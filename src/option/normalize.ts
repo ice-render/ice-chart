@@ -109,7 +109,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const xAxisOption: AxisOption = merged.xAxis;
   const xType = resolveXAxisType(xAxisOption, series);
   const { domain: rawXDomain, categories } = buildXDomain(xType, series, xAxisOption);
-  const xDomain = context.xDomain ? [context.xDomain[0], context.xDomain[1]] : rawXDomain;
+  const xDomain = resolveXDomain(xType, rawXDomain, context.xDomain);
 
   // 多 y 轴：option.yAxis 可以是单个对象或数组；每个系列用 yAxisIndex 绑定到其中一个
   const yAxisOptions: AxisOption[] = Array.isArray(option.yAxis) ? option.yAxis : [option.yAxis || {}];
@@ -129,7 +129,24 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     index: 0,
     position: 'left',
   };
+  const hasHeatmap = series.some((s) => s.type === 'heatmap');
   const yAxes: InternalAxis[] = yAxisOptions.map((option, index) => {
+    // 热力图需要「类目 y 轴」：y 方向也是离散类目
+    if (hasHeatmap && (option.type === undefined || option.type === 'category')) {
+      const seen: Record<string, boolean> = {};
+      const categories: any[] = [];
+      for (const s of series) {
+        if (s.type !== 'heatmap') continue;
+        for (const point of s.points) {
+          const key = String(point.name === undefined ? point.xValue : point.name);
+          if (!seen[key]) {
+            seen[key] = true;
+            categories.push(point.name === undefined ? point.xValue : point.name);
+          }
+        }
+      }
+      return { option, type: 'category' as const, domain: categories, scale: null, index, position: option.position || (index === 0 ? 'left' : 'right') };
+    }
     const type = option.type || 'linear';
     const explicit = context.yDomains ? context.yDomains[index] : index === 0 ? context.yDomain : null;
     const domain = explicit ? (explicit as any[]) : ((buildYDomain(series, index, option, type) as any[]) as any[]);
@@ -225,6 +242,65 @@ function buildPoints(option: SeriesOption, radar?: RadarOption | null): { points
     }
     return { points, hasExplicitX: true };
   }
+  // K 线：每个数据项是 [open, close, low, high]
+  if (option.type === 'candlestick') {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i];
+      const tuple = Array.isArray(item)
+        ? item
+        : item && typeof item === 'object' && Array.isArray((item as any).value)
+          ? (item as any).value
+          : null;
+      if (!tuple || tuple.length < 4) {
+        points.push({ index: i, xValue: i, y: null, raw: item, base: 0, top: 0 });
+        continue;
+      }
+      const open = toNumber(tuple[0]);
+      const close = toNumber(tuple[1]);
+      const low = toNumber(tuple[2]);
+      const high = toNumber(tuple[3]);
+      const name = item && typeof item === 'object' && !Array.isArray(item) && (item as any).name !== undefined ? String((item as any).name) : undefined;
+      hasExplicitX = true;
+      points.push({
+        index: i,
+        xValue: name === undefined ? i : name,
+        y: close,
+        raw: item,
+        base: 0,
+        top: close === null ? 0 : close,
+        name,
+        ohlc: [
+          open === null ? 0 : open,
+          close === null ? 0 : close,
+          low === null ? 0 : low,
+          high === null ? 0 : high,
+        ],
+      });
+    }
+    return { points, hasExplicitX };
+  }
+  // 热力图：数据项是 [x类目, y类目, 数值]
+  if (option.type === 'heatmap') {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i];
+      if (!Array.isArray(item) || item.length < 3) {
+        points.push({ index: i, xValue: i, y: null, raw: item, base: 0, top: 0 });
+        continue;
+      }
+      const value = toNumber(item[2]);
+      hasExplicitX = true;
+      points.push({
+        index: i,
+        xValue: item[0],
+        y: value,
+        raw: item,
+        base: 0,
+        top: value === null ? 0 : value,
+        name: String(item[1]),
+      });
+    }
+    return { points, hasExplicitX };
+  }
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
     let xValue: any = i;
@@ -274,7 +350,7 @@ function toNumber(value: any): number | null {
 /** 推断 x 轴类型：显式配置优先，其次是「有柱状图 → 类目」。 */
 function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear' | 'category' | 'time' | 'log' {
   if (option.type) return option.type;
-  if (series.some((s) => s.type === 'bar')) return 'category';
+  if (series.some((s) => s.type === 'bar' || s.type === 'candlestick' || s.type === 'heatmap')) return 'category';
   const values: any[] = [];
   for (const s of series) {
     for (const p of s.points) {
@@ -325,6 +401,24 @@ function buildXDomain(
   return { domain: [min, max], categories: [] };
 }
 
+/**
+ * 把「缩放窗口」落到 x 轴上。
+ *
+ * 数值/时间轴：窗口就是 [起始值, 结束值] 两个数。
+ * **类目轴：窗口是两个类目，必须切成类目数组的一个区间** ——
+ * 直接赋值成 `[起始类目, 结束类目]` 会把 36 个类目的轴塌缩成 2 个类目，
+ * 表现是柱子/K 线突然变得极宽、刻度只剩两个（这是真实踩过的坑）。
+ */
+function resolveXDomain(type: string, fullDomain: any[], window: [any, any] | null | undefined): any[] {
+  if (!window) return fullDomain;
+  if (type !== 'category') return [window[0], window[1]];
+  const from = fullDomain.indexOf(window[0]);
+  const to = fullDomain.indexOf(window[1]);
+  if (from >= 0 && to >= from) return fullDomain.slice(from, to + 1);
+  // 窗口端点不在类目里（例如来自滑块的比例换算抖动）：退化为原域
+  return fullDomain;
+}
+
 function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisOption, type: string): [number, number] {
   const values: number[] = [];
   let includeZero = false;
@@ -334,6 +428,10 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     if (s.type === 'bar' || s.type === 'area') includeZero = true;
     for (const p of s.points) {
       if (p.y !== null) values.push(p.y);
+      // K 线的影线（low/high）也要进数据域，否则影线会被裁掉
+      if (p.ohlc) {
+        values.push(p.ohlc[2], p.ohlc[3]);
+      }
       if (s.option.stack) {
         values.push(p.base);
         values.push(p.top);

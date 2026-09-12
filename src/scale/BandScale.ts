@@ -27,7 +27,8 @@ export class BandScale implements Scale {
   private computeStep(): number {
     const n = Math.max(1, this.domain.length);
     const [r0, r1] = this.range;
-    const span = r1 - r0;
+    // 取绝对值：y 轴的 range 是 [height, 0]（屏幕坐标向下），步长仍应为正
+    const span = Math.abs(r1 - r0);
     const divisor = n - this.paddingInner + this.paddingOuter * 2;
     return span / Math.max(0.0001, divisor);
   }

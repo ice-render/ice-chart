@@ -42,6 +42,15 @@ describe('dataZoom 滑块（纯函数层）', () => {
     );
     expect(layout.slider).toBeNull();
   });
+
+  it('keeps a category axis as a slice of categories (not two boundary values)', () => {
+    // 图表层的缩放窗口是通过 xDomain 传进归一化的（等价于 dataZoom 50~100）
+    const norm = normalizeOption(OPTION, { xDomain: [5, 9] });
+    // dataZoom 50~100 → 类目 5..9，共 5 个类目，而不是 [5, 9] 两个值
+    expect(norm.xAxis.domain).toHaveLength(5);
+    expect(norm.xAxis.domain[0]).toBe(5);
+    expect(norm.xAxis.domain[norm.xAxis.domain.length - 1]).toBe(9);
+  });
 });
 
 describe('dataZoom 滑块（引擎集成）', () => {
@@ -73,7 +82,7 @@ describe('dataZoom 滑块（引擎集成）', () => {
     expect(slider.state.display).toBe(true);
     expect(slider.start).toBeCloseTo(0.5, 2);
     expect(slider.end).toBeCloseTo(1, 2);
-    expect(c.getDomain('x')).toEqual([5, 9]);
+    expect(c.getDomain('x')).toEqual([5, 6, 7, 8, 9]);
   });
 
   it('drags the window and updates the x domain', async () => {

@@ -71,6 +71,8 @@ export { PieSeries } from './components/series/PieSeries';
 export type { PolarSeriesCoord } from './components/series/PieSeries';
 export { RadarSeries } from './components/series/RadarSeries';
 export type { RadarSeriesCoord } from './components/series/RadarSeries';
+export { CandlestickSeries } from './components/series/CandlestickSeries';
+export { HeatmapSeries, mixColors } from './components/series/HeatmapSeries';
 export { RadarGrid } from './components/RadarGrid';
 export type { RadarGridCoord } from './components/RadarGrid';
 export { createSeriesComponent } from './components/series/createSeries';

@@ -19,6 +19,8 @@ export interface DataPoint {
   name?: string;
   /** 该数据点自身的颜色（饼图的每个扇区各有一色）。 */
   color?: string;
+  /** K 线的 [open, close, low, high]。 */
+  ohlc?: [number, number, number, number];
 }
 
 /** 极坐标布局：圆心与半径（图表坐标系）。 */

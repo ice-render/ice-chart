@@ -11,7 +11,7 @@ export type DataItem = number | null | [any, number | null] | Record<string, any
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
-export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie' | 'radar';
+export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie' | 'radar' | 'candlestick' | 'heatmap';
 
 /** 雷达图的指标轴。 */
 export interface RadarIndicator {
@@ -117,6 +117,10 @@ export interface SeriesOption {
   clockwise?: boolean;
   /** 玫瑰图：radius（半径随数值）| area（面积随数值）。 */
   roseType?: 'radius' | 'area' | false;
+  /** K 线配色（默认红涨绿跌）。 */
+  candle?: { upColor?: string; downColor?: string; borderWidth?: number };
+  /** 热力图配色（默认从浅到深）。 */
+  heatmap?: { minColor?: string; maxColor?: string };
   /** 饼图标签。 */
   label?: { show?: boolean; position?: 'outside' | 'inside'; formatter?: (params: PieLabelParams) => string };
 }

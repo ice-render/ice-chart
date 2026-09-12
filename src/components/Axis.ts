@@ -2,6 +2,7 @@ import { ChartComponent } from './ChartComponent';
 import type { ChartTheme } from '../types';
 import type { AxisLayout, ChartLayout, InternalAxis } from '../internal';
 import { formatTick } from '../scale';
+import { measureTextWidth } from '../util/text';
 
 const TICK_LENGTH = 4;
 const LABEL_GAP = 6;
@@ -85,6 +86,18 @@ export class Axis extends ChartComponent {
     }
 
     const direction = this.position === 'left' ? -1 : 1;
+    // 标签抽稀：类目多的时候逐类目画标签会糊成一片，这里按可用宽度跳着画
+    let labelStride = 1;
+    if (this.orientation === 'x' && ticks.length > 1) {
+      const fontFamily = this.theme.fontFamily;
+      let maxLabel = 0;
+      for (const text of axisLayout.labels) {
+        const w = measureTextWidth(this.ctx, text, fontSize, fontFamily);
+        if (w > maxLabel) maxLabel = w;
+      }
+      const slot = plot.width / ticks.length;
+      if (maxLabel + 8 > slot) labelStride = Math.ceil((maxLabel + 8) / Math.max(1, slot));
+    }
     for (let i = 0; i < ticks.length; i++) {
       const label = formatTick(ticks[i], scale, i, option.formatter);
       if (this.orientation === 'x') {
@@ -97,6 +110,8 @@ export class Axis extends ChartComponent {
           ctx.stroke();
         }
         if (!label) continue;
+        const isLast = i === ticks.length - 1;
+        if (labelStride > 1 && i % labelStride !== 0 && !isLast) continue;
         const labelY = plot.y + plot.height + tickGap;
         if (option.labelRotate) {
           ctx.save();

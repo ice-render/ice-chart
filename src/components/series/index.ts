@@ -7,4 +7,6 @@ export { PieSeries } from './PieSeries';
 export type { PolarSeriesCoord } from './PieSeries';
 export { RadarSeries } from './RadarSeries';
 export type { RadarSeriesCoord } from './RadarSeries';
+export { CandlestickSeries } from './CandlestickSeries';
+export { HeatmapSeries, mixColors } from './HeatmapSeries';
 export { BarSeries } from './BarSeries';
