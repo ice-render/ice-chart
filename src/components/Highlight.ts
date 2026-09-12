@@ -3,6 +3,7 @@ import { roundRect } from './Legend';
 import type { ChartTheme } from '../types';
 
 export interface HighlightItem {
+  /** 标记中心：圆环是圆心，柱形是矩形中心。 */
   x: number;
   y: number;
   color: string;
@@ -10,7 +11,7 @@ export interface HighlightItem {
   size: number;
   /** 标记形状：数据点用圆环，柱形用矩形描边（更贴合图形语义）。 */
   shape?: 'circle' | 'rect';
-  /** shape 为 rect 时的尺寸（图表坐标系，矩形左上角 + 宽高）。 */
+  /** shape 为 rect 时的尺寸（以 x/y 为中心的宽高）。 */
   width?: number;
   height?: number;
 }
@@ -53,7 +54,7 @@ export class Highlight extends ChartComponent {
         if (w <= 0 || h <= 0) continue;
         ctx.strokeStyle = item.color;
         ctx.lineWidth = Math.max(unit, 1.5 * unit);
-        roundRect(ctx, item.x, item.y, w, h, Math.min(4, w / 2, h / 2));
+        roundRect(ctx, item.x - w / 2, item.y - h / 2, w, h, Math.min(4, w / 2, h / 2));
         ctx.stroke();
       } else {
         const radius = Math.max(3, item.size / 2 + 3);
@@ -75,7 +76,7 @@ export class Highlight extends ChartComponent {
         const w = item.width || 0;
         const h = item.height || 0;
         if (w <= 0 || h <= 0) continue;
-        roundRect(ctx, item.x - 2, item.y - 2, w + 4, h + 4, 5);
+        roundRect(ctx, item.x - w / 2 - 2, item.y - h / 2 - 2, w + 4, h + 4, 5);
         ctx.stroke();
       } else {
         const radius = Math.max(3, item.size / 2 + 3);

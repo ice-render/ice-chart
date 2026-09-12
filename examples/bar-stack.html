@@ -29,7 +29,7 @@
         animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
       };
 
-      ICEChart.createChart('grouped', {
+      const grouped = ICEChart.createChart('grouped', {
         ...base,
         title: { text: '各区域季度营收（分组）' },
         yAxis: { name: '万元' },
@@ -40,7 +40,7 @@
         ],
       });
 
-      ICEChart.createChart('stacked', {
+      const stacked = ICEChart.createChart('stacked', {
         ...base,
         title: { text: '各区域季度营收（堆叠）' },
         yAxis: { name: '万元' },
@@ -50,6 +50,7 @@
           { id: 'q3', type: 'bar', name: 'Q3', stack: 'year', barRadius: 3, data: regions.map((r, i) => ({ name: r, y: [220, 182, 191, 234, 290, 330][i] })) },
         ],
       });
+      window.__charts = { grouped, stacked };
     </script>
   </body>
 </html>

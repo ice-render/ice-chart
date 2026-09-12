@@ -38,7 +38,14 @@ export type {
 } from './types';
 
 // 主题
-export { LIGHT_CHART_THEME, DARK_CHART_THEME, resolveChartTheme } from './theme/chartTheme';
+export {
+  LIGHT_CHART_THEME,
+  DARK_CHART_THEME,
+  BOOTSTRAP_CHART_THEME,
+  BOOTSTRAP_DARK_CHART_THEME,
+  BOOTSTRAP_TOKENS,
+  resolveChartTheme,
+} from './theme/chartTheme';
 
 // 比例尺
 export { createScale, formatTick, formatNumberTick, LinearScale, BandScale, TimeScale, LogScale } from './scale';

@@ -36,6 +36,13 @@ chart.on('item:click', (params) => {
 
 ## 设计原则
 
+**0. 视觉基调是 Bootstrap**
+
+默认主题直接取 Bootstrap 5 的调色板与设计变量（primary / success / danger / warning / info、
+gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 Bootstrap 页面里
+与按钮、卡片、表格是同一套视觉语言。需要换品牌色时用 `theme: { colorPalette: [...] }` 覆盖即可，
+或直接改 `BOOTSTRAP_TOKENS` 派生自己的主题。
+
 **1. 交互是一等公民，命中判定写进组件**
 
 每个系列组件都实现 `containsLocalPoint`：把组件本地坐标翻译成数据语义（离折线多近、落在哪根柱子里），
@@ -193,6 +200,17 @@ npm run types:check   # tsc --noEmit
 npm run build         # ESM + CJS + UMD + .d.ts/.d.mts
 npm run verify        # lint → types:check → build → test
 ```
+
+交互外观审计（需要浏览器）：
+
+```bash
+npm run build && npm run examples:prepare
+node scripts/serve-examples.cjs &
+npm run audit:interactions -- ./.audit      # 12 页 × 10 步交互，逐步截图 + 几何断言
+```
+
+审计会检查每一步之后：提示框是否越出画布、是否压住坐标轴数值标签或图例、
+高亮标记是否落在绘图区内；任何一条不满足就以非 0 退出码结束，可用于 CI。
 
 测试用例覆盖的关键路径：比例尺换算、数据归一化与堆叠、布局量测、系列命中判定，
 以及「引擎命中测试 → 数据下标 → 语义事件」这条端到端链路（含多图隔离与联动回归）。

@@ -134,9 +134,11 @@ export class HitResolver {
   /** 按数据值找最近的点（跨图联动用）。 */
   public nearestByXValue(xValue: any): ActiveItem | null {
     const visible = this.host.norm.series.filter((s) => !s.hidden);
+    const hiddenSlices = this.host.norm.hiddenSlices || {};
     let best: { series: InternalSeries; index: number; dist: number } | null = null;
     for (const series of visible) {
       for (let i = 0; i < series.points.length; i++) {
+        if (series.type === 'pie' && hiddenSlices[`${series.id}#${i}`]) continue;
         const dist = valueDistance(xValue, series.points[i].xValue);
         if (dist === null) continue;
         if (!best || dist < best.dist) best = { series, index: i, dist };

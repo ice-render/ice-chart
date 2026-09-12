@@ -187,6 +187,48 @@ export class InteractionController {
 
   // ------------------------------------------------------------- 悬停
 
+  /**
+   * 数据域变化（缩放 / 平移 / 滑块 / 数据更新 / 图例切换）后重新定位悬停。
+   *
+   * 为什么必须做：悬停状态里存的是**像素**（十字准星位置、高亮环、提示框锚点），
+   * 而缩放/平移后同一份数据的像素已经变了。不重新定位就会出现
+   * 「准星停在原地、和曲线脱开」这种一眼可见的错位。
+   */
+  public refreshHover(): void {
+    const current = this.hover;
+    if (!current) return;
+    const norm = this.host.norm;
+    if (current.kind === 'item') {
+      const series = current.item.series;
+      const index = current.item.point.index;
+      const sliceHidden = series.type === 'pie' && norm.hiddenSlices[`${series.id}#${index}`];
+      // 系列/扇区被隐藏，或数据被替换导致下标越界 → 直接清理，不要悄悄跳到别的系列
+      if (series.hidden || sliceHidden || !series.points[index]) {
+        this.setHover(null);
+        return;
+      }
+      const item = this.resolver.buildActiveItem(series, index);
+      // 数据点已经不在可见窗口内（缩放 / 平移之后）→ 清理，不要在绘图区外画准星
+      if (!item || !this.resolver.isInsidePlot(item.pixel[0], item.pixel[1])) {
+        this.setHover(null);
+        return;
+      }
+      this.setHover({ kind: 'item', item });
+      return;
+    }
+    if (norm.kind !== 'cartesian') {
+      this.setHover(null);
+      return;
+    }
+    const item = this.resolver.nearestByXValue(current.column.xValue);
+    const column = item ? this.resolver.pickColumn(item.pixel[0]) : null;
+    if (!column || !this.resolver.isInsidePlot(column.pixelX, column.items[0].pixel[1])) {
+      this.setHover(null);
+      return;
+    }
+    this.setHover({ kind: 'axis', column });
+  }
+
   public resolveTarget(screenX: number, screenY: number): TargetInfo {
     return this.resolver.resolveTarget(screenX, screenY);
   }
@@ -212,7 +254,8 @@ export class InteractionController {
         legend.hoverIndex = target.index;
         legend.markDirty();
       }
-      this.clearHoverVisuals();
+      // 只收起数据层的视觉，不能顺手重置图例自身的悬停高亮
+      this.clearDataVisuals();
       this.setHoverState(null);
       return;
     }
@@ -420,10 +463,15 @@ export class InteractionController {
   }
 
   private clearHoverVisuals(): void {
+    this.clearDataVisuals();
+    this.resetLegendHover();
+  }
+
+  /** 只清理数据层（高亮环 / 准星 / 提示框），不动图例悬停。 */
+  private clearDataVisuals(): void {
     if (this.host.highlight) this.host.highlight.setHover([]);
     if (this.host.crosshair) this.host.crosshair.hide();
     if (this.host.tooltip) this.host.tooltip.hide();
-    this.resetLegendHover();
   }
 
   /** 生成高亮标记：数据点用圆环，柱形用矩形描边。 */
@@ -434,8 +482,9 @@ export class InteractionController {
       const rect = (component as any).barRectAt(item.point.index);
       if (rect && rect.width > 0 && rect.height > 0) {
         return {
-          x: plot.x + rect.x,
-          y: plot.y + rect.y,
+          // 统一约定：x/y 一律是标记中心（圆环是圆心，柱形是矩形中心）
+          x: plot.x + rect.x + rect.width / 2,
+          y: plot.y + rect.y + rect.height / 2,
           width: rect.width,
           height: rect.height,
           color: item.series.color,
@@ -480,6 +529,8 @@ export class InteractionController {
       const part = slider.hitPart(target.local[0], target.local[1]);
       if (part) {
         this.preventDefault(evt);
+        // 拖滑块时指针已经不在绘图区上，收起悬停视觉
+        this.setHover(null);
         const fraction = slider.fractionAt(target.local[0]);
         this.drag = {
           mode: 'slider',
@@ -514,11 +565,14 @@ export class InteractionController {
     const panEnabled = !!(panOption && panOption !== false && panOption.enabled);
     this.preventDefault(evt);
     if (brushEnabled) {
+      // 框选期间收起悬停视觉，避免准星/提示框和选框一起跳动
+      this.setHover(null);
       this.drag = { mode: 'brush', startX: screenX, startY: screenY, moved: false };
       if (this.host.brush) this.host.brush.setRect({ x: target.chart[0], y: target.chart[1], width: 0, height: 0 });
       return true;
     }
     if (panEnabled) {
+      this.setHover(null);
       this.drag = {
         mode: 'pan',
         startX: screenX,
@@ -532,13 +586,14 @@ export class InteractionController {
     return false;
   }
 
-  public handlePointerUp(_screenX: number, _screenY: number, _evt?: any): void {
+  public handlePointerUp(screenX: number, screenY: number, _evt?: any): void {
     const drag = this.drag;
     if (!drag) return;
     this.drag = null;
     if (drag.mode === 'brush') {
       if (!drag.moved) {
         if (this.host.brush) this.host.brush.setRect(null);
+        this.updateHover(screenX, screenY);
         return;
       }
       const range = this.brushRange();
@@ -548,11 +603,18 @@ export class InteractionController {
         if (this.host.brush) this.host.brush.setRect(null);
       }
       this.host.emit('brush:end', range);
+      // 松手后按指针位置重新取悬停，避免「选框还在、提示框没了」
+      this.updateHover(screenX, screenY);
       return;
     }
     if (drag.mode === 'slider') {
       const slider = this.host.dataZoomSlider;
       if (slider) slider.setActive(null);
+      this.updateHover(screenX, screenY);
+      return;
+    }
+    if (drag.mode === 'pan') {
+      this.updateHover(screenX, screenY);
     }
   }
 
@@ -880,10 +942,14 @@ export class InteractionController {
       case 'ArrowLeft': {
         const series = visible[seriesIndex];
         if (!series.points.length) break;
-        this.keyboardIndex = clamp(this.keyboardIndex + (key === 'ArrowRight' ? 1 : -1), 0, series.points.length - 1);
-        const item = this.resolver.buildActiveItem(series, this.keyboardIndex);
-        if (item) this.setHover({ kind: 'item', item });
-        handled = true;
+        // 只在「当前可见窗口内」的数据点之间移动：缩放之后不该跳到窗外去
+        const nextIndex = this.stepVisibleIndex(series, key === 'ArrowRight' ? 1 : -1);
+        if (nextIndex >= 0) {
+          this.keyboardIndex = nextIndex;
+          const item = this.resolver.buildActiveItem(series, nextIndex);
+          if (item) this.setHover({ kind: 'item', item });
+        }
+        handled = nextIndex >= 0;
         break;
       }
       case 'ArrowUp':
@@ -931,6 +997,21 @@ export class InteractionController {
 
   public clearHover(): void {
     this.setHover(null);
+  }
+
+  /** 沿指定方向找到下一个「落在绘图区内」的数据下标；找不到返回 -1。 */
+  private stepVisibleIndex(series: any, direction: number): number {
+    const total = series.points.length;
+    if (!total) return -1;
+    let index = clamp(this.keyboardIndex, 0, total - 1);
+    for (let guard = 0; guard < total; guard++) {
+      const candidate = index + direction;
+      if (candidate < 0 || candidate >= total) return -1;
+      index = candidate;
+      const item = this.resolver.buildActiveItem(series, index);
+      if (item && this.resolver.isInsidePlot(item.pixel[0], item.pixel[1])) return index;
+    }
+    return -1;
   }
 
   public destroy(): void {

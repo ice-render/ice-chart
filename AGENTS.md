@@ -72,6 +72,24 @@ npm run verify   # lint → types:check → build → jest
 ```
 
 改动渲染或交互后，建议再手工跑一次 `npm run examples:serve`，用浏览器确认视觉与交互。
+视觉 / 交互改动更严格的做法是跑审计脚本：
+
+```bash
+npm run build && npm run examples:prepare && node scripts/serve-examples.cjs &
+npm run audit:interactions -- ./.audit
+```
+
+它会对 12 个示例页跑 10 步真实交互并逐步断言几何关系（提示框不越界、不压坐标轴标签/图例，
+高亮在绘图区内）。新增交互能力时请同步补一步，否则这个门禁覆盖不到新路径。
+
+## 视觉基调
+
+- 默认主题 = **Bootstrap 5**（`src/theme/chartTheme.ts` 的 `BOOTSTRAP_TOKENS`）。
+  新增组件取色一律从主题里取，不要写死色值；示例页 CSS 也用 Bootstrap 变量。
+- 提示框 / 准星标签的摆放有硬性约束（见上一条审计）：**不许越出画布、不许压住坐标轴标签与图例**。
+  改 `Tooltip.doRender` 的定位逻辑时务必重跑审计。
+- 标签防重叠的既定策略：内部标签按相邻角度逐级外推半径，弧长放不下就不画（交给图例 + 提示框）；
+  桑基节点名用白色描边保证压在连线上也可读。
 
 ## 已实现 / 未实现
 

@@ -584,6 +584,8 @@ export class ICEChart {
     this.root.state.ariaLabel = chartTitle(norm);
     this.syncComponents(animate);
     this.ice.dirty = true;
+    // 缩放 / 平移 / 数据更新后，悬停视觉（准星、高亮环、提示框）必须跟着数据重新定位
+    if (this.controller) this.controller.refreshHover();
     if (this.a11yMirror.attached) this.a11yMirror.refresh();
   }
 

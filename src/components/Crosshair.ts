@@ -11,6 +11,8 @@ export class Crosshair extends ChartComponent {
   public pixelY: number | null = null;
   public xLabel = '';
   public yLabel = '';
+  /** 最近一次绘制的轴数值标签矩形（图表坐标系），供外观审计 / 测试断言使用。 */
+  public lastChipRects: Array<{ x: number; y: number; width: number; height: number }> = [];
 
   constructor(props: { width: number; height: number; zIndex?: number }) {
     super({ interactive: false, ...props });
@@ -32,6 +34,7 @@ export class Crosshair extends ChartComponent {
   }
 
   protected doRender(): void {
+    this.lastChipRects = [];
     if (!this.layout || !this.theme || this.option.show === false || this.option.type === 'none') return;
     if (this.pixelX === null && this.pixelY === null) return;
     const { plot } = this.layout;
@@ -79,6 +82,7 @@ export class Crosshair extends ChartComponent {
     const width = ctx.measureText(text).width + padX * 2;
     const height = theme.fontSize + padY * 2;
     ctx.fillStyle = theme.crosshair.labelBackground;
+    this.lastChipRects.push({ x: x - width / 2, y: y - height / 2, width, height });
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
     ctx.fillStyle = theme.crosshair.labelColor;
     ctx.fillText(text, x, y);

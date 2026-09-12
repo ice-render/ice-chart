@@ -1,6 +1,7 @@
 import { SeriesBase } from './SeriesBase';
 import type { PieLabelParams, SeriesType } from '../../types';
 import type { PolarLayout, Rect } from '../../internal';
+import { measureTextWidth } from '../../util/text';
 
 export interface PolarSeriesCoord {
   polar: PolarLayout;
@@ -207,6 +208,9 @@ export class PieSeries extends SeriesBase {
     // 标签
     if (showLabel) {
       this.setFont(this.fontSize(), this.fontFamily());
+      // 内部标签的防重叠：相邻角度太近就沿半径逐级外推（玫瑰图的小扇区尤其需要）
+      let lastAngle = NaN;
+      let stackLevel = 0;
       for (let i = 0; i < n; i++) {
         const a0 = this.slices[i * 4];
         const a1 = this.slices[i * 4 + 1];
@@ -231,7 +235,17 @@ export class PieSeries extends SeriesBase {
         const text = labelOption && typeof labelOption.formatter === 'function' ? String(labelOption.formatter(params)) : `${params.name} ${percent.toFixed(1)}%`;
         const mid = (a0 + a1) / 2;
         if (inside) {
-          const anchor = inner + (outer - inner) * 0.62;
+          if (isFinite(lastAngle)) {
+            const gap = Math.abs(Math.atan2(Math.sin(mid - lastAngle), Math.cos(mid - lastAngle)));
+            stackLevel = gap < 0.42 ? Math.min(3, stackLevel + 1) : 0;
+          } else {
+            stackLevel = 0;
+          }
+          lastAngle = mid;
+          const anchor = inner + (outer - inner) * 0.62 + stackLevel * (this.fontSize() + 4);
+          // 文字比扇区弧长还宽就不画内部标签：与其叠成一团，不如交给图例与提示框
+          const arcWidth = Math.abs(a1 - a0) * anchor;
+          if (measureTextWidth(this.ctx, text, this.fontSize(), this.fontFamily()) > arcWidth + 6) continue;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#ffffff';

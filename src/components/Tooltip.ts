@@ -27,6 +27,8 @@ export class Tooltip extends ChartComponent {
   public anchor: [number, number] = [0, 0];
   /** 是否让提示框跟随指针（axis 触发器常关掉，让它固定在数据列上方）。 */
   public follow = true;
+  /** 最近一次实际绘制的面板矩形（图表坐标系），供外观审计 / 测试断言使用。 */
+  public lastRect: { x: number; y: number; width: number; height: number } | null = null;
 
   constructor(props: { width: number; height: number; zIndex?: number }) {
     super({ interactive: false, ...props });
@@ -41,10 +43,12 @@ export class Tooltip extends ChartComponent {
   public hide(): this {
     if (!this.content) return this;
     this.content = null;
+    this.lastRect = null;
     return this.markDirty();
   }
 
   protected doRender(): void {
+    this.lastRect = null;
     if (!this.content || !this.theme || !this.layout) return;
     const theme = this.theme;
     const option = this.option;
@@ -69,13 +73,29 @@ export class Tooltip extends ChartComponent {
     const height = padding * 2 + (this.content.title ? rowHeight : 0) + rows.length * rowHeight;
     const offset: [number, number] = option.offset || [14, 14];
 
+    const bounds = this.layout.canvas;
+    const plot = this.layout.plot;
     let x = this.anchor[0] + offset[0];
     let y = this.anchor[1] + offset[1];
-    const bounds = this.layout.canvas;
     if (x + width > bounds.width) x = this.anchor[0] - offset[0] - width;
+    // 横向也优先待在绘图区内：避免压住 y 轴刻度标签；放不下时才退回画布内对齐
+    if (width <= plot.width - 4) {
+      x = Math.max(plot.x + 2, Math.min(x, plot.x + plot.width - width - 2));
+    } else {
+      x = Math.max(2, Math.min(x, Math.max(2, bounds.width - width - 2)));
+    }
     if (y + height > bounds.height) y = this.anchor[1] - offset[1] - height;
-    x = Math.max(2, Math.min(x, bounds.width - width - 2));
-    y = Math.max(2, Math.min(y, bounds.height - height - 2));
+    // 优先待在绘图区内：贴底的数据点提示框翻到上方，避免压住坐标轴上的数值标签。
+    // 十字准星的数值标签是以绘图区底边为中心的一条带状区域，这里显式让开它。
+    const plotBottom = plot.y + plot.height;
+    const axisBand = fontSize + 8;
+    const limitBottom = plotBottom - axisBand / 2;
+    if (y + height > limitBottom) {
+      const above = this.anchor[1] - offset[1] - height;
+      y = above >= plot.y + 2 ? above : Math.max(plot.y + 2, limitBottom - height);
+    }
+    y = Math.max(2, Math.min(y, Math.max(2, bounds.height - height - 2)));
+    this.lastRect = { x, y, width, height };
 
     const ctx = this.ctx;
     const unit = this.unit();

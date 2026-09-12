@@ -6,3 +6,4 @@ coverage
 .idea
 .vscode
 examples/vendor
+.audit

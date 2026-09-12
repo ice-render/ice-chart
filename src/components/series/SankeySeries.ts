@@ -132,17 +132,30 @@ export class SankeySeries extends SeriesBase {
         for (const node of nodes) {
           const x = node.x - plot.x;
           const y = node.y - plot.y + node.height / 2;
+          // 节点名常常压在连线上：先描一圈底色再填字，保证可读
           if (node.depth >= maxDepth) {
             ctx.textAlign = 'right';
-            ctx.fillText(node.name, x - 6 * unit, y);
+            this.fillLabelWithHalo(node.name, x - 6 * unit, y);
           } else {
             ctx.textAlign = 'left';
-            ctx.fillText(node.name, x + node.width + 6 * unit, y);
+            this.fillLabelWithHalo(node.name, x + node.width + 6 * unit, y);
           }
         }
       }
     }
     this.endDraw();
+  }
+
+  /** 带白色描边的文字：保证节点名压在连线上时依然清晰。 */
+  private fillLabelWithHalo(text: string, x: number, y: number): void {
+    const ctx = this.ctx;
+    const theme = this.chartTheme;
+    ctx.lineWidth = 3 * this.unit();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineJoin = 'round';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = (theme && theme.textColor) || '#212529';
+    ctx.fillText(text, x, y);
   }
 
   public hitTestIndex(localX: number, localY: number): number {

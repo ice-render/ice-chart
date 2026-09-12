@@ -53,6 +53,7 @@
     "lint:fix": "eslint src tests --ext .ts,.js --fix",
     "examples:prepare": "node scripts/prepare-examples.cjs",
     "examples:serve": "npm run examples:prepare && node scripts/serve-examples.cjs",
+    "audit:interactions": "node scripts/audit-interactions.mjs",
     "verify": "npm run lint && npm run types:check && npm run build && npm test -- --runInBand"
   },
   "peerDependencies": {
@@ -76,6 +77,7 @@
     "ice-render": "file:../ice-render",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
+    "playwright": "^1.63.0",
     "prettier": "^3.4.1",
     "rimraf": "^6.0.1",
     "rollup": "^3.29.5",
