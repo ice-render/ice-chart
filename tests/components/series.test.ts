@@ -112,6 +112,25 @@ describe('BarSeries 命中与布局', () => {
   });
 });
 
+describe('BarSeries 逐项配色', () => {
+  it('数据项带 color 时按项取色（红涨绿跌 / 告警分级都靠它）', () => {
+    const series = makeSeries('bar', [10, 20, 30]);
+    series.points = series.points.map((p, i) => ({ ...p, raw: { value: p.y as number, color: ['#f04438', '#12b76a', '#f5a524'][i] } }));
+    const component: any = new BarSeries(series, { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord(bandCoord());
+    expect(component.barColorAt(0)).toBe('#f04438');
+    expect(component.barColorAt(1)).toBe('#12b76a');
+    expect(component.barColorAt(2)).toBe('#f5a524');
+  });
+
+  it('数据项没有 color 时回落系列色', () => {
+    const series = makeSeries('bar', [10, 20]);
+    const component: any = new BarSeries(series, { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord(bandCoord());
+    expect(component.barColorAt(0)).toBe('#3B82F6');
+  });
+});
+
 describe('ScatterSeries 命中判定', () => {
   it('hits by symbol radius', () => {
     const series = makeSeries('scatter', [10, 50, 90, 20], { symbolSize: 16 });

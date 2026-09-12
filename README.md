@@ -142,7 +142,7 @@ npm install ice-chart ice-render
 | 类型 | 关键写法 | 说明 |
 | --- | --- | --- |
 | `line` / `area` | `data: [1, 2, 3]` 或 `[[x, y]]` | 平滑曲线 `smooth`、断点（`null` 断开）、面积 `areaOpacity` |
-| `bar` | 类目在 x（默认） | 分组（多系列）与堆叠（同 `stack` 名） |
+| `bar` | 类目在 x（默认） | 分组（多系列）与堆叠（同 `stack` 名）；数据项写 `{ value, color }` 可**逐项配色** |
 | `bar`（横向） | `yAxis: { type: 'category', data: [...] }` + `xAxis: { type: 'value' }` | 排行榜；类目也可写在数据项的 `name` 上 |
 | `scatter` | `data: [[x, y, size]]` + `symbolSizeRange` | 第三维映射成直径即气泡图；`symbolSize` 也可传函数 |
 | `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
@@ -156,7 +156,7 @@ npm install ice-chart ice-render
 | `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
 | `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
 | `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、按权重定大小 |
-| `function` | `expression: 'sin(x)/x'`（+ `params` / `domain`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合 |
+| `function` | `expression: 'sin(x)/x'`（+ `params` / `domain` / `samples` / `adaptive`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合；默认**自适应细分**，`adaptive: false` 才是均匀采样 |
 | `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
 | `parametric`（极坐标） | `polarExpression: 'cos(3*t)'` + `polarGrid: true` | 极坐标 `r(θ)`（玫瑰线 / 心形线 / 螺线），配 `aspect: 'equal'` 出 MATLAB `polarplot` 观感 |
 | `liquid` | `liquid: { min, max }` + `data: [{ name, value }]` | 水位球（数据大屏常客）：水位随数值升降、水面持续起伏；整球可命中 |
@@ -183,7 +183,23 @@ chart.appendData('cpu', [[t, v1], [t2, v2]], { maxPoints: 180, animate: true });
 
 ### 大屏（深色主题）
 
-[examples/dashboard.html](./examples/dashboard.html)：**12 张图共用一条数据流**的运营监控大屏。
+同一个脚手架（[examples/assets/dash-kit.js](./examples/assets/dash-kit.js)）下**六个大屏案例**，
+每个只是「换一套视觉身份 + 换一张面板清单」：
+
+| 大屏 | 视觉身份 | 侧重 |
+| --- | --- | --- |
+| [运营监控](./examples/dashboard.html) | 青 | 12 张图共用一条数据流，跨图三路联动 + 告警亮边 |
+| [设备监控](./examples/dashboard-iot.html) | 青绿 | 水位球 / 设备状态热力 / 心跳 K 线 / 固件占比 |
+| [行情监控](./examples/dashboard-market.html) | 琥珀 + 红涨绿跌 | 分时 / 盘口六档 / 资金流桑基 / 换手水位球 |
+| [能源调度](./examples/dashboard-energy.html) | 蓝紫 | 源网荷桑基 / 电量平衡瀑布 / **谐波合成（函数绘图）** |
+| [物流调度](./examples/dashboard-logistics.html) | 橙红 | 分拣漏斗 / 包裹流向 / 逐项配色的排名与时段柱 |
+| [函数实验](./examples/dashboard-lab.html) | 紫 | 参数扫动 / 极坐标 / 采样密度 / 表达式诊断 |
+
+`dash-kit` 只做三件事：注入共享 CSS（面板 / KPI 条 / 顶栏 / 底部快照面板）、
+按 12 列栅格产出面板 HTML、跑主循环（`tick` + 暂停 + 倍速 + 供审计用的 `__dashLoop`）。
+页面本身只写「配色变量 + 面板清单 + 数据怎么动」——新增一个大屏的量级是**一个 HTML 文件**。
+
+以 [运营监控大屏](./examples/dashboard.html) 为例：
 
 - 深色主题（`theme: 'dark'`）+ 自绘大屏外壳（KPI 卡片 / 面板标题栏 / 告警亮边）；
 - 折线与延迟用 `appendData` 滑动窗口（60Hz），并用 `linkCharts` 做**悬停 / 缩放 / 框选三路联动**；
@@ -198,6 +214,15 @@ chart.appendData('cpu', [[t, v1], [t2, v2]], { maxPoints: 180, animate: true });
 > 布局用**严格 12 列栅格**（12 × 120px + 12px 间距 = 1572px 设计宽）：面板是列宽的整数倍，
 > 画布宽 = 面板宽 − 内边距 − 边框，所以所有面板的左右边缘与内部留白完全对齐。
 > 12 张图（含水位球）同时流动实测 41~60fps。
+> 每个大屏的**画布左右留白都是 9/9**、所有面板左边缘都落在 132px 栅格上（脚本量测，不是目测）。
+
+两个只在大屏里用得上的能力：
+
+- **逐项配色**：数据项写成 `{ value, color }`，一个系列就能表达分级
+  （承运商准时率、时段是否越限、机组出力档位），不必拆成多个系列把图形排成一组一组；
+  横向排行榜按值排序后重建类目轴，「排名第一」永远在最上面。
+- **`adaptive: false`**：函数系列默认按曲率**自适应细分**采样（所以只把 `samples` 调小看不出粗糙），
+  显式关掉才是真正的均匀采样 —— 函数实验大屏里「9 点 / 40 点 / 自适应」三线同屏对照。
 
 ## 函数绘图（迷你 MATLAB）
 
@@ -403,7 +428,8 @@ npm run examples:serve      # http://localhost:5177
 
 示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、多 y 轴叠加、饼图 / 环形图 / 玫瑰图、雷达图、
 K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
-大数据量（5 万点降采样）、无障碍、跨图联动。
+大数据量（5 万点降采样）、无障碍、跨图联动、迷你 MATLAB，以及 **6 个深色大屏**
+（运营 / 设备 / 行情 / 能源 / 物流 / 函数实验）。
 
 每个示例页在图表下方都有两块面板：
 
@@ -415,9 +441,9 @@ K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件
 
 ## 开发
 
-本包的 `devDependencies` 把引擎写成 `file:../ice-render`（本地联调用）：
-**克隆下来后请把 ice-render 仓库放到同级目录**，再 `npm install`；
-只想跑测试、不打算改引擎的话，把这条换成 `npm i -D ice-render@^1.4.7` 即可。
+引擎按 **npm 依赖**装（`peerDependencies` + `devDependencies` 都是 `ice-render@^1.4.7`），
+`npm install` 即可跑测试和示例。要连着改引擎源码时，把 `devDependencies` 那条临时改成
+`file:../ice-render`（引擎仓库放同级目录）再 `npm install`。
 
 ```bash
 npm test              # jest（纯函数单测 + 真实引擎集成的 jsdom 测试）
@@ -431,14 +457,15 @@ npm run verify        # lint → types:check → build → test
 ```bash
 npm run build && npm run examples:prepare
 node scripts/serve-examples.cjs &
-npm run audit:interactions -- ./.audit      # 22 页 × 11 步交互，逐步截图 + 几何断言
-npm run audit:hover -- ./.hover-sweep       # 逐类型逐个数据点悬停：反馈动画 + 像素缓存新鲜度
+npm run audit:interactions -- ./.audit      # 27 页 × 11 步交互，逐步截图 + 几何断言
+npm run audit:hover -- ./.hover-sweep       # 18 种图表逐个数据点悬停：反馈动画 + 像素缓存新鲜度
 ```
 
 审计会检查每一步之后：提示框是否越出画布、是否压住坐标轴数值标签或图例、
-高亮标记是否落在绘图区内；任何一条不满足就以非 0 退出码结束，可用于 CI。
+高亮标记是否落在绘图区内、有没有饱和色墨迹跑到坐标轴带上；任何一条不满足就以非 0 退出码结束，可用于 CI。
+（图例带例外：图例色块本来就是饱和色、又画在绘图区外面，居中的图例落在等比坐标的轴带里不算越界。）
 
-悬停实测（`audit:hover`）会把指针移到 18 种图表的每一个数据点上，逐点断言三件事：
+悬停实测（`audit:hover`）会把指针移到每个数据点上，逐点断言三件事：
 交互层把 `hoverIndex` 下发到了对应系列、反馈动画确实推进到 1、悬停几何没有越界；
 同时做一次**像素缓存新鲜度**检查（清掉缓存键重算，两次像素必须一致）——
 它抓的是「缩放 / 数据变化后 `pixels` 没重算，悬停高亮画在别处」这类缓存 bug。

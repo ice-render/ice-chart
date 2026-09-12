@@ -35,6 +35,11 @@ const pages = [
   'time-series',
   'live-stream',
   'dashboard',
+  'dashboard-iot',
+  'dashboard-market',
+  'dashboard-energy',
+  'dashboard-logistics',
+  'dashboard-lab',
   'large-data',
   'a11y',
   'linked-charts',
@@ -135,11 +140,20 @@ function paintOverflowProbe() {
         }
         return n;
       };
+      // 图例带不算「越界墨迹」：图例色块本来就是饱和色，而且它画在绘图区外面。
+      // 等比坐标（aspect: 'equal'）会把绘图区缩成正方形并居中，左轴带随之变宽 ——
+      // 这时居中的图例就落在左轴带里，不改的话会被误判成「图形画到了坐标轴上」。
+      const legendItems = (c.layout.legend ? c.layout.legend.items : []) || [];
+      const legendTop = legendItems.length ? Math.min(...legendItems.map((it) => it.y)) : Infinity;
+      const legendBottom = legendItems.length ? Math.max(...legendItems.map((it) => it.y + it.height)) + 3 : 0;
       const axisBandBottom = slider ? slider.y - 3 : H;
+      // 图例在绘图区上方：左右轴带从图例下沿开始扫；图例在下方：y 轴带扫到图例上沿为止
+      const sideTop = legendItems.length && legendTop < plot.y ? legendBottom : 0;
+      const belowEnd = legendItems.length && legendTop > plot.y + plot.height ? Math.min(axisBandBottom, legendTop - 3) : axisBandBottom;
       return {
-        left: scan(0, 0, plot.x - 3, H),
-        right: scan(plot.x + plot.width + 3, 0, W - plot.x - plot.width - 3, H),
-        below: scan(0, plot.y + plot.height + 3, W, axisBandBottom - plot.y - plot.height - 3),
+        left: scan(0, sideTop, plot.x - 3, H - sideTop),
+        right: scan(plot.x + plot.width + 3, sideTop, W - plot.x - plot.width - 3, H - sideTop),
+        below: scan(0, plot.y + plot.height + 3, W, belowEnd - plot.y - plot.height - 3),
       };
     });
 }

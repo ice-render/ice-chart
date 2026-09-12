@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 设备监控大屏</title>
+    <!--
+      第二个大屏案例：设备 / IoT 监控。与「运营监控大屏」共用示例脚手架（examples/assets/dash-kit.js），
+      只换视觉身份（青绿主色 + 墨绿黑底）与面板清单 —— 演示「同一套栅格与组件，换配色就是另一个大屏」。
+    -->
+    <style>
+      /* 视觉身份：青绿 */
+      :root {
+        --dk-bg: #03110f;
+        --dk-bg-2: #041d19;
+        --dk-panel: rgba(8, 42, 38, 0.55);
+        --dk-panel-2: rgba(4, 24, 22, 0.86);
+        --dk-line: rgba(46, 230, 197, 0.16);
+        --dk-corner: rgba(46, 230, 197, 0.7);
+        --dk-accent: #2ee6c5;
+        --dk-accent-soft: rgba(46, 230, 197, 0.08);
+        --dk-accent-soft-strong: rgba(46, 230, 197, 0.35);
+        --dk-text: #e4fbf5;
+        --dk-text-dim: #93c4ba;
+        --dk-muted: #5f8b83;
+        --dk-glow: rgba(46, 230, 197, 0.1);
+        --dk-glow-2: rgba(34, 197, 94, 0.08);
+        --dk-glow-text: rgba(46, 230, 197, 0.45);
+        --dk-dots: rgba(46, 230, 197, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dk-screen" id="screen"></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script src="./assets/dash-kit.js"></script>
+    <script>
+      DashKit.injectStyle();
+      const $ = (id) => document.getElementById(id);
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      const WINDOW = 180;
+
+      const IDENTITY = {
+        accent: '#2ee6c5',
+        palette: ['#2ee6c5', '#22c55e', '#5eead4', '#a3e635', '#38bdf8', '#facc15', '#fb923c', '#f472b6', '#c4b5fd', '#94a3b8'],
+        text: '#e4fbf5',
+        // 轴名称 / 图例文字用近灰：偏青的灰（通道极差 > 45）会被「越界墨迹」审计判成饱和色
+        textDim: '#9db0a9',
+        axisLine: 'rgba(46, 230, 197, 0.18)',
+        axisLabel: '#8fa5a0',
+        splitLine: 'rgba(46, 230, 197, 0.09)',
+        halo: 'rgba(3, 17, 15, 0.9)',
+        inactive: '#3a5b56',
+        tooltipBg: 'rgba(4, 24, 22, 0.96)',
+        tooltipBorder: 'rgba(46, 230, 197, 0.32)',
+        crosshair: 'rgba(46, 230, 197, 0.5)',
+        chipBg: 'rgba(3, 20, 17, 0.94)',
+        chipText: '#7ff3dd',
+        brushFill: 'rgba(46, 230, 197, 0.12)',
+        brushStroke: 'rgba(46, 230, 197, 0.8)',
+      };
+      const theme = DashKit.chartTheme(IDENTITY);
+      const BASE = {
+        theme,
+        legend: { show: false },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        animation: { enter: { duration: 600, easing: 'easeOutCubic' } },
+        xAxis: { type: 'value' },
+        yAxis: {},
+      };
+
+      // ---------------- 面板清单（宽度都是 12 列栅格的整数倍） ----------------
+      $('screen').innerHTML =
+        '<header class="dk-topbar">' +
+        '<span class="dk-wing left"></span><h1>设备监控大屏</h1><span class="dk-wing right"></span>' +
+        '<div class="dk-side left"><span class="dk-pill ok"><i class="dk-dot"></i>采集正常</span>' +
+        '<span class="dk-pill" id="pill-clock">--:--:--</span>' +
+        '<span class="dk-pill">在线率 <b id="pill-online">--</b></span></div>' +
+        '<div class="dk-side right"><span class="dk-pill" id="pill-alert">告警 0</span>' +
+        '<button class="dk-ghost" id="btn-spike">注入故障</button>' +
+        '<button class="dk-ghost" id="btn-toggle">暂停</button></div>' +
+        '</header>' +
+        DashKit.kpiStrip([
+          { id: 'kpi-online', label: '在线设备', unit: '台' },
+          { id: 'kpi-offline', label: '离线设备', unit: '台' },
+          { id: 'kpi-temp', label: '平均温度', unit: '℃' },
+          { id: 'kpi-flow', label: '实时吞吐', unit: 'Mbps' },
+          { id: 'kpi-alarms', label: '未处理告警', unit: '条' },
+        ]) +
+        DashKit.panel({ id: 'online', title: '设备在线率', meta: '水位球', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'throughput', title: '实时吞吐', meta: '滑动窗口 60Hz · 与右侧联动', span: 6, height: 200 }) +
+        DashKit.panel({ id: 'health', title: '机房健康度', meta: '实时评分', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'status', title: '设备状态热力', meta: '每 250ms 左移', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'temp', title: '温度分布', meta: '箱线图', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'energy', title: '能耗构成', meta: '矩形 morph', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'alarm', title: '告警 Top 5', meta: '横向排名', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'topo', title: '设备拓扑', meta: '可拖拽节点', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'firmware', title: '固件版本', meta: '环形占比', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'heartbeat', title: '设备心跳 K 线', meta: '每 8 个采样一根', span: 6, height: 170 }) +
+        DashKit.panel({ id: 'events', title: '异常事件散点', meta: '按严重度着色', span: 6, height: 170 }) +
+        '<div class="dk-footer"><span>ice-chart · 交互全部由引擎内建</span>' +
+        '<span>同一套 12 列栅格与组件：换配色即另一个大屏</span></div>' +
+        '<div id="snapshot-panel"></div>';
+
+      // ---------------- 数据源 ----------------
+      const DEVICES = 1280;
+      const state = {
+        t: 0,
+        online: 1246,
+        offline: 34,
+        temp: 41,
+        flow: 640,
+        alarms: 6,
+        saturation: 87,
+        incident: 0,
+      };
+
+      // ---------------- 面板 ----------------
+      const online = ICEChart.createChart('online', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        liquid: { min: 0, max: 100, color: IDENTITY.accent, borderWidth: 4, waveHeight: 0.05, waveLength: 1.4, waveSpeed: 1.6, detail: { fontSize: 32 } },
+        series: [{ id: 'rate', type: 'liquid', name: '在线率', data: [{ name: '设备', value: 0 }] }],
+      });
+
+      const throughput = ICEChart.createChart('throughput', {
+        ...BASE,
+        yAxis: { name: 'Mbps', min: 0, max: 1200 },
+        series: [
+          { id: 'in', type: 'area', name: '入站', data: [], color: IDENTITY.accent, areaOpacity: 0.22, lineWidth: 2, smooth: 0.25 },
+          { id: 'out', type: 'line', name: '出站', data: [], color: '#22c55e', lineWidth: 1.5, smooth: 0.25 },
+        ],
+      });
+
+      const health = ICEChart.createChart('health', {
+        ...BASE,
+        radar: {
+          indicators: [
+            { name: '在线', max: 100 },
+            { name: '温度', max: 100 },
+            { name: '带宽', max: 100 },
+            { name: '告警', max: 100 },
+            { name: '能耗', max: 100 },
+          ],
+          splitNumber: 4,
+        },
+        animation: { enter: { duration: 600 }, update: { duration: 300, easing: 'linear' } },
+        series: [
+          { id: 'dc1', type: 'radar', name: 'A 机房', data: [96, 78, 88, 72, 66], color: IDENTITY.accent },
+          { id: 'dc2', type: 'radar', name: 'B 机房', data: [88, 86, 74, 84, 74], color: '#22c55e' },
+        ],
+      });
+
+      const ROWS = ['A 区', 'B 区', 'C 区'];
+      const COLS = 20;
+      const matrix = Array.from({ length: COLS }, () => [40, 50, 30]);
+      const matrixData = () => {
+        const out = [];
+        for (let col = 0; col < COLS; col++) {
+          for (let row = 0; row < ROWS.length; row++) out.push([`T${col}`, ROWS[row], Number(matrix[col][row].toFixed(1))]);
+        }
+        return out;
+      };
+      const status = ICEChart.createChart('status', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', data: Array.from({ length: COLS }, (_, i) => `T${i}`) },
+        yAxis: { type: 'category' },
+        grid: { x: false, y: false },
+        animation: { enter: { duration: 400 }, update: { duration: 240, easing: 'linear' } },
+        series: [{ id: 'm', type: 'heatmap', name: '负载', data: matrixData(), heatmap: { minColor: '#062821', maxColor: IDENTITY.accent } }],
+      });
+
+      const tempSamples = () => {
+        const base = [38, 41, 45, 52, 61];
+        return base.map((v, i) => Array.from({ length: 24 }, () => Number((v + state.temp - 41 + (Math.random() - 0.5) * (6 + i * 2)).toFixed(1))));
+      };
+      const temp = ICEChart.createChart('temp', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', data: ['传感器 A', '传感器 B', '传感器 C', '传感器 D', '传感器 E'] },
+        yAxis: { name: '℃', min: 20, max: 80 },
+        animation: { enter: { duration: 600 }, update: { duration: 400, easing: 'easeOutCubic' } },
+        series: [{ id: 'tp', type: 'boxplot', name: '温度分布', data: tempSamples() }],
+      });
+
+      const energyTree = [
+        { name: '计算设备', children: [{ name: '服务器', value: 420 }, { name: '网关', value: 160 }] },
+        { name: '制冷', children: [{ name: '空调', value: 300 }, { name: '风扇', value: 90 }] },
+        { name: '照明', value: 120 },
+      ];
+      const energy = ICEChart.createChart('energy', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        animation: { enter: { duration: 600 }, update: { duration: 520, easing: 'easeOutCubic' } },
+        treemap: { gap: 2, minLabelRatio: 0.05, depthFade: 0.16 },
+        series: [{ id: 'e', type: 'treemap', name: '能耗', data: energyTree }],
+      });
+
+      const alarmData = [
+        { name: '温度过高', value: 42 },
+        { name: '心跳丢失', value: 28 },
+        { name: '磁盘告警', value: 21 },
+        { name: '链路抖动', value: 15 },
+        { name: '认证失败', value: 9 },
+      ];
+      const alarm = ICEChart.createChart('alarm', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'value' },
+        yAxis: { type: 'category', data: alarmData.map((d) => d.name) },
+        grid: { x: true, y: false },
+        series: [{ id: 'al', type: 'bar', name: '告警', data: alarmData.map((d) => d.value), barWidth: 0.5, color: '#fb923c' }],
+      });
+
+      const topo = ICEChart.createChart('topo', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        graph: {
+          symbolSizeRange: [8, 20],
+          repulsion: 9000,
+          edgeLength: 90,
+          gravity: 0.04,
+          categories: [
+            { name: '采集层', color: IDENTITY.accent },
+            { name: '汇聚层', color: '#22c55e' },
+            { name: '平台层', color: '#facc15' },
+          ],
+          nodes: [
+            { id: 's1', name: '传感器组', value: 14, category: '采集层' },
+            { id: 's2', name: '摄像头', value: 10, category: '采集层' },
+            { id: 'g1', name: '边缘网关', value: 12, category: '汇聚层' },
+            { id: 'g2', name: '汇聚交换机', value: 11, category: '汇聚层' },
+            { id: 'p1', name: 'IoT 平台', value: 15, category: '平台层' },
+            { id: 'p2', name: '时序库', value: 9, category: '平台层' },
+          ],
+          links: [
+            { source: 's1', target: 'g1', value: 5 },
+            { source: 's2', target: 'g1', value: 4 },
+            { source: 'g1', target: 'g2', value: 5 },
+            { source: 'g2', target: 'p1', value: 6 },
+            { source: 'p1', target: 'p2', value: 4 },
+          ],
+        },
+        series: [{ id: 'tp', type: 'graph', name: '拓扑' }],
+      });
+
+      const firmwareData = [
+        { name: 'v3.2', value: 520 },
+        { name: 'v3.1', value: 320 },
+        { name: 'v3.0', value: 180 },
+        { name: 'v2.x', value: 96 },
+      ];
+      const firmware = ICEChart.createChart('firmware', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        series: [{ id: 'fw', type: 'pie', name: '固件', data: firmwareData, innerRadius: 0.5, label: { show: false } }],
+      });
+
+      const candles = [];
+      let building = null;
+      const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
+      const heartbeat = ICEChart.createChart('heartbeat', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category' },
+        yAxis: { name: '心跳(ms)', min: 20, max: 120 },
+        animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
+        series: [{ id: 'hb', type: 'candlestick', name: '心跳', data: [], barWidth: 0.5 }],
+      });
+
+      const events = [];
+      const eventsChart = ICEChart.createChart('events', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'value', name: '时间' },
+        yAxis: { name: '严重度', min: 0, max: 4 },
+        series: [
+          { id: 'ev', type: 'scatter', name: '事件', data: [], symbolSize: 9, color: '#fb923c' },
+        ],
+      });
+
+      // ---------------- 主循环 ----------------
+      const updateKpi = DashKit.kpiUpdater();
+      const pad = (v) => String(v).padStart(2, '0');
+      const startedAt = Date.now();
+
+      const loop = DashKit.loop({
+        tick: () => {
+          state.t += 1;
+          const t = state.t;
+          if (state.incident > 0) {
+            state.incident -= 1;
+          } else if (Math.random() < 0.004) {
+            state.incident = 40;
+          }
+          const incidentBoost = state.incident > 0 ? 1 : 0;
+          state.offline = clamp(DashKit.walk(state.offline, 34 + incidentBoost * 40, 2), 4, 120);
+          state.online = DEVICES - Math.round(state.offline);
+          state.temp = clamp(DashKit.walk(state.temp, 41 + incidentBoost * 8, 0.5), 30, 68);
+          state.flow = clamp(DashKit.walk(state.flow, 640 + Math.sin(t / 80) * 260, 26, 0.05), 120, 1200);
+          state.alarms = clamp(DashKit.walk(state.alarms, 6 + incidentBoost * 24, 1.2), 0, 60);
+          state.saturation = clamp(DashKit.walk(state.saturation, 87 + incidentBoost * 10, 0.8), 40, 100);
+
+          throughput.appendData('in', [[t, Math.round(state.flow)]], { maxPoints: WINDOW });
+          throughput.appendData('out', [[t, Math.round(state.flow * 0.62)]], { maxPoints: WINDOW });
+
+          if (t % 8 === 0) {
+            online.setData('rate', [{ name: '设备', value: Number(state.saturation.toFixed(1)) }]);
+          }
+          if (t % 16 === 0) {
+            matrix.shift();
+            matrix.push([state.flow / 14, state.temp, state.alarms * 3]);
+            status.setData('m', matrixData());
+          }
+          if (t % 40 === 0) {
+            temp.setData('tp', tempSamples());
+            health.setData('dc1', [clamp(96 - state.offline / 6, 40, 100), clamp(100 - Math.abs(state.temp - 41) * 3, 40, 100), clamp(88 - state.flow / 60, 40, 100), clamp(96 - state.alarms * 1.6, 20, 100), clamp(66 + Math.random() * 6, 40, 100)]);
+            health.setData('dc2', [clamp(88 - state.offline / 9, 40, 100), clamp(92 - Math.abs(state.temp - 44) * 3, 40, 100), clamp(74 - state.flow / 90, 40, 100), clamp(88 - state.alarms * 1.3, 20, 100), clamp(74 + Math.random() * 6, 40, 100)]);
+          }
+          if (t % 90 === 0) {
+            energy.setData(
+              'e',
+              energyTree.map((node) => (node.children
+                ? { ...node, children: node.children.map((c) => ({ ...c, value: Math.round(c.value * (0.8 + Math.random() * 0.4)) })) }
+                : { ...node, value: Math.round(node.value * (0.8 + Math.random() * 0.4)) }))
+            );
+            firmware.setData('fw', firmwareData.map((d) => ({ ...d, value: Math.round(d.value * (0.85 + Math.random() * 0.3)) })));
+          }
+
+          // 心跳 K 线：每 8 个采样聚合一根
+          const hb = 60 + state.temp - 41 + (state.incident > 0 ? 30 : 0) + (Math.random() - 0.5) * 6;
+          if (!building) building = { o: hb, c: hb, l: hb, h: hb };
+          building.c = hb;
+          building.h = Math.max(building.h, hb);
+          building.l = Math.min(building.l, hb);
+          if (t % 8 === 0) {
+            candles.push({ ...building });
+            if (candles.length > 34) candles.shift();
+            building = null;
+            heartbeat.setData('hb', candleData());
+          } else {
+            heartbeat.setData('hb', candleData().concat([[building.o, building.c, building.l, building.h]]));
+          }
+
+          // 异常事件散点：随机落下，保留最近 40 个
+          if (Math.random() < (state.incident > 0 ? 0.35 : 0.06)) {
+            events.push([t, clamp(1 + Math.random() * 3, 0, 4)]);
+            if (events.length > 40) events.shift();
+            eventsChart.setData('ev', events);
+          }
+
+          const alerting = state.offline > 60;
+          $('pill-alert').textContent = `告警 ${state.alarms.toFixed(0)}`;
+          $('pill-alert').className = `dk-pill ${alerting ? 'danger' : 'ok'}`;
+          $('pill-online').textContent = `${state.saturation.toFixed(1)}%`;
+          ['online', 'throughput', 'health'].forEach((id) => {
+            const panel = $('panel-' + id);
+            if (panel) panel.classList.toggle('dk-alert', alerting);
+          });
+
+          updateKpi('kpi-online', state.online, `${state.online}<small>台</small>`);
+          updateKpi('kpi-offline', state.offline, `${Math.round(state.offline)}<small>台</small>`, true);
+          updateKpi('kpi-temp', state.temp, `${state.temp.toFixed(1)}<small>℃</small>`, true);
+          updateKpi('kpi-flow', state.flow, `${Math.round(state.flow)}<small>Mbps</small>`);
+          updateKpi('kpi-alarms', state.alarms, `${Math.round(state.alarms)}<small>条</small>`, true);
+        },
+        onFrame: () => {
+          $('pill-clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        },
+      });
+
+      $('btn-toggle').addEventListener('click', (event) => {
+        event.target.textContent = loop.toggle() ? '暂停' : '继续';
+      });
+      $('btn-spike').addEventListener('click', () => {
+        state.incident = 40;
+      });
+
+      DashKit.wire({ main: throughput, charts: { online, throughput, health, status, temp, energy, alarm, topo, firmware, heartbeat, events: eventsChart } });
+    </script>
+  </body>
+</html>

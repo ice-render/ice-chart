@@ -2,6 +2,7 @@ import { SeriesBase } from './SeriesBase';
 import type { SeriesType, TreemapOption } from '../../types';
 import type { Rect } from '../../internal';
 import type { TreemapNodeLayout } from '../../layout/treemap';
+import { measureTextWidth } from '../../util/text';
 
 export interface TreemapSeriesCoord {
   plot: Rect;
@@ -200,7 +201,28 @@ export class TreemapSeries extends SeriesBase {
       }
     }
 
-    // 标签：只画放得下的（含数值占比）
+    // 标签：只画**放得下**的（含数值占比）。
+    //
+    // 两个坑都是大屏实测出来的：
+    // 1. 父节点标签是左对齐的（画在标题带里），改完 `textAlign` 没有还原 ——
+    //    后面的叶子标签就变成「从矩形中心往右排」，等于整体右移半个文本宽；
+    //    宽块看不出来，窄块（占比小的那一档，40~70px）直接把字顶出画布。
+    // 2. 「放得下」以前只按矩形尺寸判断（< 44px 宽不画），而树图的占比每轮都在变，
+    //    44~70px 之间浮动时 4 个汉字的名字照样会横着压到隔壁块上。
+    //    现在按**真实文本宽度**判断：先按主题字号试，放不下逐级缩到 9px，仍放不下才不画。
+    const minFontSize = 9;
+    /**
+     * 先按主题字号试，放不下逐级缩到 9px；返回能放下这些行的字号（返回 9 表示仍可能放不下，由调用方再判一次）。
+     * 量宽用 `measureTextWidth`（不区分字重），所以阈值里留了 8px 的左右余量给粗体。
+     */
+    const fitFontSize = (lines: string[], limit: number): number => {
+      let size = theme.fontSize;
+      while (size > minFontSize) {
+        if (lines.every((line) => measureTextWidth(ctx, line, size, theme.fontFamily) <= limit)) break;
+        size -= 1;
+      }
+      return size;
+    };
     this.setFont(theme.fontSize, theme.fontFamily);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -212,17 +234,25 @@ export class TreemapSeries extends SeriesBase {
       if (node.hasChildren && node.header > 0) {
         ctx.textAlign = 'left';
         ctx.fillStyle = node.depth === 0 ? '#ffffff' : theme.textColor;
-        this.setFont(theme.fontSize, theme.fontFamily, 'bold');
-        ctx.fillText(`${node.name} ${ratioText}`, rect.x - plot.x + 8 * unit, rect.y - plot.y + node.header / 2);
+        const label = `${node.name} ${ratioText}`;
+        const size = fitFontSize([label], rect.width - 16 * unit);
+        if (size > minFontSize || measureTextWidth(ctx, label, size, theme.fontFamily) <= rect.width - 16 * unit) {
+          this.setFont(size, theme.fontFamily, 'bold');
+          ctx.fillText(label, rect.x - plot.x + 8 * unit, rect.y - plot.y + node.header / 2);
+        }
         continue;
       }
       if (rect.width < 44 || rect.height < 26) continue;
-      this.setFont(theme.fontSize, theme.fontFamily);
       const text = rect.height >= 40 ? `${node.name}\n${ratioText}` : `${node.name} ${ratioText}`;
       const lines = text.split('\n');
+      const size = fitFontSize(lines, rect.width - 8 * unit);
+      const maxLineWidth = Math.max(...lines.map((line) => measureTextWidth(ctx, line, size, theme.fontFamily)));
+      if (maxLineWidth > rect.width - 8 * unit) continue; // 缩到最小字号还放不下：宁可不画，也不压到邻居
+      this.setFont(size, theme.fontFamily);
+      ctx.textAlign = 'center'; // 父节点标签是左对齐的，叶子必须显式改回来
       const color = node.depth === 0 ? '#ffffff' : theme.textColor;
       ctx.fillStyle = color;
-      const lineHeight = theme.fontSize * 1.35;
+      const lineHeight = size * 1.35;
       const startY = rect.y - plot.y + rect.height / 2 - ((lines.length - 1) * lineHeight) / 2;
       for (let i = 0; i < lines.length; i++) {
         ctx.fillText(lines[i], rect.x - plot.x + rect.width / 2, startY + i * lineHeight);

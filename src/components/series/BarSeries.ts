@@ -101,9 +101,18 @@ export class BarSeries extends SeriesBase {
     return raw <= 1 ? Math.max(1, bandWidth * raw) : Math.max(1, raw * this.unit());
   }
 
-  /** 单根柱子的颜色（瀑布图按增/减/合计覆写）。 */
+  /**
+   * 单根柱子的颜色（瀑布图按增/减/合计覆写）。
+   *
+   * 支持**逐项配色**：数据项写成 `{ value, color }` 就按项取色 ——
+   * 「红涨绿跌」「告警分级」「正负值分色」这类大屏常见需求都靠它，
+   * 以前只有系列级颜色，只能靠拆成多个系列去凑（还会把柱子排成一组一组的）。
+   */
   protected barColorAt(index: number): string {
-    return this.pointColor(index);
+    const point = this.series.points[index];
+    const raw: any = point && (point as any).raw;
+    const own = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw.color : undefined;
+    return own || this.pointColor(index);
   }
 
   /**

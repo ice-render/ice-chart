@@ -33,6 +33,11 @@ const pages = [
   'time-series',
   'live-stream',
   'dashboard',
+  'dashboard-iot',
+  'dashboard-market',
+  'dashboard-energy',
+  'dashboard-logistics',
+  'dashboard-lab',
 ];
 
 fs.mkdirSync(outDir, { recursive: true });
@@ -63,7 +68,18 @@ for (const name of pages) {
   // 像素缓存新鲜度：清掉各类的缓存键再重算一遍，两次结果必须一致。
   // 不一致 = 缓存键漏了某个几何输入（数据域 / 绘图区），页面上的表现是
   // 「悬停高亮画在别处」「命中判空」这类看起来像交互 bug 的问题。
-  const stale = await page.evaluate(() => {
+  const stale = await page.evaluate(async () => {
+    // 数据流页面（大屏 / 实时流）每 100~130ms 就换一次数据，缓存「落后一帧」是正常的 ——
+    // 检测前先暂停数据流、等两帧让页面落定，比对完再恢复，避免把正常时序误判成缓存陈旧。
+    const paused = [];
+    const candidates = [window.__dashLoop && window.__dashLoop.state, window.__liveState, window.__dashboardState];
+    for (const state of candidates) {
+      if (state && typeof state.running === 'boolean' && state.running) {
+        state.running = false;
+        paused.push(state);
+      }
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const list = [];
     const push = (c) => {
       if (c && c.norm && c.layout) list.push(c);
@@ -91,6 +107,7 @@ for (const name of pages) {
         if (diff) out.push({ type: comp.seriesType, diff });
       }
     }
+    for (const state of paused) state.running = true;
     return out;
   });
 
@@ -154,9 +171,10 @@ for (const name of pages) {
         // 探针算好坐标、鼠标移过去时，图元可能已经缩小/滑走，指针真的不在它上面。
         // 这不是交互缺陷，所以允许「重算坐标 + 重试一次」。
         let result = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < 3; attempt++) {
           let point = [sx, sy];
           if (attempt > 0) {
+            await page.waitForTimeout(80); // 让流式页面先把这一帧渲染完再重算坐标
             const retry = await page.evaluate(
               ({ i, s, t }) => {
                 const list = [];

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 能源调度大屏</title>
+    <!--
+      第三个大屏案例：电网 / 能源调度。与其它大屏共用 examples/assets/dash-kit.js，
+      只换视觉身份（蓝紫主色）与面板清单。
+      这张屏里刻意把「表达式绘图」搬进了大屏：谐波合成面板用 function 系列画方波近似，
+      参数扫动时曲线实时重采样 —— 数学函数图不只是教学示例，也能当仪表用。
+    -->
+    <style>
+      /* 视觉身份：蓝紫 */
+      :root {
+        --dk-bg: #05071a;
+        --dk-bg-2: #0a0d26;
+        --dk-panel: rgba(20, 24, 66, 0.55);
+        --dk-panel-2: rgba(11, 13, 40, 0.86);
+        --dk-line: rgba(124, 140, 255, 0.18);
+        --dk-corner: rgba(124, 140, 255, 0.72);
+        --dk-accent: #7c8cff;
+        --dk-accent-soft: rgba(124, 140, 255, 0.09);
+        --dk-accent-soft-strong: rgba(124, 140, 255, 0.36);
+        --dk-text: #e8ecff;
+        --dk-text-dim: #9aa6d4;
+        --dk-muted: #6b76a6;
+        --dk-glow: rgba(124, 140, 255, 0.1);
+        --dk-glow-2: rgba(56, 189, 248, 0.08);
+        --dk-glow-text: rgba(124, 140, 255, 0.45);
+        --dk-dots: rgba(124, 140, 255, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dk-screen" id="screen"></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script src="./assets/dash-kit.js"></script>
+    <script>
+      DashKit.injectStyle();
+      const $ = (id) => document.getElementById(id);
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      const WINDOW = 180;
+
+      const IDENTITY = {
+        accent: '#7c8cff',
+        palette: ['#7c8cff', '#38bdf8', '#2ee6c5', '#a3e635', '#facc15', '#fb923c', '#f472b6', '#c4b5fd', '#22c55e', '#94a3b8'],
+        text: '#e8ecff',
+        // 轴名称 / 图例文字用近灰：偏紫的灰（通道极差 > 45）会被「越界墨迹」审计判成饱和色
+        textDim: '#a3a8bd',
+        axisLine: 'rgba(124, 140, 255, 0.2)',
+        axisLabel: '#949aae',
+        splitLine: 'rgba(124, 140, 255, 0.1)',
+        halo: 'rgba(5, 7, 26, 0.9)',
+        inactive: '#414a72',
+        tooltipBg: 'rgba(11, 13, 40, 0.96)',
+        tooltipBorder: 'rgba(124, 140, 255, 0.34)',
+        crosshair: 'rgba(124, 140, 255, 0.5)',
+        chipBg: 'rgba(9, 11, 34, 0.94)',
+        chipText: '#b8c2ff',
+        brushFill: 'rgba(124, 140, 255, 0.12)',
+        brushStroke: 'rgba(124, 140, 255, 0.8)',
+      };
+      const theme = DashKit.chartTheme(IDENTITY);
+      const BASE = {
+        theme,
+        legend: { show: false },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        animation: { enter: { duration: 600, easing: 'easeOutCubic' } },
+        xAxis: { type: 'value' },
+        yAxis: {},
+      };
+
+      // ---------------- 面板清单 ----------------
+      $('screen').innerHTML =
+        '<header class="dk-topbar">' +
+        '<span class="dk-wing left"></span><h1>能源调度大屏</h1><span class="dk-wing right"></span>' +
+        '<div class="dk-side left"><span class="dk-pill ok"><i class="dk-dot"></i>并网正常</span>' +
+        '<span class="dk-pill" id="pill-clock">--:--:--</span>' +
+        '<span class="dk-pill">新能源 <b id="pill-green">--</b></span></div>' +
+        '<div class="dk-side right"><span class="dk-pill" id="pill-alert">告警 0</span>' +
+        '<button class="dk-ghost" id="btn-spike">负荷冲击</button>' +
+        '<button class="dk-ghost" id="btn-toggle">暂停</button></div>' +
+        '</header>' +
+        DashKit.kpiStrip([
+          { id: 'kpi-load', label: '当前负荷', unit: 'MW' },
+          { id: 'kpi-green', label: '新能源占比', unit: '%' },
+          { id: 'kpi-freq', label: '频率偏差', unit: 'Hz' },
+          { id: 'kpi-gen', label: '今日发电量', unit: 'GWh' },
+          { id: 'kpi-alarms', label: '越限告警', unit: '条' },
+        ]) +
+        DashKit.panel({ id: 'load', title: '电网负荷', meta: '滑动窗口 60Hz · 与新能源出力联动', span: 6, height: 200 }) +
+        DashKit.panel({ id: 'green', title: '新能源出力', meta: '风电 + 光伏', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'freq', title: '电网频率', meta: '50Hz ±0.5', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'unit', title: '机组负荷率', meta: '水位球', span: 3, height: 170 }) +
+        DashKit.panel({ id: 'flow', title: '能源流向', meta: '源 → 网 → 荷', span: 5, height: 170 }) +
+        DashKit.panel({ id: 'area', title: '区域负荷', meta: '每 250ms 左移', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'grid', title: '电网拓扑', meta: '可拖拽节点', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'balance', title: '电量平衡', meta: '瀑布图', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'output', title: '机组出力分布', meta: '箱线图', span: 4, height: 170 }) +
+        DashKit.panel({ id: 'price', title: '时段电价', meta: '玫瑰图', span: 3, height: 170 }) +
+        DashKit.panel({ id: 'wave', title: '谐波合成', meta: '函数绘图 · 表达式实时重采样', span: 5, height: 170 }) +
+        DashKit.panel({ id: 'rank', title: '机组发电排名', meta: '逐项配色', span: 4, height: 170 }) +
+        '<div class="dk-footer"><span>ice-chart · 交互全部由引擎内建</span>' +
+        '<span>同一套 12 列栅格与组件：换配色即另一个大屏</span></div>' +
+        '<div id="snapshot-panel"></div>';
+
+      // ---------------- 数据源 ----------------
+      const state = {
+        t: 0,
+        load: 2860,
+        green: 34,
+        freq: 50,
+        total: 41.6,
+        alarms: 3,
+        peak: 0,
+      };
+
+      // ---------------- 面板 ----------------
+      const load = ICEChart.createChart('load', {
+        ...BASE,
+        yAxis: { name: 'MW', min: 1800, max: 4200 },
+        series: [
+          { id: 'l', type: 'area', name: '实际负荷', data: [], color: IDENTITY.accent, areaOpacity: 0.24, lineWidth: 2, smooth: 0.25 },
+          { id: 'p', type: 'line', name: '预测负荷', data: [], color: '#38bdf8', lineWidth: 1.5, smooth: 0.25 },
+        ],
+      });
+
+      const green = ICEChart.createChart('green', {
+        ...BASE,
+        yAxis: { name: '%', min: 0, max: 80 },
+        series: [
+          { id: 'g', type: 'area', name: '新能源占比', data: [], color: '#22c55e', areaOpacity: 0.26, lineWidth: 2, smooth: 0.25 },
+        ],
+      });
+      // 两张直角坐标图按 x 数据值三路联动：悬停 / 缩放 / 框选
+      const link = ICEChart.linkCharts([load, green], { axis: 'x', hover: true, zoom: true, brush: true });
+
+      const freq = ICEChart.createChart('freq', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        gauge: {
+          min: 49.5,
+          max: 50.5,
+          splitNumber: 5,
+          lineWidth: 12,
+          axisLineColor: [
+            [0.25, '#ff5b6a'],
+            [0.45, '#fac858'],
+            [0.55, '#22c55e'],
+            [0.75, '#fac858'],
+            [1, '#ff5b6a'],
+          ],
+          pointer: { show: true, width: 5, length: 0.7 },
+          detail: { formatter: (v) => `${v.toFixed(2)} Hz`, fontSize: 15 },
+          title: { show: false },
+        },
+        series: [{ id: 'f', type: 'gauge', name: '频率', data: [{ name: '频率', value: 50 }] }],
+      });
+
+      const unit = ICEChart.createChart('unit', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        liquid: { min: 0, max: 100, color: IDENTITY.accent, borderWidth: 4, waveHeight: 0.05, waveLength: 1.4, waveSpeed: 1.5, unit: '%', detail: { fontSize: 30 } },
+        series: [{ id: 'u', type: 'liquid', name: '负荷率', data: [{ name: '机组', value: 0 }] }],
+      });
+
+      const flow = ICEChart.createChart('flow', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        sankey: {
+          nodes: [
+            { name: '煤电' },
+            { name: '气电' },
+            { name: '水电' },
+            { name: '风电' },
+            { name: '光伏' },
+            { name: '电网' },
+            { name: '工业' },
+            { name: '居民' },
+            { name: '商业' },
+            { name: '数据中心' },
+            { name: '线损' },
+          ],
+          links: [
+            { source: '煤电', target: '电网', value: 1180 },
+            { source: '气电', target: '电网', value: 420 },
+            { source: '水电', target: '电网', value: 360 },
+            { source: '风电', target: '电网', value: 520 },
+            { source: '光伏', target: '电网', value: 430 },
+            { source: '电网', target: '工业', value: 1420 },
+            { source: '电网', target: '居民', value: 620 },
+            { source: '电网', target: '商业', value: 480 },
+            { source: '电网', target: '数据中心', value: 290 },
+            { source: '电网', target: '线损', value: 100 },
+          ],
+          nodeWidth: 12,
+          nodePadding: 8,
+          flow: true,
+          flowSpeed: 46,
+          linkOpacity: 0.62,
+        },
+        series: [{ id: 'sf', type: 'sankey', name: '流向' }],
+      });
+
+      const AREAS = ['华东', '华北', '华南'];
+      const COLS = 20;
+      const matrix = Array.from({ length: COLS }, () => [2400, 1900, 1500]);
+      const matrixData = () => {
+        const out = [];
+        for (let col = 0; col < COLS; col++) {
+          for (let row = 0; row < AREAS.length; row++) out.push([`T${col}`, AREAS[row], Number(matrix[col][row].toFixed(0))]);
+        }
+        return out;
+      };
+      const area = ICEChart.createChart('area', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', data: Array.from({ length: COLS }, (_, i) => `T${i}`) },
+        yAxis: { type: 'category' },
+        grid: { x: false, y: false },
+        animation: { enter: { duration: 400 }, update: { duration: 240, easing: 'linear' } },
+        series: [{ id: 'a', type: 'heatmap', name: '负荷', data: matrixData(), heatmap: { minColor: '#0a0f38', maxColor: IDENTITY.accent } }],
+      });
+
+      const grid = ICEChart.createChart('grid', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        graph: {
+          symbolSizeRange: [8, 20],
+          repulsion: 11000,
+          edgeLength: 100,
+          gravity: 0.035,
+          categories: [
+            { name: '电源', color: IDENTITY.accent },
+            { name: '变电', color: '#38bdf8' },
+            { name: '负荷', color: '#facc15' },
+          ],
+          nodes: [
+            { id: 'c1', name: '煤电基地', value: 15, category: '电源' },
+            { id: 'c2', name: '风电场', value: 12, category: '电源' },
+            { id: 'c3', name: '光伏站', value: 10, category: '电源' },
+            { id: 's1', name: '500kV 枢纽', value: 13, category: '变电' },
+            { id: 's2', name: '220kV 中心', value: 11, category: '变电' },
+            { id: 'd1', name: '工业园区', value: 12, category: '负荷' },
+            { id: 'd2', name: '数据中心', value: 9, category: '负荷' },
+          ],
+          links: [
+            { source: 'c1', target: 's1', value: 6 },
+            { source: 'c2', target: 's1', value: 4 },
+            { source: 'c3', target: 's2', value: 4 },
+            { source: 's1', target: 's2', value: 5 },
+            { source: 's2', target: 'd1', value: 5 },
+            { source: 's2', target: 'd2', value: 3 },
+          ],
+        },
+        series: [{ id: 'topo', type: 'graph', name: '拓扑' }],
+      });
+
+      const balanceBase = [
+        { name: '发电量', value: 2910 },
+        { name: '外购电', value: 380 },
+        { name: '厂用电', value: -190 },
+        { name: '线损', value: -142 },
+        { name: '储能充电', value: -160 },
+      ];
+      const balance = ICEChart.createChart('balance', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category' },
+        yAxis: { name: 'MWh', min: 0, max: 3600 },
+        animation: { enter: { duration: 600 }, update: { duration: 420, easing: 'easeOutCubic' } },
+        series: [
+          {
+            id: 'b',
+            type: 'waterfall',
+            name: '平衡',
+            barWidth: 0.55,
+            data: balanceBase.concat([{ name: '供电量', value: 0, total: true }]),
+          },
+        ],
+      });
+
+      const outputSamples = () => {
+        const base = [92, 86, 78, 71, 64, 58];
+        return base.map((v, i) => Array.from({ length: 24 }, () => Number(clamp(v + (state.load - 2860) / 26 + (Math.random() - 0.5) * (5 + i * 1.5), 20, 100).toFixed(1))));
+      };
+      const output = ICEChart.createChart('output', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', data: ['#1', '#2', '#3', '#4', '#5', '#6'] },
+        yAxis: { name: 'MW', min: 20, max: 100 },
+        animation: { enter: { duration: 600 }, update: { duration: 400, easing: 'easeOutCubic' } },
+        series: [{ id: 'o', type: 'boxplot', name: '出力', data: outputSamples() }],
+      });
+
+      const priceData = [
+        { name: '尖峰', value: 1.36 },
+        { name: '高峰', value: 1.08 },
+        { name: '平段', value: 0.72 },
+        { name: '低谷', value: 0.38 },
+      ];
+      const price = ICEChart.createChart('price', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        series: [{ id: 'pr', type: 'pie', name: '电价', data: priceData, roseType: 'area', innerRadius: 0.36, label: { show: false } }],
+      });
+
+      // 谐波合成：基波 + 3/5/7 次谐波 ≈ 方波。参数 a 由数据流扫动，曲线每帧重采样。
+      const waveOption = {
+        ...BASE,
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'value', name: '相位', min: -3, max: 3 },
+        yAxis: { name: '幅值', min: -1.6, max: 1.6 },
+        series: [
+          { id: 'fund', type: 'function', name: '基波', expression: 'sin(pi*x)', domain: [-3, 3], lineWidth: 1.5, color: '#6b76a6' },
+          {
+            id: 'sum',
+            type: 'function',
+            name: '合成波',
+            expression: 'a*(sin(pi*x) + sin(3*pi*x)/3 + sin(5*pi*x)/5 + sin(7*pi*x)/7)',
+            params: { a: 1 },
+            domain: [-3, 3],
+            lineWidth: 2,
+            color: IDENTITY.accent,
+          },
+        ],
+      };
+      const wave = ICEChart.createChart('wave', waveOption);
+
+      const rankRows = [
+        { name: '#1 机组', value: 92 },
+        { name: '#2 机组', value: 86 },
+        { name: '#3 机组', value: 78 },
+        { name: '#4 机组', value: 71 },
+        { name: '#5 机组', value: 64 },
+      ];
+      const rankColor = (v) => (v >= 85 ? '#22c55e' : v >= 70 ? IDENTITY.accent : v >= 60 ? '#fac858' : '#fb923c');
+      // 类目轴的第 0 项画在最下面：排名图要把最强的一台送到最上面，所以按值升序排一遍
+      const rankSorted = (rows) => rows.slice().sort((a, b) => a.value - b.value);
+      const rankOption = () => ({
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'value', name: 'MW' },
+        yAxis: { type: 'category', data: rankSorted(rankRows).map((r) => r.name) },
+        grid: { x: true, y: false },
+        series: [
+          {
+            id: 'rk',
+            type: 'bar',
+            name: '出力',
+            barWidth: 0.5,
+            data: rankSorted(rankRows).map((r) => ({ name: r.name, value: r.value, color: rankColor(r.value) })),
+          },
+        ],
+      });
+      const rank = ICEChart.createChart('rank', rankOption());
+
+      // ---------------- 主循环 ----------------
+      const updateKpi = DashKit.kpiUpdater();
+      const startedAt = Date.now();
+
+      const loop = DashKit.loop({
+        tick: () => {
+          state.t += 1;
+          const t = state.t;
+          if (state.peak > 0) state.peak -= 1;
+          else if (Math.random() < 0.002) state.peak = 60;
+          const boost = state.peak > 0 ? 1 : 0;
+
+          const dayCurve = Math.sin(t / 260) * 620 + Math.sin(t / 90) * 130;
+          state.load = clamp(DashKit.walk(state.load, 2860 + dayCurve + boost * 720, 12), 1800, 4200);
+          state.green = clamp(DashKit.walk(state.green, 34 + Math.sin(t / 140) * 14 - boost * 12, 0.5), 4, 78);
+          state.freq = clamp(DashKit.walk(state.freq, 50 + (Math.random() - 0.5) * 0.05 - boost * 0.12, 0.012), 49.5, 50.5);
+          state.alarms = clamp(DashKit.walk(state.alarms, 3 + boost * 20 + Math.abs(state.freq - 50) * 30, 0.4), 0, 40);
+          state.total = 41.6 + t * 0.0008;
+
+          load.appendData('l', [[t, Math.round(state.load)]], { maxPoints: WINDOW });
+          load.appendData('p', [[t, Math.round(state.load * (1 + Math.sin(t / 47) * 0.012))]], { maxPoints: WINDOW });
+          green.appendData('g', [[t, Number(state.green.toFixed(1))]], { maxPoints: WINDOW });
+
+          if (t % 12 === 0) freq.setData('f', [{ name: '频率', value: Number(state.freq.toFixed(3)) }]);
+          if (t % 16 === 0) unit.setData('u', [{ name: '机组', value: Number(clamp(((state.load - 1800) / 2400) * 100, 0, 100).toFixed(1)) }]);
+
+          if (t % 16 === 0) {
+            matrix.shift();
+            matrix.push([state.load, state.load * 0.71, state.load * 0.52]);
+            area.setData('a', matrixData());
+          }
+          if (t % 40 === 0) {
+            output.setData('o', outputSamples());
+            balance.setData(
+              'b',
+              balanceBase.map((d) => ({ ...d, value: Math.round(d.value * (0.92 + Math.random() * 0.16)) })).concat([{ name: '供电量', value: 0, total: true }])
+            );
+            const nextRank = rankRows.map((r) => ({ ...r, value: Number(clamp(r.value + (Math.random() - 0.5) * 12, 20, 100).toFixed(1)) }));
+            rankRows.forEach((r, i) => (r.value = nextRank[i].value));
+            // 值在变，名次就可能换位：类目轴和数据一起重建（只 setData 会让标签和值错位）
+            rank.setOption(rankOption());
+          }
+          if (t % 90 === 0) {
+            price.setData(
+              'pr',
+              priceData.map((d) => ({ ...d, value: Number((d.value * (0.9 + Math.random() * 0.2)).toFixed(3)) }))
+            );
+          }
+          // 谐波：幅度按 0.6~1.4 缓慢扫动（表达式参数变化 → 重采样 → 曲线渐变）
+          if (t % 6 === 0) {
+            // 参数写在系列上：改完把整份 option 交给 setOption（引擎按「完整配置」归一化）
+            waveOption.series[1].params = { a: Number((1 + Math.sin(t / 70) * 0.4).toFixed(3)) };
+            wave.setOption(waveOption);
+          }
+
+          const alerting = state.alarms > 14;
+          $('pill-alert').textContent = `告警 ${state.alarms.toFixed(0)}`;
+          $('pill-alert').className = `dk-pill ${alerting ? 'danger' : 'ok'}`;
+          $('pill-green').textContent = `${state.green.toFixed(1)}%`;
+          ['load', 'green', 'freq', 'unit'].forEach((id) => {
+            const panel = $('panel-' + id);
+            if (panel) panel.classList.toggle('dk-alert', alerting);
+          });
+
+          updateKpi('kpi-load', state.load, `${Math.round(state.load)}<small>MW</small>`);
+          updateKpi('kpi-green', state.green, `${state.green.toFixed(1)}<small>%</small>`);
+          updateKpi('kpi-freq', Math.abs(state.freq - 50), `${state.freq.toFixed(2)}<small>Hz</small>`, true);
+          updateKpi('kpi-gen', state.total, `${state.total.toFixed(1)}<small>GWh</small>`);
+          updateKpi('kpi-alarms', state.alarms, `${Math.round(state.alarms)}<small>条</small>`, true);
+        },
+        onFrame: () => {
+          $('pill-clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        },
+      });
+
+      $('btn-toggle').addEventListener('click', (event) => {
+        event.target.textContent = loop.toggle() ? '暂停' : '继续';
+      });
+      $('btn-spike').addEventListener('click', () => {
+        state.peak = 60;
+      });
+
+      DashKit.wire({ main: load, link, charts: { load, green, freq, unit, flow, area, grid, balance, output, price, wave, rank } });
+      console.log('energy dashboard ready in', Date.now() - startedAt, 'ms');
+    </script>
+  </body>
+</html>

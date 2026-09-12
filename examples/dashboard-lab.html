@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 函数实验大屏</title>
+    <!--
+      第五个大屏案例：函数实验台（迷你 MATLAB 的「大屏版」）。
+
+      与其它大屏的区别：数据源不是「业务指标」，而是**表达式本身** ——
+      参数 a / b / k 随时间扫动，曲线每帧重新采样、原地变形；采样密度面板把同一个公式
+      画三遍（疏 / 中 / 密），能直接看出「采样不足」长什么样。
+      底部面板回答「用户写错公式怎么办」：输入框改表达式 → 引擎编译 → 报告错误位置 / 未定义变量 /
+      区间内无可绘制值，画布不会因为写错而崩。
+    -->
+    <style>
+      /* 视觉身份：紫（科研 / 实验台） */
+      :root {
+        --dk-bg: #0a0718;
+        --dk-bg-2: #130c28;
+        --dk-panel: rgba(42, 28, 76, 0.5);
+        --dk-panel-2: rgba(20, 13, 40, 0.86);
+        --dk-line: rgba(167, 139, 250, 0.18);
+        --dk-corner: rgba(167, 139, 250, 0.72);
+        --dk-accent: #a78bfa;
+        --dk-accent-soft: rgba(167, 139, 250, 0.09);
+        --dk-accent-soft-strong: rgba(167, 139, 250, 0.36);
+        --dk-text: #f0ecff;
+        --dk-text-dim: #b3a8d4;
+        --dk-muted: #7a6fa6;
+        --dk-glow: rgba(167, 139, 250, 0.12);
+        --dk-glow-2: rgba(56, 189, 248, 0.08);
+        --dk-glow-text: rgba(167, 139, 250, 0.45);
+        --dk-dots: rgba(167, 139, 250, 0.08);
+      }
+      .fx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .fx-row label { font-size: 12px; color: var(--dk-muted); }
+      .fx-input {
+        flex: 1 1 320px;
+        min-width: 260px;
+        font-family: var(--dk-mono);
+        font-size: 13px;
+        padding: 5px 9px;
+        color: var(--dk-text);
+        background: rgba(2, 4, 14, 0.86);
+        border: 1px solid var(--dk-line);
+        border-radius: 2px;
+        outline: none;
+      }
+      .fx-input:focus { border-color: var(--dk-accent); }
+      .fx-input.invalid { border-color: #ff5b6a; background: rgba(255, 91, 106, 0.08); }
+      .fx-input.warned { border-color: #fac858; background: rgba(250, 200, 88, 0.08); }
+      .fx-state { font-family: var(--dk-mono); font-size: 12px; color: var(--dk-ok, #22c55e); }
+      .fx-state.invalid { color: #ff5b6a; }
+      .fx-state.warned { color: #fac858; }
+      .fx-hint { font-size: 11px; color: var(--dk-muted); }
+      .fx-diag {
+        margin: 8px 0 0;
+        padding: 8px 10px;
+        max-height: 7.5rem;
+        overflow: auto;
+        border: 1px solid var(--dk-line);
+        background: rgba(2, 4, 14, 0.8);
+        color: var(--dk-text-dim);
+        font-family: var(--dk-mono);
+        font-size: 11px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+      }
+      .fx-diag b { color: #ff5b6a; }
+      .fx-diag i { color: #fac858; font-style: normal; }
+      .fx-diag em { color: var(--dk-accent); font-style: normal; }
+      .fx-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .fx-list button {
+        font: inherit;
+        font-size: 11px;
+        font-family: var(--dk-mono);
+        padding: 3px 9px;
+        border: 1px solid var(--dk-line);
+        border-radius: 2px;
+        background: var(--dk-accent-soft);
+        color: var(--dk-text-dim);
+        cursor: pointer;
+      }
+      .fx-list button:hover { border-color: var(--dk-accent); color: #fff; }
+    </style>
+  </head>
+  <body>
+    <div class="dk-screen" id="screen"></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script src="./assets/dash-kit.js"></script>
+    <script>
+      DashKit.injectStyle();
+      const $ = (id) => document.getElementById(id);
+
+      const IDENTITY = {
+        accent: '#a78bfa',
+        palette: ['#a78bfa', '#38bdf8', '#2ee6c5', '#f472b6', '#fac858', '#a3e635', '#fb923c', '#c4b5fd', '#22c55e', '#94a3b8'],
+        text: '#f0ecff',
+        // 轴名称 / 图例文字用近灰：偏紫的灰（通道极差 > 45）会被「越界墨迹」审计判成饱和色
+        textDim: '#b0aabd',
+        axisLine: 'rgba(167, 139, 250, 0.2)',
+        axisLabel: '#a09aad',
+        splitLine: 'rgba(167, 139, 250, 0.1)',
+        halo: 'rgba(10, 7, 24, 0.9)',
+        inactive: '#4b4270',
+        tooltipBg: 'rgba(20, 13, 40, 0.96)',
+        tooltipBorder: 'rgba(167, 139, 250, 0.34)',
+        crosshair: 'rgba(167, 139, 250, 0.5)',
+        chipBg: 'rgba(16, 10, 34, 0.94)',
+        chipText: '#cbb8ff',
+        brushFill: 'rgba(167, 139, 250, 0.12)',
+        brushStroke: 'rgba(167, 139, 250, 0.8)',
+      };
+      const theme = DashKit.chartTheme(IDENTITY);
+      const BASE = {
+        theme,
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        animation: { enter: { duration: 700, easing: 'easeOutCubic' }, update: { duration: 180 } },
+        xAxis: { type: 'value', name: 'x' },
+        yAxis: { name: 'y' },
+      };
+
+      // ---------------- 面板清单 ----------------
+      $('screen').innerHTML =
+        '<header class="dk-topbar">' +
+        '<span class="dk-wing left"></span><h1>函数实验大屏</h1><span class="dk-wing right"></span>' +
+        '<div class="dk-side left"><span class="dk-pill ok"><i class="dk-dot"></i>表达式引擎就绪</span>' +
+        '<span class="dk-pill" id="pill-clock">--:--:--</span>' +
+        '<span class="dk-pill">重采样 <b id="pill-cost">--</b></span></div>' +
+        '<div class="dk-side right"><span class="dk-pill" id="pill-diag">诊断 0</span>' +
+        '<button class="dk-ghost" id="btn-toggle">暂停扫动</button></div>' +
+        '</header>' +
+        DashKit.kpiStrip([
+          { id: 'kpi-curves', label: '曲线', unit: '条' },
+          { id: 'kpi-samples', label: '每帧采样点', unit: '个' },
+          { id: 'kpi-cost', label: '重采样耗时', unit: 'ms' },
+          { id: 'kpi-extreme', label: '合成波峰值', unit: '' },
+          { id: 'kpi-diag', label: '表达式诊断', unit: '条' },
+        ]) +
+        DashKit.panel({ id: 'overlay', title: '函数曲线叠加', meta: '五种形态同屏 · 可缩放平移', span: 6, height: 220 }) +
+        DashKit.panel({ id: 'sweep', title: '参数扫动', meta: 'a · b · c 随时间变化', span: 6, height: 220 }) +
+        DashKit.panel({ id: 'lissajous', title: '李萨如曲线', meta: '参数曲线 · 频率比漂移', span: 4, height: 200 }) +
+        DashKit.panel({ id: 'rose', title: '极坐标玫瑰线', meta: 'r(θ) · 花瓣数连续变化', span: 4, height: 200 }) +
+        DashKit.panel({ id: 'taylor', title: '泰勒逼近', meta: 'sin(x) 的 1 / 3 / 5 / 7 阶', span: 4, height: 200 }) +
+        DashKit.panel({ id: 'packet', title: '高斯波包', meta: '中心与宽度扫动', span: 4, height: 200 }) +
+        DashKit.panel({ id: 'family', title: '参数曲线族', meta: '螺线 / 心形线 / 三叶玫瑰', span: 4, height: 200 }) +
+        DashKit.panel({ id: 'density', title: '采样密度', meta: '均匀采样 vs 自适应细分', span: 4, height: 200 }) +
+        '<section class="dk-panel dk-span12" id="panel-formula">' +
+        '<header class="dk-panel-title">表达式输入与诊断<span class="dk-meta">f(x) = …</span></header>' +
+        '<div class="fx-row">' +
+        '<label for="formula">f(x) =</label>' +
+        '<input class="fx-input" id="formula" spellcheck="false" value="sin(3*x)*exp(-x^2/8)" />' +
+        '<span class="fx-state" id="formula-state">✓ 语法正确</span>' +
+        '<span class="fx-hint">支持 + − × ÷ ^ 与 sin cos tan asin exp log sqrt abs floor round min max pow mod hypot clamp；常量 pi / e；隐式乘法 2x、3sin(x)；变量 x（参数曲线里是 t）</span>' +
+        '</div>' +
+        '<pre class="fx-diag" id="formula-diag">…</pre>' +
+        '<div class="fx-list">' +
+        '<button data-f="sin(3*x)*exp(-x^2/8)">sin(3x)·e^(−x²/8)</button>' +
+        '<button data-f="sin(x)/x">sin(x)/x</button>' +
+        '<button data-f="x*sin(1/x)">x·sin(1/x)</button>' +
+        '<button data-f="tan(x)">tan(x) 发散的画法</button>' +
+        '<button data-f="sqrt(x-2)">sqrt(x−2) 半段有值</button>' +
+        '<button data-f="sin(x">缺右括号（演示报错）</button>' +
+        '<button data-f="b*x">未定义变量（演示报错）</button>' +
+        '<button data-f="sin(0)">常量输出（演示警告）</button>' +
+        '</div>' +
+        '</section>' +
+        '<div class="dk-footer"><span>ice-chart · 表达式编译与采样全在本地完成</span>' +
+        '<span>写错公式不会让画布崩：错误与警告都从 expressionDiagnostics() 取</span></div>' +
+        '<div id="snapshot-panel"></div>';
+
+      // ---------------- 面板 ----------------
+      const overlay = ICEChart.createChart('overlay', {
+        ...BASE,
+        legend: { show: true },
+        xAxis: { type: 'value', name: 'x', min: -10, max: 10 },
+        yAxis: { name: 'y', min: -1.6, max: 1.6 },
+        series: [
+          { id: 'sinc', type: 'function', name: 'sin(x)/x', expression: 'sin(x)/x', domain: [-10, 10], lineWidth: 2, color: IDENTITY.accent },
+          { id: 'gauss', type: 'function', name: 'e^(−x²/6)', expression: 'exp(-x^2/6)', domain: [-10, 10], lineWidth: 2, color: '#38bdf8' },
+          { id: 'beat', type: 'function', name: 'x·sin(x)/4', expression: 'x*sin(x)/4', domain: [-10, 10], lineWidth: 1.6, color: '#f472b6' },
+          { id: 'sig', type: 'function', name: '1/(1+e^(−x))', expression: '1/(1+exp(-x))', domain: [-10, 10], lineWidth: 1.6, color: '#2ee6c5' },
+          { id: 'tanh', type: 'function', name: 'sin(2x)·e^(−|x|/4)', expression: 'sin(2*x)*exp(-abs(x)/4)', domain: [-10, 10], lineWidth: 1.6, color: '#fac858' },
+        ],
+      });
+
+      const sweepOption = {
+        ...BASE,
+        // nice: false —— 轴范围就是要它写的那两个数，别被「取整到好看的刻度」放大（放大后曲线会顶到边）
+        xAxis: { type: 'value', name: 'x', min: -2, max: 14, nice: false },
+        // 幅度 a 最大 2.2：留足余量，曲线任何时刻都不顶到画布边上（顶到边 = 看起来像越界）
+        yAxis: { name: 'y', min: -3.4, max: 3.4 },
+        series: [
+          {
+            id: 'damp',
+            type: 'function',
+            name: '阻尼振荡',
+            expression: 'a*exp(-b*x)*sin(c*x)',
+            params: { a: 1.6, b: 0.12, c: 2 },
+            domain: [-2, 14],
+            lineWidth: 2,
+            color: IDENTITY.accent,
+          },
+          {
+            id: 'envelope',
+            type: 'function',
+            name: '包络',
+            expression: 'a*exp(-b*x)',
+            params: { a: 1.6, b: 0.12 },
+            domain: [-2, 14],
+            lineWidth: 1.2,
+            color: '#4b4270',
+          },
+        ],
+      };
+      const sweep = ICEChart.createChart('sweep', sweepOption);
+
+      const lissajousOption = {
+        ...BASE,
+        aspect: 'equal',
+        xAxis: { type: 'value', name: 'x(t)', min: -1.2, max: 1.2 },
+        yAxis: { name: 'y(t)', min: -1.2, max: 1.2 },
+        series: [
+          {
+            id: 'lis',
+            type: 'parametric',
+            name: '李萨如',
+            xExpression: 'sin(a*t + d)',
+            yExpression: 'sin(b*t)',
+            params: { a: 3, b: 2, d: 0 },
+            domain: [0, Math.PI * 2],
+            samples: 480,
+            lineWidth: 2,
+            color: IDENTITY.accent,
+          },
+        ],
+      };
+      const lissajous = ICEChart.createChart('lissajous', lissajousOption);
+
+      const roseOption = {
+        ...BASE,
+        aspect: 'equal',
+        polarGrid: { splitNumber: 4, spokeCount: 12 },
+        xAxis: { type: 'value' },
+        yAxis: {},
+        series: [
+          {
+            id: 'rp',
+            type: 'parametric',
+            name: '玫瑰线',
+            polarExpression: 'cos(k*t)',
+            params: { k: 5 },
+            domain: [0, Math.PI * 2],
+            samples: 720,
+            lineWidth: 2,
+            color: '#f472b6',
+          },
+        ],
+      };
+      const rose = ICEChart.createChart('rose', roseOption);
+
+      const taylor = ICEChart.createChart('taylor', {
+        ...BASE,
+        legend: { show: true },
+        xAxis: { type: 'value', name: 'x', min: -8, max: 8 },
+        yAxis: { name: 'y', min: -2.4, max: 2.4 },
+        series: [
+          { id: 'sin', type: 'function', name: 'sin(x)', expression: 'sin(x)', domain: [-8, 8], lineWidth: 2, color: '#6b76a6' },
+          { id: 't3', type: 'function', name: 'x − x³/6', expression: 'x - x^3/6', domain: [-8, 8], lineWidth: 1.6, color: '#38bdf8' },
+          { id: 't5', type: 'function', name: '… + x⁵/120', expression: 'x - x^3/6 + x^5/120', domain: [-8, 8], lineWidth: 1.6, color: '#2ee6c5' },
+          { id: 't7', type: 'function', name: '… − x⁷/5040', expression: 'x - x^3/6 + x^5/120 - x^7/5040', domain: [-8, 8], lineWidth: 1.6, color: IDENTITY.accent },
+        ],
+      });
+
+      const packetOption = {
+        ...BASE,
+        xAxis: { type: 'value', name: 'x', min: -6, max: 6 },
+        yAxis: { name: 'y', min: -1.6, max: 1.6 },
+        series: [
+          {
+            id: 'pk',
+            type: 'function',
+            name: '波包',
+            expression: 'a*exp(-((x-b)^2)/w)*cos(6*x)',
+            params: { a: 1.2, b: 0, w: 2 },
+            domain: [-6, 6],
+            lineWidth: 2,
+            color: '#2ee6c5',
+          },
+          {
+            id: 'env',
+            type: 'function',
+            name: '包络',
+            expression: 'a*exp(-((x-b)^2)/w)',
+            params: { a: 1.2, b: 0, w: 2 },
+            domain: [-6, 6],
+            lineWidth: 1.2,
+            color: '#4b4270',
+          },
+        ],
+      };
+      const packet = ICEChart.createChart('packet', packetOption);
+
+      const family = ICEChart.createChart('family', {
+        ...BASE,
+        aspect: 'equal',
+        legend: { show: true },
+        xAxis: { type: 'value', name: 'x(t)' },
+        yAxis: { name: 'y(t)' },
+        series: [
+          // 三条曲线的量级要接近（同一张等比坐标里，谁大谁把别人压小）
+          { id: 'spiral', type: 'parametric', name: '螺线', xExpression: 't*cos(t)/6', yExpression: 't*sin(t)/6', domain: [0, Math.PI * 4], samples: 480, lineWidth: 1.8, color: '#38bdf8' },
+          { id: 'heart', type: 'parametric', name: '心形线', xExpression: 'sin(t)^3', yExpression: '(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/16', domain: [0, Math.PI * 2], samples: 480, lineWidth: 1.8, color: '#f472b6' },
+          { id: 'lisa34', type: 'parametric', name: '李萨如 3:4', xExpression: 'sin(3*t)', yExpression: 'sin(4*t)', domain: [0, Math.PI * 2], samples: 480, lineWidth: 1.8, color: IDENTITY.accent },
+        ],
+      });
+
+      // 采样密度：同一个公式画三遍。默认是**自适应细分**（按曲率补点），所以光把 samples 调小
+      // 看不出来差别 —— 前两条显式关掉 adaptive，才是真正的「均匀采样」：
+      // 9 个点画 6 个波峰，折角一眼可见；第三条用默认的自适应细分，最平滑。
+      const densityOption = {
+        ...BASE,
+        legend: { show: true },
+        xAxis: { type: 'value', name: 'x', min: -6, max: 6 },
+        yAxis: { name: 'y', min: -1.6, max: 1.6 },
+        series: [
+          { id: 'd1', type: 'function', name: '9 点 · 均匀', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 9, adaptive: false, lineWidth: 2.4, color: '#ff5b6a' },
+          { id: 'd2', type: 'function', name: '40 点 · 均匀', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 40, adaptive: false, lineWidth: 1.6, color: '#fac858' },
+          { id: 'd3', type: 'function', name: '自适应细分', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 40, lineWidth: 1.6, color: IDENTITY.accent },
+        ],
+      };
+      const density = ICEChart.createChart('density', densityOption);
+
+      // ---------------- 主循环：参数扫动 ----------------
+      const updateKpi = DashKit.kpiUpdater();
+      const state = { t: 0, cost: 0, diagnostics: 0, peak: 0 };
+      let sampleCost = 0;
+
+      const loop = DashKit.loop({
+        tick: () => {
+          state.t += 1;
+          const t = state.t;
+          if (t % 4 !== 0) return;
+          const started = performance.now();
+
+          // 参数扫动：改的是表达式里的参数，曲线原地变形（不是换一张图）
+          sweepOption.series[0].params = {
+            a: Number((1.6 + Math.sin(t / 90) * 0.6).toFixed(3)),
+            b: Number((0.12 + (Math.sin(t / 160) + 1) * 0.05).toFixed(4)),
+            c: Number((2 + Math.sin(t / 110) * 0.7).toFixed(3)),
+          };
+          sweepOption.series[1].params = { a: sweepOption.series[0].params.a, b: sweepOption.series[0].params.b };
+          sweep.setOption(sweepOption, { animate: false });
+
+          lissajousOption.series[0].params = {
+            a: Number((3 + Math.sin(t / 130) * 1.2).toFixed(3)),
+            b: Number((2 + Math.cos(t / 170) * 0.8).toFixed(3)),
+            d: Number((Math.sin(t / 200) * Math.PI).toFixed(4)),
+          };
+          lissajous.setOption(lissajousOption, { animate: false });
+
+          roseOption.series[0].params = { k: Number((5 + Math.sin(t / 210) * 3).toFixed(3)) };
+          rose.setOption(roseOption, { animate: false });
+
+          packetOption.series[0].params = {
+            a: 1.2,
+            b: Number((Math.sin(t / 230) * 3.2).toFixed(3)),
+            w: Number((1 + (Math.sin(t / 150) + 1) * 0.9).toFixed(3)),
+          };
+          packetOption.series[1].params = { ...packetOption.series[0].params };
+          packet.setOption(packetOption, { animate: false });
+
+          state.cost = performance.now() - started;
+          sampleCost = sampleCost * 0.8 + state.cost * 0.2;
+          // 合成波峰值（阻尼振荡在当前参数下的极值）：每 32 帧量一次，避免每帧全量扫描
+          if (t % 32 === 0) {
+            let peak = 0;
+            const p = sweepOption.series[0].params;
+            for (let x = -2; x <= 14; x += 0.02) peak = Math.max(peak, p.a * Math.exp(-p.b * x) * Math.abs(Math.sin(p.c * x)));
+            state.peak = peak;
+          }
+          updateKpi('kpi-cost', sampleCost, `${sampleCost.toFixed(2)}<small>ms</small>`);
+          updateKpi('kpi-extreme', state.peak, `${state.peak.toFixed(3)}`);
+          $('pill-cost').textContent = `${sampleCost.toFixed(2)} ms`;
+        },
+        onFrame: () => {
+          $('pill-clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        },
+      });
+
+      $('btn-toggle').addEventListener('click', (event) => {
+        event.target.textContent = loop.toggle() ? '暂停扫动' : '继续扫动';
+      });
+
+      // ---------------- 表达式输入 + 诊断 ----------------
+      const DIAG_HINT = '写错公式画布不会崩：曲线自动消失，错误从 expressionDiagnostics() 取。';
+      const formulaState = $('formula-state');
+      const formulaDiag = $('formula-diag');
+
+      function renderDiagnostics(expression) {
+        // 三张密度面板共用同一个公式：错误也只需要报一次
+        densityOption.series.forEach((s) => (s.expression = expression));
+        density.setOption(densityOption, { animate: false });
+
+        const items = density.expressionDiagnostics();
+        const lines = [];
+        let errors = 0;
+        let warnings = 0;
+        for (const entry of items) {
+          for (const d of entry.diagnostics) {
+            const label = d.severity === 'error' ? '错误' : '警告';
+            if (d.severity === 'error') errors += 1;
+            else warnings += 1;
+            const tag = d.severity === 'error' ? `<b>[${label}]</b>` : `<i>[${label}]</i>`;
+            const at = d.position === undefined ? '' : ` (第 ${d.position} 个字符)`;
+            lines.push(`${tag} ${entry.seriesId}${at}  ${d.message}`);
+          }
+        }
+        const input = $('formula');
+        input.className = 'fx-input' + (errors ? ' invalid' : warnings ? ' warned' : '');
+        formulaState.className = 'fx-state' + (errors ? ' invalid' : warnings ? ' warned' : '');
+        formulaState.textContent = errors ? `✗ ${errors} 个错误` : warnings ? `! ${warnings} 个警告` : '✓ 语法正确';
+        state.diagnostics = errors + warnings;
+        $('pill-diag').textContent = `诊断 ${state.diagnostics}`;
+        $('pill-diag').className = `dk-pill ${errors ? 'danger' : warnings ? '' : 'ok'}`;
+        updateKpi('kpi-diag', state.diagnostics, `${state.diagnostics}<small>条</small>`, true);
+
+        const samples = densityOption.series.map((s) => s.samples).reduce((a, b) => a + b, 0);
+        const mode = densityOption.series.map((s) => `${s.samples} 点${s.adaptive === false ? '（均匀）' : '（自适应）'}`).join(' / ');
+        const header = `f(x) = ${expression}\n采样：${mode}，基础点合计 ${samples}\n`;
+        formulaDiag.innerHTML = errors || warnings ? header + lines.join('\n') : header + `<em>${DIAG_HINT}</em>`;
+      }
+
+      $('formula').addEventListener('input', (event) => renderDiagnostics(event.target.value));
+      document.querySelectorAll('.fx-list button').forEach((button) => {
+        button.addEventListener('click', () => {
+          $('formula').value = button.dataset.f;
+          renderDiagnostics(button.dataset.f);
+        });
+      });
+      renderDiagnostics($('formula').value);
+
+      // 曲线数与采样点数是**真数**（从各图的 option 里数出来），不是写死的文案
+      const curveCharts = [overlay, sweep, lissajous, rose, taylor, packet, family, density];
+      let curveCount = 0;
+      let sampleTotal = 0;
+      for (const chart of curveCharts) {
+        for (const series of chart.option.series || []) {
+          if (series.type !== 'function' && series.type !== 'parametric') continue;
+          curveCount += 1;
+          const declared = Number(series.samples);
+          sampleTotal += declared > 0 ? declared : series.type === 'function' ? 240 : 360;
+        }
+      }
+      updateKpi('kpi-curves', curveCount, `${curveCount}<small>条</small>`);
+      updateKpi('kpi-samples', sampleTotal, `${sampleTotal}<small>个</small>`);
+
+      DashKit.wire({
+        main: overlay,
+        charts: { overlay, sweep, lissajous, rose, taylor, packet, family, density },
+      });
+    </script>
+  </body>
+</html>
