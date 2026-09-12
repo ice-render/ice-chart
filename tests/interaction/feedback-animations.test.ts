@@ -177,6 +177,7 @@ describe('交互反馈动画', () => {
   it('准星平滑跟随：绘制位置逐帧逼近目标列，pixelX 始终是目标值', async () => {
     const c = await mount({
       ...BAR_OPTION,
+      animation: { enter: { duration: 60 }, update: { duration: 600, easing: 'linear' } },
       tooltip: { trigger: 'axis' },
       crosshair: { show: true, axis: 'x', showAxisLabel: true },
     } as ChartOption);
@@ -190,12 +191,14 @@ describe('交互反馈动画', () => {
     await c.render();
     const target = c.seriesComponents[0].pixelAt(4)![0] + c.layout.plot.x;
     expect(crosshair.pixelX).toBeCloseTo(target, 3);
+    // 跟随中：等在中间某个位置采样（时长接到 animation.update.duration = 600ms，采样点稳定）
+    await wait(150);
+    await c.render();
     const drawn = crosshair.state.axisX as number;
-    // 从旧位置出发、还没到新位置
     expect(drawn).toBeGreaterThan(first);
     expect(drawn).toBeLessThan(target);
 
-    await wait(300);
+    await wait(600);
     await c.render();
     expect(crosshair.state.axisX as number).toBeCloseTo(target, 1);
   });

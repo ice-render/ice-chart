@@ -1,11 +1,26 @@
 import { ChartComponent } from './ChartComponent';
 import type { ChartTheme } from '../types';
 import type { AxisLayout, ChartLayout, InternalAxis } from '../internal';
+import type { Rect } from '../internal';
 import { formatTick } from '../scale';
 import { measureTextWidth } from '../util/text';
+import { shouldAnimate } from '../animation/motion';
 
 const TICK_LENGTH = 4;
 const LABEL_GAP = 6;
+/** 刻度平滑过渡时长：缩放 / 平移 / 数据更新时，标签滑动到新位置而不是瞬间跳。 */
+export const AXIS_MORPH_DURATION = 240;
+
+interface AxisTickMark {
+  /** 刻度值（字符串化）：跨帧匹配用，位置变了但值没变的刻度就是「同一根刻度」。 */
+  key: string;
+  /** 主轴方向的像素位置：x 轴是 x，y 轴是 y。 */
+  pos: number;
+  /** 格式化后的标签文本。 */
+  label: string;
+  /** 抽稀之后是否真的画标签（抽掉的刻度仍然画刻度线）。 */
+  drawn: boolean;
+}
 
 /**
  * 坐标轴（x / y 共用一套绘制逻辑）。
@@ -24,6 +39,9 @@ export class Axis extends ChartComponent {
   public axis: InternalAxis | null = null;
   public layout: ChartLayout | null = null;
   public theme: ChartTheme | null = null;
+  /** 上一次同步的刻度（含像素位置），用于检测变化并作为过渡起点。 */
+  private lastTicks: AxisTickMark[] = [];
+  private morphFrom: AxisTickMark[] = [];
 
   constructor(props: {
     orientation: 'x' | 'y';
@@ -46,6 +64,164 @@ export class Axis extends ChartComponent {
     return this.position === 'left' ? plot.x - offset : plot.x + plot.width + offset;
   }
 
+  private axisLayoutOf(layout: ChartLayout): AxisLayout {
+    return this.orientation === 'x'
+      ? layout.xAxisLayout
+      : layout.yAxes[this.axisIndex] || layout.yAxisLayout;
+  }
+
+  /** 当前刻度 + 目标位置 + 标签（抽稀规则与绘制时完全一致，两边共用这一份）。 */
+  private tickEntries(): AxisTickMark[] | null {
+    const axis = this.axis;
+    const layout = this.layout;
+    if (!axis || !layout || !axis.scale) return null;
+    const option: any = axis.option || {};
+    const scale = axis.scale;
+    const plot = layout.plot;
+    const axisLayout = this.axisLayoutOf(layout);
+    const ticks = axisLayout.ticks;
+    const fontSize = this.theme ? this.theme.fontSize : 12;
+    const fontFamily = this.theme ? this.theme.fontFamily : 'sans-serif';
+
+    // 标签抽稀：类目多的时候逐类目画标签会糊成一片，按可用宽度跳着画
+    let labelStride = 1;
+    if (this.orientation === 'x' && ticks.length > 1) {
+      let maxLabel = 0;
+      for (const text of axisLayout.labels) {
+        const w = measureTextWidth(this.ctx, text, fontSize, fontFamily);
+        if (w > maxLabel) maxLabel = w;
+      }
+      const slot = plot.width / ticks.length;
+      if (maxLabel + 8 > slot) labelStride = Math.ceil((maxLabel + 8) / Math.max(1, slot));
+    }
+
+    const marks: AxisTickMark[] = [];
+    for (let i = 0; i < ticks.length; i++) {
+      const mapped = scale.map(ticks[i]);
+      const pos = this.orientation === 'x' ? plot.x + mapped : plot.y + mapped;
+      if (!isFinite(pos)) continue;
+      const label = formatTick(ticks[i], scale, i, option.formatter) || '';
+      const isLast = i === ticks.length - 1;
+      const drawn = !!label && !(labelStride > 1 && i % labelStride !== 0 && !isLast);
+      marks.push({ key: String(ticks[i]), pos, label, drawn });
+    }
+    return marks;
+  }
+
+  /** 过渡进度（0~1）；没有动画时恒为 1。 */
+  private morphProgress(): number {
+    const value = Number(this.state.axisMorph);
+    return isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+  }
+
+  /** 每个刻度「此刻画在哪」：过渡中会取中间位置。 */
+  private renderedPositions(): Map<string, number> {
+    const t = this.morphProgress();
+    const out = new Map<string, number>();
+    for (const tick of this.lastTicks) {
+      const from = this.morphFrom.find((mark) => mark.key === tick.key);
+      out.set(tick.key, from ? from.pos + (tick.pos - from.pos) * t : tick.pos);
+    }
+    return out;
+  }
+
+  /**
+   * 同步刻度并（在必要时）启动一次平滑过渡。
+   *
+   * 由 ICEChart 在 `layout` / `axis` 赋值之后调用。判断完全基于「刻度集合有没有变」，
+   * 所以缩放、平移、数据更新、图例切换、resize 都能自动覆盖，不需要调用方传意图。
+   *
+   * 过渡中的再次变化从**当前渲染位置**接着走（等价于指数平滑），
+   * 连续滚轮缩放时不会出现「每次事件都从旧位置重新跳」的抖动。
+   */
+  public syncTicks(): void {
+    const next = this.tickEntries();
+    if (!next) return;
+    const same =
+      next.length === this.lastTicks.length &&
+      next.every((tick, i) => tick.key === this.lastTicks[i].key && Math.abs(tick.pos - this.lastTicks[i].pos) < 0.01);
+    if (same) return;
+    const firstSync = this.lastTicks.length === 0;
+    const rendered = this.renderedPositions();
+    this.morphFrom = this.lastTicks.map((tick) => ({
+      ...tick,
+      pos: rendered.get(tick.key) ?? tick.pos,
+    }));
+    this.lastTicks = next;
+    this.setState({ axisMorph: 0 });
+    if (firstSync || !shouldAnimate()) {
+      this.setState({ axisMorph: 1 });
+      this.markDirty();
+      return;
+    }
+    // props.animations 的默认值是引擎共享的冻结对象：复制后整体替换（踩过的坑）
+    const animations: any = { ...((this.props as any).animations || {}) };
+    animations.axisMorph = {
+      from: 0,
+      to: 1,
+      duration: AXIS_MORPH_DURATION,
+      easing: 'easeOutCubic',
+      startTime: undefined,
+      finished: false,
+    };
+    (this.props as any).animations = animations;
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.add(this);
+    this.markDirty();
+  }
+
+  /** 某个刻度当前的渲染位置（过渡中间态）。测试 / 审计用。 */
+  public renderedTickPos(value: any): number | null {
+    const key = String(value);
+    const from = this.morphFrom.find((mark) => mark.key === key);
+    const to = this.lastTicks.find((mark) => mark.key === key);
+    if (from && to) return from.pos + (to.pos - from.pos) * this.morphProgress();
+    if (to) return to.pos;
+    if (from) return from.pos;
+    return null;
+  }
+
+  /** 位置是否还在过渡中（测试 / 审计用）。 */
+  public morphing(): boolean {
+    return this.morphProgress() < 1;
+  }
+
+  private drawTick(pos: number, plot: Rect, edgeX: number, unit: number, option: any): void {
+    if (option.showTick === false) return;
+    const ctx = this.ctx;
+    ctx.beginPath();
+    if (this.orientation === 'x') {
+      ctx.moveTo(pos, plot.y + plot.height);
+      ctx.lineTo(pos, plot.y + plot.height + TICK_LENGTH * unit);
+    } else {
+      const direction = this.position === 'left' ? -1 : 1;
+      ctx.moveTo(edgeX, pos);
+      ctx.lineTo(edgeX + direction * TICK_LENGTH * unit, pos);
+    }
+    ctx.stroke();
+  }
+
+  private drawTickLabel(pos: number, label: string, plot: Rect, edgeX: number, tickGap: number, option: any): void {
+    if (!label) return;
+    const ctx = this.ctx;
+    if (this.orientation === 'x') {
+      const labelY = plot.y + plot.height + tickGap;
+      if (option.labelRotate) {
+        ctx.save();
+        ctx.translate(pos, labelY);
+        ctx.rotate((Number(option.labelRotate) * Math.PI) / 180);
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      } else {
+        ctx.fillText(label, pos, labelY);
+      }
+      return;
+    }
+    const direction = this.position === 'left' ? -1 : 1;
+    ctx.fillText(label, edgeX + direction * tickGap, pos);
+  }
+
   protected doRender(): void {
     if (!this.axis || !this.layout || !this.theme) return;
     const option = this.axis.option;
@@ -55,7 +231,6 @@ export class Axis extends ChartComponent {
     const plot = this.layout.plot;
     const axisLayout =
       this.orientation === 'x' ? this.layout.xAxisLayout : this.layout.yAxes[this.axisIndex] || this.layout.yAxisLayout;
-    const ticks = axisLayout.ticks;
     const ctx = this.ctx;
     const fontSize = this.theme.fontSize;
     const unit = this.unit();
@@ -85,57 +260,35 @@ export class Axis extends ChartComponent {
       ctx.stroke();
     }
 
+    // 刻度的平滑过渡：保留的刻度从旧位置滑到新位置，新出现的淡入，消失的淡出。
     const direction = this.position === 'left' ? -1 : 1;
-    // 标签抽稀：类目多的时候逐类目画标签会糊成一片，这里按可用宽度跳着画
-    let labelStride = 1;
-    if (this.orientation === 'x' && ticks.length > 1) {
-      const fontFamily = this.theme.fontFamily;
-      let maxLabel = 0;
-      for (const text of axisLayout.labels) {
-        const w = measureTextWidth(this.ctx, text, fontSize, fontFamily);
-        if (w > maxLabel) maxLabel = w;
+    const entries = this.tickEntries() || [];
+    const t = this.morphProgress();
+    const fromPos = new Map<string, number>();
+    for (const mark of this.morphFrom) fromPos.set(mark.key, mark.pos);
+    const liveKeys = new Set(entries.map((entry) => entry.key));
+
+    if (t < 1) {
+      // 已经不在刻度集合里的刻度：原地淡出（缩放时标签整体换一批，这条让过渡不「硬切」）
+      ctx.fillStyle = this.theme.axisLabelColor;
+      ctx.globalAlpha = (1 - t) * (1 - t);
+      for (const mark of this.morphFrom) {
+        if (liveKeys.has(mark.key) || !mark.drawn) continue;
+        this.drawTick(mark.pos, plot, edgeX, unit, option);
+        this.drawTickLabel(mark.pos, mark.label, plot, edgeX, tickGap, option);
       }
-      const slot = plot.width / ticks.length;
-      if (maxLabel + 8 > slot) labelStride = Math.ceil((maxLabel + 8) / Math.max(1, slot));
+      ctx.globalAlpha = 1;
     }
-    for (let i = 0; i < ticks.length; i++) {
-      const label = formatTick(ticks[i], scale, i, option.formatter);
-      if (this.orientation === 'x') {
-        const x = this.snap(plot.x + scale.map(ticks[i]));
-        if (!isFinite(x)) continue;
-        if (option.showTick !== false) {
-          ctx.beginPath();
-          ctx.moveTo(x, plot.y + plot.height);
-          ctx.lineTo(x, plot.y + plot.height + TICK_LENGTH * unit);
-          ctx.stroke();
-        }
-        if (!label) continue;
-        const isLast = i === ticks.length - 1;
-        if (labelStride > 1 && i % labelStride !== 0 && !isLast) continue;
-        const labelY = plot.y + plot.height + tickGap;
-        if (option.labelRotate) {
-          ctx.save();
-          ctx.translate(x, labelY);
-          ctx.rotate((Number(option.labelRotate) * Math.PI) / 180);
-          ctx.textAlign = 'right';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(label, 0, 0);
-          ctx.restore();
-        } else {
-          ctx.fillText(label, x, labelY);
-        }
-      } else {
-        const y = this.snap(plot.y + scale.map(ticks[i]));
-        if (!isFinite(y)) continue;
-        if (option.showTick !== false) {
-          ctx.beginPath();
-          ctx.moveTo(edgeX, y);
-          ctx.lineTo(edgeX + direction * TICK_LENGTH * unit, y);
-          ctx.stroke();
-        }
-        if (label) ctx.fillText(label, edgeX + direction * tickGap, y);
-      }
+
+    for (const entry of entries) {
+      const start = fromPos.get(entry.key);
+      const pos = start === undefined ? entry.pos : start + (entry.pos - start) * t;
+      // 新出现的刻度淡入；一直在的刻度保持不透明（只滑动）
+      ctx.globalAlpha = start === undefined ? Math.min(1, 0.15 + 0.85 * t) : 1;
+      this.drawTick(pos, plot, edgeX, unit, option);
+      if (entry.drawn) this.drawTickLabel(pos, entry.label, plot, edgeX, tickGap, option);
     }
+    ctx.globalAlpha = 1;
 
     if (option.name) {
       this.setFont(fontSize, this.theme.fontFamily);

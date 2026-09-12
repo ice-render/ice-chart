@@ -152,6 +152,16 @@ npm run audit:interactions -- ./.audit
   就会横在柱子中间（看着像接缝）。描边一律取「终态绘制矩形」并与绘图区求交。
 - **入场动画只在 `enter` 阶段做「画出来」这类形态**：`isEntering()` 判断。
   更新阶段截断折线会变成「重画」而不是「折点动起来」。
+- **坐标轴 / 网格线的过渡必须共享同一份渲染位置**：刻度位置由 `Axis` 算（`renderedTickPos`），
+  网格线**读坐标轴**而不是自己重算 `scale.map()` —— 否则动画期间标签在滑、网格线在跳。
+  网格自己不产生位移，只需要一条等长的补间当「脏驱动」（`GridLines.syncTicks()`）。
+  判断「要不要过渡」只看刻度集合有没有变，缩放 / 平移 / 数据更新 / resize 都自动覆盖。
+- **对同一批刻度做过渡时，插值「起点 + 扫过角」，不要分别插值两个端点**：
+  饼图隐藏扇区时端点各自走最短路径，会让扇形中途先变宽再收拢（看起来像抖了一下）。
+- **显隐切换现在是动画而不是瞬跳**：`toggleSeries` / `toggleSlice` 传 `animate: true`，
+  新类型的显隐重排要按同一节奏接上（饼图用 `sliceFrom`、漏斗用 `stageFrom`，都按数据下标对齐）。
+- **`finishAnimations()` 要收尾所有补间组件**（系列 / 坐标轴 / 网格 / 准星 / 提示框）：
+  只收系列的话，截图与「动效偏好 = instant」会拍到半路状态。
 - **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。
   `ICEChart.domainTransition` + `stepDomainTransition()` 每帧按系列进度插值数据域；
   过渡期间同步组件必须传 `preserveAnimation=true`（只换 series 引用，不清 `fromEffective`），

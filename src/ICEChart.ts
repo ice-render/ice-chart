@@ -289,7 +289,8 @@ export class ICEChart {
     const currentlyHidden = !!this.hiddenIds[seriesId];
     const nextHidden = forceSelected === undefined ? !currentlyHidden : !forceSelected;
     this.hiddenIds[seriesId] = nextHidden;
-    this.applyOption(this.option, { animate: false, preserveView: true });
+    // 动画更新：数值域跟着过渡（隐藏最大值那一条时，其它系列平滑缩放而不是瞬跳）
+    this.applyOption(this.option, { animate: true, preserveView: true });
     this.emit('legend:toggle', {
       seriesId,
       seriesName: series.name,
@@ -316,7 +317,8 @@ export class ICEChart {
     const nextHidden = forceSelected === undefined ? !currentlyHidden : !forceSelected;
     this.hiddenSlices[key] = nextHidden;
     const point = series.points[dataIndex];
-    this.applyOption(this.option, { animate: false, preserveView: true });
+    // 动画更新：其余扇区/阶段平滑挪位（被隐藏的那个收拢到 0 再消失）
+    this.applyOption(this.option, { animate: true, preserveView: true });
     this.emit('legend:toggle', {
       seriesId,
       seriesName: (point && point.name) || `${series.name} ${dataIndex + 1}`,
@@ -797,7 +799,7 @@ export class ICEChart {
     this.grid.horizontal = norm.yAxes
       .map((axis, index) => ({ axis, axisLayout: layout.yAxes[index], index }))
       .filter((item) => (item.axis.option.showGrid === undefined ? item.index === 0 : item.axis.option.showGrid !== false))
-      .map((item) => ({ scale: item.axis.scale as Scale, ticks: item.axisLayout.ticks }));
+      .map((item) => ({ scale: item.axis.scale as Scale, ticks: item.axisLayout.ticks, index: item.index }));
     this.grid.plot = plot;
     this.grid.grid = norm.option.grid || {};
     this.grid.theme = theme;
@@ -829,6 +831,8 @@ export class ICEChart {
       axisComponent.axis = norm.yAxes[i] || norm.yAxis;
       axisComponent.axisIndex = i;
       axisComponent.position = (norm.yAxes[i] && norm.yAxes[i].position) || 'left';
+      // 刻度变了就滑过去（缩放 / 平移 / 数据更新 / resize 都走这一条）
+      axisComponent.syncTicks();
       axisComponent.markDirty();
     }
     {
@@ -837,8 +841,13 @@ export class ICEChart {
       axis.layout = layout;
       axis.theme = theme;
       axis.axis = norm.xAxis;
+      axis.syncTicks();
       axis.markDirty();
     }
+    // 网格线要和刻度用同一条时间线：位置从坐标轴读，重绘由自己的补间驱动
+    this.grid.axisX = this.axisX;
+    this.grid.axisYList = this.axisYList;
+    this.grid.syncTicks();
 
     if (this.legend) {
       this.legend.setState({ width: canvas.width, height: canvas.height });
@@ -863,6 +872,10 @@ export class ICEChart {
     if (this.crosshair) {
       this.crosshair.layout = layout;
       this.crosshair.option = norm.option.crosshair || {};
+      // 准星跟随的时长跟「更新动画」走：同一张图里所有过渡的手感应该一致
+      const stages: any = norm.option.animation;
+      const update = stages && stages.enabled !== false ? stages.update : null;
+      this.crosshair.followDuration = Math.max(60, Number(update && update.duration) || 140);
     }
     if (this.crosshair) this.crosshair.setState({ display: !isPolar });
     if (this.brushComponent) {
@@ -1117,7 +1130,11 @@ export class ICEChart {
   public finishAnimations(): this {
     this.domainTransition = null;
     this.stopDomainTransition();
-    for (const component of this.seriesComponents) {
+    // 系列之外还有坐标轴刻度过渡 / 提示框 / 准星这些独立补间，一并收尾，
+    // 否则截图和「瞬时模式」下还会看到它们在半路上。
+    const animated: any[] = [...this.seriesComponents, this.axisX, ...this.axisYList, this.grid, this.tooltip, this.crosshair];
+    for (const component of animated) {
+      if (!component) continue;
       // 必须同时取消引擎里的补间：只把 progress 置 1 的话，下一帧引擎又会把它写回去
       const animations: any = (component.props as any).animations;
       if (animations) {
@@ -1126,6 +1143,9 @@ export class ICEChart {
         }
       }
       if (this.ice.animationManager) this.ice.animationManager.remove(component);
+      if (component.props && component.props.animations && component.props.animations.axisMorph) {
+        component.setState({ axisMorph: 1 });
+      }
       if (Number(component.state.progress) < 1) component.setState({ progress: 1 });
       component.markDirty();
     }

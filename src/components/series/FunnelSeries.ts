@@ -32,6 +32,17 @@ export class FunnelSeries extends SeriesBase {
   private stageGeom: Array<StageGeom | null> = [];
   private stageRects: Array<Rect | null> = [];
   private funnelKey = '';
+  /** 阶段显隐切换时的起点几何（按数据下标对齐）：其余阶段「挪过去」而不是跳过去。 */
+  private stageFrom: Array<StageGeom | null> | null = null;
+
+  public setHiddenSlices(indexes: number[]): this {
+    if (indexes.join(',') !== this.hiddenSlices.join(',') && this.stageGeom.length) {
+      this.stageFrom = this.stageGeom.map((geom) => (geom ? { ...geom } : null));
+    }
+    super.setHiddenSlices(indexes);
+    this.funnelKey = '';
+    return this;
+  }
 
   public setCoord(coord: any): this {
     this.funnel = (coord || null) as FunnelSeriesCoord | null;
@@ -122,8 +133,37 @@ export class FunnelSeries extends SeriesBase {
       this.pixels[index * 2] = cx;
       this.pixels[index * 2 + 1] = (y0 + y1) / 2;
     }
+    this.blendStageMorph();
     this.xMonotonic = false;
     this.renderIndices = null;
+  }
+
+  /**
+   * 阶段显隐切换的过渡：从旧几何插值到新几何，阶段的高度与宽度一起变化。
+   * 被隐藏的阶段直接不再绘制（它已经从 `visible` 里移除）。
+   */
+  private blendStageMorph(): void {
+    const from = this.stageFrom;
+    if (!from || this.isEntering()) return;
+    const t = Math.max(0, Math.min(1, this.progress()));
+    if (t >= 1) {
+      this.stageFrom = null;
+      return;
+    }
+    for (let i = 0; i < this.stageGeom.length; i++) {
+      const target = this.stageGeom[i];
+      const start = from[i];
+      if (!target || !start) continue;
+      const lerp = (a: number, b: number) => a + (b - a) * t;
+      target.y0 = lerp(start.y0, target.y0);
+      target.y1 = lerp(start.y1, target.y1);
+      target.topWidth = lerp(start.topWidth, target.topWidth);
+      target.bottomWidth = lerp(start.bottomWidth, target.bottomWidth);
+      const halfMax = Math.max(target.topWidth, target.bottomWidth) / 2;
+      this.stageRects[i] = { x: target.cx - halfMax, y: target.y0, width: halfMax * 2, height: target.y1 - target.y0 };
+      this.pixels[i * 2] = target.cx;
+      this.pixels[i * 2 + 1] = (target.y0 + target.y1) / 2;
+    }
   }
 
   public hitTestIndex(localX: number, localY: number): number {

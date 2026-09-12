@@ -14,6 +14,8 @@ export class Crosshair extends ChartComponent {
   public yLabel = '';
   /** 最近一次绘制的轴数值标签矩形（图表坐标系），供外观审计 / 测试断言使用。 */
   public lastChipRects: Array<{ x: number; y: number; width: number; height: number }> = [];
+  /** 换列时的跟随时长（毫秒）：由图表按 `animation.update.duration` 下发。 */
+  public followDuration = 110;
 
   constructor(props: { width: number; height: number; zIndex?: number }) {
     super({ interactive: false, ...props });
@@ -61,9 +63,10 @@ export class Crosshair extends ChartComponent {
     // 直接往上面挂字段会抛 "Cannot add property ... object is not extensible"。
     // 必须先复制成新对象，再整体替换（这条在 jsdom 的 instant 模式下测不出来，只有真动画才暴露）。
     const animations: any = { ...((this.props as any).animations || {}) };
-    animations.axisX = { from: currentX, to: x, duration: 110, easing: 'easeOutCubic', startTime: undefined, finished: false };
+    const duration = Math.max(40, Number(this.followDuration) || 110);
+    animations.axisX = { from: currentX, to: x, duration, easing: 'easeOutCubic', startTime: undefined, finished: false };
     if (currentY !== null && y !== null) {
-      animations.axisY = { from: currentY, to: y, duration: 110, easing: 'easeOutCubic', startTime: undefined, finished: false };
+      animations.axisY = { from: currentY, to: y, duration, easing: 'easeOutCubic', startTime: undefined, finished: false };
     }
     (this.props as any).animations = animations;
     if (this.ice && this.ice.animationManager) this.ice.animationManager.add(this);

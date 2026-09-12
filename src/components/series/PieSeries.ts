@@ -16,6 +16,13 @@ function normalizeAngle(value: number): number {
   return ((value % TAU) + TAU) % TAU;
 }
 
+/** 从 a 到 b 的最短角度差（结果落在 (-π, π]）。 */
+function shortestAngleDelta(a: number, b: number): number {
+  let delta = normalizeAngle(b - a);
+  if (delta > Math.PI) delta -= TAU;
+  return delta;
+}
+
 /**
  * 饼图 / 玫瑰图。
  *
@@ -28,6 +35,8 @@ export class PieSeries extends SeriesBase {
   /** 每个扇区 [a0, a1, r0, r1]，本地坐标空间。 */
   private slices = new Float64Array(0);
   private pieCacheKey = '';
+  /** 图例切换扇区显隐时的起点几何（按下标对齐）：隐藏一个扇区，其余扇区「挪过去」而不是跳过去。 */
+  private sliceFrom: Float64Array | null = null;
 
   public setCoord(coord: any): this {
     this.polar = (coord || null) as PolarSeriesCoord | null;
@@ -36,6 +45,10 @@ export class PieSeries extends SeriesBase {
   }
 
   public setHiddenSlices(indexes: number[]): this {
+    // 只有显隐真的变了才记起点：syncComponents 每轮都会调这个方法
+    if (indexes.join(',') !== this.hiddenSlices.join(',') && this.slices.length) {
+      this.sliceFrom = new Float64Array(this.slices);
+    }
     super.setHiddenSlices(indexes);
     this.pieCacheKey = '';
     return this;
@@ -118,17 +131,58 @@ export class PieSeries extends SeriesBase {
       this.slices[i * 4 + 1] = a1;
       this.slices[i * 4 + 2] = inner;
       this.slices[i * 4 + 3] = outer;
-
-      if (sweep <= 1e-9) {
-        this.pixels[i * 2] = NaN;
-        this.pixels[i * 2 + 1] = NaN;
-        continue;
-      }
-      const mid = (a0 + a1) / 2;
-      const centroidRadius = inner + (outer - inner) * 0.6;
-      this.pixels[i * 2] = cx + Math.cos(mid) * centroidRadius;
-      this.pixels[i * 2 + 1] = cy + Math.sin(mid) * centroidRadius;
     }
+
+    this.blendSliceMorph(this.isEntering());
+    for (let i = 0; i < n; i++) this.writeCentroid(i, cx, cy);
+  }
+
+  /**
+   * 显隐切换的过渡：从 `sliceFrom` 插值到新几何。
+   *
+   * 角度按**最短方向**走（跨 2π 的扇区不会绕一整圈），半径线性。
+   * 被隐藏的扇区因此是「收拢到 0 再消失」，其余扇区平滑挪到新位置。
+   */
+  private blendSliceMorph(entering: boolean): void {
+    const from = this.sliceFrom;
+    if (!from || entering || from.length < this.slices.length) return;
+    const t = Math.max(0, Math.min(1, this.progress()));
+    if (t >= 1) {
+      this.sliceFrom = null;
+      return;
+    }
+    for (let i = 0; i < this.slices.length / 4; i++) {
+      // 起点角按最短方向走；扫过角（带方向）单独插值 ——
+      // 直接插值两个端点会让被隐藏的扇形在中途「先变宽再收拢」，看起来像抖了一下。
+      const startA = from[i * 4];
+      const startB = this.slices[i * 4];
+      const a0 = startA + shortestAngleDelta(startA, startB) * t;
+      const sweepFrom = from[i * 4 + 1] - startA;
+      const sweepTo = this.slices[i * 4 + 1] - startB;
+      this.slices[i * 4] = a0;
+      this.slices[i * 4 + 1] = a0 + sweepFrom + (sweepTo - sweepFrom) * t;
+      for (const k of [2, 3]) {
+        const a = from[i * 4 + k];
+        this.slices[i * 4 + k] = a + (this.slices[i * 4 + k] - a) * t;
+      }
+    }
+  }
+
+  /** 扇形质心写进像素缓存（命中与高亮锚点共用的那一份几何）。 */
+  private writeCentroid(index: number, cx: number, cy: number): void {
+    const a0 = this.slices[index * 4];
+    const a1 = this.slices[index * 4 + 1];
+    const inner = this.slices[index * 4 + 2];
+    const outer = this.slices[index * 4 + 3];
+    if (Math.abs(a1 - a0) <= 1e-9) {
+      this.pixels[index * 2] = NaN;
+      this.pixels[index * 2 + 1] = NaN;
+      return;
+    }
+    const mid = (a0 + a1) / 2;
+    const centroidRadius = inner + (outer - inner) * 0.6;
+    this.pixels[index * 2] = cx + Math.cos(mid) * centroidRadius;
+    this.pixels[index * 2 + 1] = cy + Math.sin(mid) * centroidRadius;
   }
 
   public hitTestIndex(localX: number, localY: number): number {
