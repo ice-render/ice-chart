@@ -17,4 +17,6 @@ export { GaugeSeries } from './GaugeSeries';
 export type { GaugeSeriesCoord } from './GaugeSeries';
 export { BoxplotSeries } from './BoxplotSeries';
 export { WaterfallSeries } from './WaterfallSeries';
+export { TreemapSeries } from './TreemapSeries';
+export type { TreemapSeriesCoord } from './TreemapSeries';
 export { BarSeries } from './BarSeries';

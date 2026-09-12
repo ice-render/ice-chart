@@ -24,7 +24,18 @@ export type SeriesType =
   | 'funnel'
   | 'gauge'
   | 'boxplot'
-  | 'waterfall';
+  | 'waterfall'
+  | 'treemap';
+
+/** 矩形树图配置。 */
+export interface TreemapOption {
+  /** 同级节点之间的间距（像素），默认 2。 */
+  gap?: number;
+  /** 只显示面积占比大于该值的标签，默认 0.02。 */
+  minLabelRatio?: number;
+  /** 子节点颜色与白色混合的比例（按 depth 递增），默认 0.18。 */
+  depthFade?: number;
+}
 
 /** 瀑布图配置。 */
 export interface WaterfallOption {
@@ -356,6 +367,8 @@ export interface ChartOption {
   gauge?: GaugeOption;
   /** 瀑布图配置。 */
   waterfall?: WaterfallOption;
+  /** 矩形树图配置。 */
+  treemap?: TreemapOption;
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;

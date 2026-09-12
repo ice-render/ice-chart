@@ -94,7 +94,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' = series.some((s) => s.type === 'pie')
+  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'treemap' = series.some((s) => s.type === 'pie')
     ? 'polar'
     : series.some((s) => s.type === 'radar')
       ? 'radar'
@@ -104,10 +104,13 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
           ? 'funnel'
           : series.some((s) => s.type === 'gauge')
             ? 'gauge'
-            : 'cartesian';
+            : series.some((s) => s.type === 'treemap')
+              ? 'treemap'
+              : 'cartesian';
   const sankey = kind === 'sankey' ? option.sankey || null : null;
   const funnel = kind === 'funnel' ? option.funnel || {} : null;
   const gauge = kind === 'gauge' ? option.gauge || {} : null;
+  const treemap = kind === 'treemap' ? option.treemap || {} : null;
   const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
   const radarDomains: Array<[number, number]> = radar ? buildRadarDomains(radar, series) : [];
   if (kind !== 'cartesian' && (!option.tooltip || option.tooltip.trigger === undefined)) {
@@ -222,6 +225,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     sankey,
     funnel,
     gauge,
+    treemap,
     radarDomains,
     option: merged,
     theme,
@@ -453,6 +457,35 @@ function buildPoints(
       points.push({ index: i, xValue: name === undefined ? i : name, y: value, raw: item, base: 0, top: value === null ? 0 : value, name });
     }
     return { points, hasExplicitX };
+  }
+  // 矩形树图：把层级数据按「先父后子、每层按值降序」拉平 ——
+  // 必须与 layoutTreemap 的访问顺序一致，否则像素/提示框会与矩形错位。
+  if (option.type === 'treemap') {
+    const flat: Array<{ node: any; depth: number }> = [];
+    const visit = (nodes: any[], depth: number): void => {
+      const sorted = nodes
+        .slice()
+        .sort((a, b) => treemapNodeValue(b) - treemapNodeValue(a));
+      for (const node of sorted) {
+        flat.push({ node, depth });
+        if (Array.isArray(node && node.children) && node.children.length) visit(node.children, depth + 1);
+      }
+    };
+    if (Array.isArray(option.data)) visit(option.data as any[], 0);
+    for (let i = 0; i < flat.length; i++) {
+      const node = flat[i].node;
+      const value = treemapNodeValue(node);
+      points.push({
+        index: i,
+        xValue: node && node.name !== undefined ? node.name : i,
+        y: value,
+        raw: node,
+        base: 0,
+        top: value,
+        name: node && node.name !== undefined ? String(node.name) : String(i),
+      });
+    }
+    return { points, hasExplicitX: true };
   }
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
@@ -739,6 +772,16 @@ function applyWaterfall(series: InternalSeries[]): void {
 }
 
 /** 箱线图：原始观测值 → [min, Q1, median, Q3, max]（五数概括）。 */
+/** 矩形树图节点的数值：有子节点时取子节点之和。 */
+export function treemapNodeValue(node: any): number {
+  if (!node) return 0;
+  if (Array.isArray(node.children) && node.children.length) {
+    return node.children.reduce((sum: number, child: any) => sum + treemapNodeValue(child), 0);
+  }
+  const value = Number(node.value);
+  return isFinite(value) && value > 0 ? value : 0;
+}
+
 export function computeBoxplotSummary(values: number[]): [number, number, number, number, number] {
   const sorted = values.filter((v) => isFinite(v)).sort((a, b) => a - b);
   if (!sorted.length) return [0, 0, 0, 0, 0];

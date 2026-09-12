@@ -22,6 +22,7 @@ import { Emitter } from './util/emitter';
 import { clamp } from './util/math';
 import { A11yMirror, buildDataNodes, buildDataTable, chartTitle, type A11yTreeOptions, type DataTable } from './a11y';
 import { layoutSankey } from './layout/sankey';
+import { layoutTreemap } from './layout/treemap';
 
 const Z = {
   plotArea: 10,
@@ -933,6 +934,18 @@ export class ICEChart {
               ? { plot, canvas: this.layout.canvas, options: norm.funnel || {} }
               : series.type === 'gauge'
                 ? { polar: polarLayout, plot, canvas: this.layout.canvas, options: norm.gauge || {} }
+                : series.type === 'treemap'
+                  ? {
+                      plot,
+                      canvas: this.layout.canvas,
+                      layout: layoutTreemap(
+                        (series.option.data || []) as any,
+                        plot,
+                        norm.treemap || {},
+                        norm.theme.colorPalette
+                      ),
+                      options: norm.treemap || {},
+                    }
             : series.type === 'sankey' && norm.sankey
               ? {
                   plot,

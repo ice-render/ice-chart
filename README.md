@@ -74,7 +74,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / candlestick / heatmap / sankey / funnel / gauge / boxplot / waterfall | 见下方「图表类型与写法」 |
+| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / candlestick / heatmap / sankey / funnel / gauge / boxplot / waterfall / treemap | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter |
@@ -154,6 +154,7 @@ npm install ice-chart ice-render
 | `funnel` | `data: [{ name, value }]` | 阶段梯形、`minSize` 保护最小阶段、图例按阶段显隐 |
 | `gauge` | `gauge: { min, max, axisLineColor }` + `data: [{ name, value }]` | 指针随数值转动，轴线按阈值分段配色 |
 | `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
+| `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
 
 ## 主要 API
 

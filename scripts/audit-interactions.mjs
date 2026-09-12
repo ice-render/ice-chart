@@ -24,6 +24,7 @@ const pages = [
   'radar',
   'funnel-gauge',
   'boxplot-waterfall',
+  'treemap',
   'finance',
   'sankey',
   'serialize',

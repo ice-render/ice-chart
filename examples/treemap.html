@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 矩形树图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>矩形树图</h1>
+    <p class="lead">
+      层级数据用嵌套矩形表达构成：面积按数值分配，布局用 <b>squarified</b> 算法（每行尽量接近正方形，
+      避免又细又长的切片）。命中判定返回<b>最深的那个节点</b> —— 点在大类目里的小类目上，命中的是小类目；
+      提示框给出名称、数值与占根总量的比例。
+    </p>
+
+    <div class="card"><canvas id="treemap" width="960" height="480"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const data = [
+        {
+          name: '数码',
+          children: [
+            { name: '手机', value: 4200 },
+            { name: '笔记本', value: 2800 },
+            { name: '平板', value: 1100 },
+            { name: '配件', value: 620 },
+          ],
+        },
+        {
+          name: '家电',
+          children: [
+            { name: '大家电', value: 2600 },
+            { name: '厨电', value: 1500 },
+            { name: '清洁', value: 900 },
+          ],
+        },
+        {
+          name: '服饰',
+          children: [
+            { name: '女装', value: 2100 },
+            { name: '男装', value: 1300 },
+            { name: '运动', value: 860 },
+          ],
+        },
+        { name: '食品', value: 1450 },
+        { name: '图书', value: 520 },
+      ];
+
+      const treemap = ICEChart.createChart('treemap', {
+        title: { text: '各品类销售额构成（矩形树图）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        treemap: { gap: 2, minLabelRatio: 0.015, depthFade: 0.22 },
+        animation: { enabled: false },
+        series: [{ id: 'sales', type: 'treemap', name: '销售额', data }],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      treemap.on('item:hover', (p) => write(`treemap hover  ${p.xValue} = ${p.value}`));
+      treemap.on('item:click', (p) => write(`treemap click  ${p.xValue} = ${p.value}`));
+
+      window.__chart = treemap;
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

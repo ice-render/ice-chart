@@ -8,6 +8,7 @@ import type {
   SankeyOption,
   SeriesOption,
   SeriesType,
+  TreemapOption,
   ChartTheme,
 } from './types';
 import type { Scale } from './scale';
@@ -74,7 +75,7 @@ export interface InternalAxis {
 
 export interface NormalizedOption {
   /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图 / 桑基图。 */
-  kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge';
+  kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'treemap';
   /**
    * 直角坐标的排布方向。
    * vertical：类目在 x 轴（普通柱状/折线）；horizontal：类目在 y 轴（横向柱状，排行榜场景）。
@@ -88,6 +89,8 @@ export interface NormalizedOption {
   funnel: FunnelOption | null;
   /** 仪表盘配置。 */
   gauge: GaugeOption | null;
+  /** 矩形树图配置。 */
+  treemap: TreemapOption | null;
   /** 每个雷达指标轴的数据域。 */
   radarDomains: Array<[number, number]>;
   /** 合并默认值之后的原始 option（函数字段保留）。 */

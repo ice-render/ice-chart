@@ -476,6 +476,28 @@ export class InteractionController {
         ],
       };
     }
+    // 矩形树图：名称 + 数值 + 占根总量比例
+    if (anchorItem && anchorItem.series.type === 'treemap') {
+      const series = anchorItem.series;
+      const point = anchorItem.point;
+      const rootTotal = series.points.find((p) => p.index === 0) ? series.points[0].y || 0 : 0;
+      void rootTotal;
+      const value = point.y || 0;
+      // 占比用「同类目下的总量」不好界定，这里统一按根节点总量算
+      let total = 0;
+      for (const p of series.points) {
+        const raw: any = p.raw;
+        if (raw && Array.isArray(raw.children) && raw.children.length) continue;
+        total += p.y || 0;
+      }
+      const percent = total > 0 ? (value / total) * 100 : 0;
+      return {
+        title: point.name || String(point.xValue),
+        rows: [
+          { name: series.name, value: `${value}（${percent.toFixed(1)}%）`, color: anchorItem.series.color },
+        ],
+      };
+    }
     if (anchorItem && anchorItem.series.type === 'heatmap') {
       const point = anchorItem.point;
       return {

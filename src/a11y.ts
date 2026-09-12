@@ -306,4 +306,5 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   gauge: '仪表盘',
   boxplot: '箱线图',
   waterfall: '瀑布柱',
+  treemap: '矩形树图单元',
 };
