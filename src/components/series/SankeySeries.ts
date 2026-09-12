@@ -75,6 +75,11 @@ export class SankeySeries extends SeriesBase {
     const unit = this.unit();
     this.beginDraw();
 
+    // 「流动」效果：给连线再描一层流动的虚线中心线（保持每帧重绘，靠时间算相位）
+    const flow = coord.options.flow;
+    if (flow) this.keepAnimating();
+    else this.stopAnimating();
+
     // 连线
     ctx.globalAlpha = 0.42;
     for (const link of links) {
@@ -95,6 +100,27 @@ export class SankeySeries extends SeriesBase {
       ctx.closePath();
       ctx.fillStyle = link.color;
       ctx.fill();
+
+      if (flow) {
+        const speed = Number(coord.options.flowSpeed) || 40;
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(x0, (y0 + y1) / 2);
+        ctx.bezierCurveTo(c0, (y0 + y1) / 2, c1, (y0 + y1) / 2, x1, (y0 + y1) / 2);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = Math.max(unit, link.width * 0.28);
+        if (typeof ctx.setLineDash === 'function') {
+          const dash = [6 * unit, 10 * unit];
+          ctx.setLineDash(dash);
+          if (typeof ctx.lineDashOffset === 'number') {
+            ctx.lineDashOffset = -((Date.now() / 1000) * speed) % (dash[0] + dash[1]);
+          }
+        }
+        ctx.stroke();
+        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+        ctx.restore();
+      }
     }
     ctx.globalAlpha = 1;
 

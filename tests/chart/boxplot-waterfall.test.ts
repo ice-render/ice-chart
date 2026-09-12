@@ -52,6 +52,24 @@ describe('箱线图（纯函数层）', () => {
     expect(norm.series[0].points[0].y).toBe(260);
   });
 
+  it('treats arrays with more than 5 numbers as raw observations (not a summary)', () => {
+    // 回归：曾经用 `tuple.length >= 5` 判断，40 个原始观测值被截成前 5 个当五数概括，
+    // 结果 min/max 包不住四分位 —— 箱体错乱，悬停还点不中。
+    const samples = Array.from({ length: 40 }, (_, i) => 100 + i * 3);
+    const norm = normalizeOption({
+      ...BOXPLOT,
+      series: [{ id: 'raw', type: 'boxplot', name: '原始观测', data: [samples] as any }],
+    });
+    const summary = norm.series[0].points[0].boxplot!;
+    expect(summary).toHaveLength(5);
+    expect(summary[0]).toBe(100);
+    expect(summary[4]).toBe(217);
+    // 五数概括必须有序（min ≤ Q1 ≤ median ≤ Q3 ≤ max）
+    for (let i = 1; i < 5; i++) expect(summary[i]).toBeGreaterThanOrEqual(summary[i - 1]);
+    // 不是「取前 5 个原始值」（那样 max 会是 103 而不是 217）
+    expect(norm.series[0].points[0].y).toBe(summary[2]);
+  });
+
   it('computes quantiles from raw observations', () => {
     const summary = computeBoxplotSummary([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(summary[0]).toBe(1);

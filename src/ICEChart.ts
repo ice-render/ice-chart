@@ -24,6 +24,7 @@ import { A11yMirror, buildDataNodes, buildDataTable, chartTitle, type A11yTreeOp
 import { layoutSankey } from './layout/sankey';
 import { layoutTreemap } from './layout/treemap';
 import { forceLayout } from './layout/force';
+import { shouldAnimate } from './animation/motion';
 
 const Z = {
   plotArea: 10,
@@ -41,33 +42,8 @@ const Z = {
 /** 快照格式版本：结构变化时递增，还原时校验。 */
 export const SNAPSHOT_VERSION = 1;
 
-/** 全局动效偏好：auto 跟随系统「减少动态效果」，instant 一切动画瞬时到位，full 始终动画。 */
-export type MotionPreference = 'auto' | 'instant' | 'full';
-let motionPreference: MotionPreference = 'auto';
-
-export function setMotionPreference(preference: MotionPreference): void {
-  motionPreference = preference;
-}
-
-export function getMotionPreference(): MotionPreference {
-  return motionPreference;
-}
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined' || typeof (window as any).matchMedia !== 'function') return false;
-  try {
-    return !!(window as any).matchMedia('(prefers-reduced-motion: reduce)').matches;
-  } catch (err) {
-    return false;
-  }
-}
-
-/** 当前是否应该播放动画（无障碍：尊重系统的「减少动态效果」）。 */
-export function shouldAnimate(): boolean {
-  if (motionPreference === 'instant') return false;
-  if (motionPreference === 'full') return true;
-  return !prefersReducedMotion();
-}
+export { setMotionPreference, getMotionPreference, shouldAnimate } from './animation/motion';
+export type { MotionPreference } from './animation/motion';
 
 export interface SnapshotRestoreOptions {
   /**

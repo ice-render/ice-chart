@@ -1,6 +1,7 @@
 import { ChartComponent } from './ChartComponent';
 import type { ChartTheme, CrosshairOption } from '../types';
 import type { ChartLayout } from '../internal';
+import { shouldAnimate } from '../animation/motion';
 
 /** 十字准星：跟随活动数据列的辅助线 + 坐标轴数值标签。 */
 export class Crosshair extends ChartComponent {
@@ -23,14 +24,69 @@ export class Crosshair extends ChartComponent {
     this.pixelY = pixelY;
     this.xLabel = xLabel;
     this.yLabel = yLabel;
+    this.animateAxis(pixelX, pixelY);
     return this.markDirty();
+  }
+
+  /** 绘制位置（可能是动画中的中间值）；`pixelX/pixelY` 始终是目标值。 */
+  private drawnX(): number | null {
+    const value = Number(this.state.axisX);
+    if (this.pixelX === null) return null;
+    return isFinite(value) ? value : this.pixelX;
+  }
+
+  private drawnY(): number | null {
+    const value = Number(this.state.axisY);
+    if (this.pixelY === null) return null;
+    return isFinite(value) ? value : this.pixelY;
+  }
+
+  /**
+   * 准星平滑：每次悬停换列时从**当前位置**补间到新位置（而不是硬切）。
+   * 快速划过时会有轻微跟随感，这正是十字准星该有的手感。
+   */
+  private animateAxis(x: number | null, y: number | null): void {
+    if (!shouldAnimate() || x === null) {
+      this.setState({ axisX: x, axisY: y });
+      return;
+    }
+    const currentX = this.drawnX();
+    const currentY = this.drawnY();
+    if (currentX === null) {
+      // 从「没有准星」进入：直接落到目标位置
+      this.setState({ axisX: x, axisY: y });
+      return;
+    }
+    // 注意：props.animations 的默认值是引擎共享的**冻结**对象，
+    // 直接往上面挂字段会抛 "Cannot add property ... object is not extensible"。
+    // 必须先复制成新对象，再整体替换（这条在 jsdom 的 instant 模式下测不出来，只有真动画才暴露）。
+    const animations: any = { ...((this.props as any).animations || {}) };
+    animations.axisX = { from: currentX, to: x, duration: 110, easing: 'easeOutCubic', startTime: undefined, finished: false };
+    if (currentY !== null && y !== null) {
+      animations.axisY = { from: currentY, to: y, duration: 110, easing: 'easeOutCubic', startTime: undefined, finished: false };
+    }
+    (this.props as any).animations = animations;
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.add(this);
   }
 
   public hide(): this {
     if (this.pixelX === null && this.pixelY === null) return this;
     this.pixelX = null;
     this.pixelY = null;
+    this.stopAxisAnimation();
     return this.markDirty();
+  }
+
+  private stopAxisAnimation(): void {
+    const animations: any = (this.props as any).animations;
+    if (animations) {
+      for (const key in animations) {
+        if (animations[key]) animations[key].finished = true;
+      }
+    }
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.remove(this);
+    this.state.axisX = null;
+    this.state.axisY = null;
   }
 
   protected doRender(): void {
@@ -48,12 +104,12 @@ export class Crosshair extends ChartComponent {
     if (typeof ctx.setLineDash === 'function') ctx.setLineDash([3 * unit, 3 * unit]);
     ctx.beginPath();
     if (this.pixelX !== null && axis !== 'y') {
-      const x = this.snap(this.pixelX);
+      const x = this.snap(this.drawnX() as number);
       ctx.moveTo(x, plot.y);
       ctx.lineTo(x, plot.y + plot.height);
     }
     if (this.pixelY !== null && (axis === 'y' || axis === 'xy')) {
-      const y = this.snap(this.pixelY);
+      const y = this.snap(this.drawnY() as number);
       ctx.moveTo(plot.x, y);
       ctx.lineTo(plot.x + plot.width, y);
     }
@@ -65,10 +121,10 @@ export class Crosshair extends ChartComponent {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       if (this.pixelX !== null && this.xLabel && axis !== 'y') {
-        this.drawChip(this.snap(this.pixelX), plot.y + plot.height, this.xLabel);
+        this.drawChip(this.snap(this.drawnX() as number), plot.y + plot.height, this.xLabel);
       }
       if (this.pixelY !== null && this.yLabel && (axis === 'y' || axis === 'xy')) {
-        this.drawChip(plot.x, this.snap(this.pixelY), this.yLabel);
+        this.drawChip(plot.x, this.snap(this.drawnY() as number), this.yLabel);
       }
     }
     ctx.restore();

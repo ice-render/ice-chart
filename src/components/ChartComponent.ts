@@ -20,6 +20,7 @@ export interface ChartComponentProps {
  *    （按一下方向键整条折线平移 2px）。键盘导航由交互层统一接管。
  */
 export class ChartComponent extends ICEComponent {
+  private loopRegistered = false;
   constructor(props: ChartComponentProps = {}) {
     super({
       origin: 'top-left',
@@ -70,6 +71,35 @@ export class ChartComponent extends ICEComponent {
       this.ice.dirty = true;
     }
     return this;
+  }
+
+  /**
+   * 让组件「持续重绘」：给引擎挂一个 100ms 循环动画。
+   *
+   * 这正是引擎蚂蚁线（lineDashFlow）的做法 —— 动画值本身没意义，
+   * 作用是每帧 setState → 标脏 → 重绘；真正的动效（如虚线相位）用 Date.now() 算。
+   * 注意：持续重绘会让脏矩形局部重绘失去意义，只在确实需要「一直动」时用，且要能停。
+   */
+  protected keepAnimating(): void {
+    if (this.loopRegistered) return;
+    this.loopRegistered = true;
+    const animations: any = { ...((this.props as any).animations || {}), __tick: { from: 0, to: 1, duration: 100, loop: true } };
+    (this.props as any).animations = animations;
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.add(this);
+    this.markDirty();
+  }
+
+  /** 停止持续重绘。 */
+  protected stopAnimating(): void {
+    if (!this.loopRegistered) return;
+    this.loopRegistered = false;
+    const animations: any = (this.props as any).animations;
+    if (animations) {
+      for (const key in animations) {
+        if (animations[key]) animations[key].finished = true;
+      }
+    }
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.remove(this);
   }
 
   /** 统一的字体设置。 */

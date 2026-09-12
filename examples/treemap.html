@@ -14,6 +14,17 @@
     </p>
 
     <div class="card"><canvas id="treemap" width="960" height="480"></canvas></div>
+    <div class="card">
+      <div class="snapshot-head">
+        <span class="snapshot-title">布局过渡</span>
+        <span class="snapshot-actions">
+          <button type="button" id="btn-shuffle">换一批数据（看矩形 morph）</button>
+          <button type="button" id="btn-replay">重播入场</button>
+        </span>
+        <span class="spacer"></span>
+        <span class="snapshot-meta">矩形在旧布局与新布局之间插值，而不是瞬间跳</span>
+      </div>
+    </div>
     <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
 
@@ -57,7 +68,10 @@
         legend: { show: false },
         tooltip: { trigger: 'item' },
         treemap: { gap: 2, minLabelRatio: 0.015, depthFade: 0.22 },
-        animation: { enabled: false },
+        animation: {
+          enter: { duration: 700, easing: 'easeOutCubic', stagger: 0.3 },
+          update: { duration: 620, easing: 'easeOutCubic' },
+        },
         series: [{ id: 'sales', type: 'treemap', name: '销售额', data }],
       });
 
@@ -67,6 +81,21 @@
       };
       treemap.on('item:hover', (p) => write(`treemap hover  ${p.xValue} = ${p.value}`));
       treemap.on('item:click', (p) => write(`treemap click  ${p.xValue} = ${p.value}`));
+
+      const jitter = (value, ratio) => Math.max(120, Math.round(value * (1 + (Math.random() - 0.5) * ratio)));
+      document.getElementById('btn-shuffle').addEventListener('click', () => {
+        const option = treemap.getOption();
+        option.series[0].data.forEach((node) => {
+          if (node.children) node.children.forEach((child) => { child.value = jitter(child.value, 0.9); });
+          else node.value = jitter(node.value, 0.9);
+        });
+        treemap.setOption(option, { animate: true, preserveView: true });
+        write('换了一批数据：矩形正在 morph 到新布局');
+      });
+      document.getElementById('btn-replay').addEventListener('click', () => {
+        treemap.setOption(treemap.getOption(), { animate: 'enter', preserveView: true });
+        write('重播入场动画');
+      });
 
       window.__chart = treemap;
       mountSnapshotPanel();

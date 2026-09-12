@@ -159,6 +159,10 @@ export interface SankeyOption {
   /** 纵向松弛迭代次数，默认 6。 */
   iterations?: number;
   label?: { show?: boolean };
+  /** 连线是否显示「流动」效果（虚线相位持续推进），默认 false。 */
+  flow?: boolean;
+  /** 流动速度（像素/秒），默认 40。 */
+  flowSpeed?: number;
 }
 
 /** 雷达图的指标轴。 */

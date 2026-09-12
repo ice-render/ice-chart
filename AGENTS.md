@@ -116,9 +116,12 @@ npm run audit:interactions -- ./.audit
    - `seriesType`；
    - 覆盖 `paintPad()`（脏矩形留白）；
    - `rebuildPixels()` 填 `this.pixels`（**必须是绘制与命中共用的同一份几何**）；
+     缓存键走 `this.buildSeriesKey([...])`（自动带坐标系指纹与动画进度）；
    - `hitTestIndex(lx, ly)`（本地坐标，返回数据下标）；
    - `doRender()`（本地坐标绘制；直角坐标系列记得 `clipToBox = true`）；
    - 需要矩形高亮就实现 `highlightRectAt(index)`。
+   - 悬停反馈：几何能安全变形的用 `hoverBoost()`（记得命中判定同步放大，
+     否则指针停在放大后的边缘会「忽进忽出」）；图元紧挨着的用 `drawHoverOverlay()`（只叠加不改几何）。
 5. `createSeriesComponent` 加 case；`src/components/series/index.ts` 与 `src/index.ts` 导出。
 6. `ICEChart.syncSeries` 里给该类型分派 coord；非直角场景要在 `syncComponents` 里隐藏坐标轴/网格。
 7. `InteractionController.buildTooltipContent` 加该类型的提示框分支（别的类型都有，别让它退化成默认格式）。
@@ -134,6 +137,19 @@ npm run audit:interactions -- ./.audit
 - **画布缓存键必须带动画进度**：任何覆写 `rebuildPixels` 的系列，键一律走
   `this.buildSeriesKey([...几何参数])` —— 它会把 `progress` / 阶段 / 错峰拼进去。
   这条曾被六个系列同时违反，表现为「动画只动第一帧，之后冻住」（外部完全看不出来，只有逐帧采样才发现）。
+- **缓存键还必须带坐标系指纹**：`buildSeriesKey` 现在会自动拼上「绘图区矩形 + x/y 比例尺的数据域」。
+  只拼「绘图区 + 某一个轴」的键在缩放 / 数据域过渡 / 轴类目变化之后不会失效，
+  于是 `pixels` 停在旧位置 —— **渲染几何（重算）与命中/高亮锚点几何（pixels）分叉**，
+  表现是「悬停高亮画在别处」，看起来像交互 bug，实际是缓存 bug。
+  门禁：`tests/components/pixel-freshness.test.ts`（清键重算，两次像素必须一致）。
+- **交互验证必须探测渲染态**：`hoverIndex` 有值只说明状态对了，不代表画出来了。
+  要断言 `barDrawRectAt()` / `highlightRectAt()` / `panelOpacity()` / `state.axisX` 这类
+  「真正参与绘制的值」。也不要直接读 `layout[].rect`（那是新布局，不是动画中的渲染值）。
+- **悬停状态里的系列对象会过期**：`rebuild()` 每次都重建 norm，悬停里存的是上一轮的系列对象。
+  `HitResolver.seriesComponentOf()` 有 id 兜底、`refreshHover()` 从当前 norm 取新系列 —— 
+  否则「数据更新时悬停被清掉」（实时刷新的仪表盘 1.6s 掉一次，肉眼可见）。
+- **改了图元的悬停几何，要同步改高亮描边**：柱形悬停会变长，描边若还用基础矩形，
+  就会横在柱子中间（看着像接缝）。描边一律取「终态绘制矩形」并与绘图区求交。
 - **入场动画只在 `enter` 阶段做「画出来」这类形态**：`isEntering()` 判断。
   更新阶段截断折线会变成「重画」而不是「折点动起来」。
 - **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。
@@ -147,6 +163,11 @@ npm run audit:interactions -- ./.audit
   这样既有断言确定、也快；动画的时序行为另有 `tests/chart/animation.test.ts` 覆盖。
 - **不要把动画放到「不可见的驱动组件」上**：实测证明引擎补间期间的 `interactive=false`
   只存在于同步块内，动画与命中互不影响。
+- **浏览器实测门禁**：`npm run audit:hover -- ./.hover-sweep`
+  会逐类型、逐数据点真实悬停（15 种类型 / 86 个探针），断言反馈动画到位、几何不越界、
+  像素缓存新鲜、无 console 报错，并按「图 × 系列」截图供人工复核。
+  示例页里的 `setInterval` 实时数据（仪表盘示例）要留意：探针必须等一次刷新窗口，
+  否则会把「数据更新」误判成「悬停丢失」。
 
 ## 已实现 / 未实现
 

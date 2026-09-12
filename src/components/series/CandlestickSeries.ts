@@ -117,6 +117,11 @@ export class CandlestickSeries extends SeriesBase {
       ctx.lineWidth = borderWidth;
       ctx.stroke();
     }
+    // 悬停：蜡烛实体叠一层高亮描边（不改宽高 —— 改了命中区域就会和渲染分叉）
+    if (this.hoverIndex !== null) {
+      const rect = rects[this.hoverIndex];
+      if (rect) this.drawHoverOverlay(this.hoverIndex, rect, { radius: 2, fill: 'rgba(255,255,255,0.10)' });
+    }
     this.endDraw();
   }
 }

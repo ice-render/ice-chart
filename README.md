@@ -148,7 +148,7 @@ npm install ice-chart ice-render
 | `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
 | `radar` | `radar.indicators` + `data: [数值...]` | 一个系列一个多边形，顶点命中 |
 | `candlestick` | `data: [[open, close, low, high]]` | 影线进数据域，提示框给 OHLC |
-| `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一串原始观测值 | 后者自动算五数概括；命中覆盖整条须 |
+| `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一组原始观测值 | 恰好 5 个数按五数概括解释，其它长度自动算分位数；命中覆盖整条须 |
 | `heatmap` | `data: [[x类目, y类目, 数值]]` | y 轴自动变类目轴，颜色线性插值 |
 | `waterfall` | `data: [{ name, value }]`，合计项标 `total: true` | 增/减/合计三色 + 连接虚线 |
 | `funnel` | `data: [{ name, value }]` | 阶段梯形、`minSize` 保护最小阶段、图例按阶段显隐 |
@@ -165,7 +165,7 @@ npm install ice-chart ice-render
 animation: {
   enter:     { duration: 900, easing: 'easeOutCubic', stagger: 0.45 },  // 首次渲染 / 新增系列
   update:    { duration: 700, easing: 'easeOutCubic' },                 // setData / setOption
-  highlight: { duration: 260, easing: 'springSnappy' },                 // 悬停反馈（预留）
+  highlight: { duration: 260, easing: 'springSnappy' },                 // 悬停反馈
 }
 ```
 
@@ -183,6 +183,23 @@ animation: {
 桑基连线从源流向目标、矩形树图逐层展开、关系图从环形铺开**收敛到力布局结果**。
 
 数据更新时，系列的值会从旧值插值到新值，**坐标轴数据域也跟着一起过渡**（否则域瞬跳会让图形先蹦一下再动）。
+
+### 交互过程中的动画
+
+鼠标交互不是「瞬间换一张图」，所有反馈都走引擎补间，因此中途也保持连贯：
+
+- **悬停放大**：被悬停的图元自己沿语义方向做微放大 —— 柱子从基线往外伸长（不是整体平移）、
+  气泡变大、饼图/玫瑰图扇形沿中角向外「脱出」。`SeriesBase.setHoverIndex()` 由交互层统一下发，
+  移开后同一个补间反向回落。柱形的绘制矩形可用 `barDrawRectAt(i)` 取到（测试断言用）。
+- **提示框淡入淡出**：出现时淡入 + 上滑 6px；消失时淡出到 0 才清内容，不会「淡入很柔、消失很硬」。
+  淡出途中重新悬停会从当前透明度继续淡入（`Tooltip.panelOpacity()` 可断言）。
+- **准星平滑跟随**：换列时从当前位置补间到新列，跟上「快速划过」的手感；
+  `Crosshair.pixelX/pixelY` 始终是目标值，绘制位置在 `state.axisX/axisY`。
+- **框选蚂蚁线**：拖框期间虚线相位持续推进，松手即停（不会留下一直在重绘的组件）。
+- **桑基流动**：`sankey: { flow: true, flowSpeed: 40 }` 给连线加一层沿路径流动的白色虚线，
+  表达方向与速率；不需要时保持关闭以免每帧重绘。
+- **矩形树图形变**：树图数据更新时，矩形在**旧布局 → 新布局**之间插值（而不是瞬间跳布局），
+  子节点按相对父矩形的比例跟随父矩形一起缩放，中途不会露出空隙或错位。
 
 ## 主要 API
 
@@ -294,10 +311,16 @@ npm run verify        # lint → types:check → build → test
 npm run build && npm run examples:prepare
 node scripts/serve-examples.cjs &
 npm run audit:interactions -- ./.audit      # 12 页 × 10 步交互，逐步截图 + 几何断言
+npm run audit:hover -- ./.hover-sweep       # 逐类型逐个数据点悬停：反馈动画 + 像素缓存新鲜度
 ```
 
 审计会检查每一步之后：提示框是否越出画布、是否压住坐标轴数值标签或图例、
 高亮标记是否落在绘图区内；任何一条不满足就以非 0 退出码结束，可用于 CI。
+
+悬停实测（`audit:hover`）会把指针移到 15 种图表的每一个数据点上，逐点断言三件事：
+交互层把 `hoverIndex` 下发到了对应系列、反馈动画确实推进到 1、悬停几何没有越界；
+同时做一次**像素缓存新鲜度**检查（清掉缓存键重算，两次像素必须一致）——
+它抓的是「缩放 / 数据变化后 `pixels` 没重算，悬停高亮画在别处」这类缓存 bug。
 
 测试用例覆盖的关键路径：比例尺换算、数据归一化与堆叠、布局量测、系列命中判定，
 以及「引擎命中测试 → 数据下标 → 语义事件」这条端到端链路（含多图隔离与联动回归）。

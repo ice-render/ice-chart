@@ -117,7 +117,10 @@ export class GraphSeries extends SeriesBase {
     for (const node of nodes) {
       const dx = localX - (node.x - plot.x);
       const dy = localY - (node.y - plot.y);
-      if (dx * dx + dy * dy <= ((node.size / 2 + 3) * (node.size / 2 + 3))) return node.id;
+      // 命中半径跟着悬停放大 —— 否则指针停在放大后的边缘上会判定为「离开」，
+      // 节点一缩一涨就会闪。放大后的节点只会更容易命中，不会丢悬停。
+      const radius = (node.size / 2) * this.hoverBoost(node.id, 0.28) + 3;
+      if (dx * dx + dy * dy <= radius * radius) return node.id;
     }
     // 再判连线
     const tolerance = 6;
@@ -179,12 +182,14 @@ export class GraphSeries extends SeriesBase {
       const [nx, ny] = positionOf(node);
       const x = nx - plot.x;
       const y = ny - plot.y;
+      // 悬停：节点鼓起来一点（命中半径同样放大，边缘不会抖）
+      const radius = Math.max(2, (node.size / 2) * this.hoverBoost(node.id, 0.28));
       ctx.beginPath();
-      ctx.arc(x, y, Math.max(2, node.size / 2), 0, Math.PI * 2);
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fillStyle = node.color;
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth = unit;
+      ctx.lineWidth = unit * (this.hoverBoost(node.id, 0.28) > 1 ? 2 : 1);
       ctx.stroke();
     }
 
@@ -209,6 +214,7 @@ export class GraphSeries extends SeriesBase {
   public nodeSizeAt(index: number): number {
     const coord = this.graph;
     const node = coord && coord.layout.nodes[index];
-    return node ? node.size : 10;
+    // 高亮环跟着悬停放大一起长，否则环会「陷」在放大的节点里
+    return node ? node.size * this.hoverBoost(index, 0.28) : 10;
   }
 }

@@ -207,7 +207,10 @@ export class InteractionController {
     if (!current) return;
     const norm = this.host.norm;
     if (current.kind === 'item') {
-      const series = current.item.series;
+      // 必须换成**当前这一轮** norm 里的系列对象：buildActiveItem 按对象身份找组件，
+      // 用上一轮的对象会找不到（悬停被清掉），而且提示框里会显示旧数据。
+      const series =
+        norm.series.find((s) => s.id === current.item.series.id) || current.item.series;
       const index = current.item.point.index;
       const sliceHidden = (series.type === 'pie' || series.type === 'funnel') && norm.hiddenSlices[`${series.id}#${index}`];
       // 系列/扇区被隐藏，或数据被替换导致下标越界 → 直接清理，不要悄悄跳到别的系列
@@ -327,6 +330,7 @@ export class InteractionController {
   private applyHoverVisuals(state: { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn }): void {
     const items = state.kind === 'item' ? [state.item] : state.column.items;
     const anchor = items[0];
+    this.syncSeriesHover(items);
     const highlight = this.host.highlight;
     if (highlight) {
       highlight.setHover(
@@ -608,9 +612,22 @@ export class InteractionController {
 
   /** 只清理数据层（高亮环 / 准星 / 提示框），不动图例悬停。 */
   private clearDataVisuals(): void {
+    this.syncSeriesHover([]);
     if (this.host.highlight) this.host.highlight.setHover([]);
     if (this.host.crosshair) this.host.crosshair.hide();
     if (this.host.tooltip) this.host.tooltip.hide();
+  }
+
+  /** 把「当前悬停的数据项」下发给系列：图元自己会做放大/外移等反馈动画。 */
+  private syncSeriesHover(items: ActiveItem[]): void {
+    const hovered = new Map<string, number>();
+    for (const item of items) {
+      if (!hovered.has(item.series.id)) hovered.set(item.series.id, item.point.index);
+    }
+    for (const component of this.host.seriesComponents) {
+      const index = hovered.get(component.series.id);
+      component.setHoverIndex(index === undefined ? null : index);
+    }
   }
 
   /** 生成高亮标记：数据点用圆环，柱形用矩形描边。 */
@@ -618,7 +635,19 @@ export class InteractionController {
     const component = this.resolver.seriesComponentOf(item.series);
     const plot = this.host.layout.plot;
     if (component && item.series.type === 'bar' && typeof (component as any).barRectAt === 'function') {
-      const rect = (component as any).barRectAt(item.point.index);
+      // 用 t=1 的**终态**绘制矩形：悬停时柱子会沿值方向长一点，
+      // 描边必须贴着长完之后的轮廓（用基础矩形会看到描边横在柱子中间）。
+      // 再与绘图区求交：越界部分被 clip 掉了，描边也不该画到坐标轴上。
+      const drawn = typeof (component as any).barDrawRectAt === 'function' ? (component as any).barDrawRectAt(item.point.index, 1) : null;
+      const raw = drawn || (component as any).barRectAt(item.point.index);
+      const rect = raw
+        ? {
+            x: Math.max(raw.x, 0),
+            y: Math.max(raw.y, 0),
+            width: Math.max(0, Math.min(raw.x + raw.width, plot.width) - Math.max(raw.x, 0)),
+            height: Math.max(0, Math.min(raw.y + raw.height, plot.height) - Math.max(raw.y, 0)),
+          }
+        : null;
       if (rect && rect.width > 0 && rect.height > 0) {
         return {
           // 统一约定：x/y 一律是标记中心（圆环是圆心，柱形是矩形中心）

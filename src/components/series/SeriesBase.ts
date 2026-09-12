@@ -1,7 +1,9 @@
 import { ChartComponent } from '../ChartComponent';
+import { roundRect } from '../Legend';
 import type { ChartTheme, SeriesType } from '../../types';
 import type { DataPoint, InternalSeries, Rect } from '../../internal';
 import type { Scale } from '../../scale';
+import { shouldAnimate } from '../../animation/motion';
 
 export interface SeriesCoord {
   plot: Rect;
@@ -62,6 +64,8 @@ export abstract class SeriesBase extends ChartComponent {
   protected stagger = 0;
   /** 当前动画阶段：enter 可以「画出来」，update 只能「动起来」。 */
   protected animationKind: 'enter' | 'update' = 'enter';
+  /** 当前悬停的数据项（0 表示没有）。 */
+  public hoverIndex: number | null = null;
   private cacheKey = '';
   /** 散点等「每个点都必须画」的系列不参与降采样。 */
   protected supportsSampling = true;
@@ -193,6 +197,89 @@ export abstract class SeriesBase extends ChartComponent {
   }
 
   /**
+   * 设置/清除悬停项，并用引擎动画把 `highlightT` 从 0 推到 1（或反向）。
+   *
+   * 反馈动画由组件自己启动：它持有 `ice.animationManager`，不需要图表层代劳，
+   * 这样「悬停哪个图元」这件事就完全收敛在系列内部。
+   */
+  public setHoverIndex(index: number | null): void {
+    const next = index === undefined ? null : index;
+    if (this.hoverIndex === next) return;
+    const hadHover = this.hoverIndex !== null;
+    this.hoverIndex = next;
+    const from = this.highlightT();
+    const to = next === null ? 0 : 1;
+    if (!shouldAnimate()) {
+      this.setState({ highlightT: to });
+      this.markDirty();
+      return;
+    }
+    // 从当前值出发，避免快速划过时来回跳变
+    // props.animations 默认是引擎共享的冻结对象：必须复制后再整体替换
+    const animations: any = { ...((this.props as any).animations || {}) };
+    animations.highlightT = {
+      from,
+      to,
+      duration: next === null ? 180 : 260,
+      easing: next === null ? 'easeOutCubic' : 'springSnappy',
+      startTime: undefined,
+      finished: false,
+    };
+    (this.props as any).animations = animations;
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.add(this);
+    if (!hadHover && next !== null) this.markDirty();
+  }
+
+  /** 悬停反馈的进度（0~1）。 */
+  public highlightT(): number {
+    const value = Number(this.state.highlightT);
+    return isFinite(value) ? Math.max(0, Math.min(1.2, value)) : 0;
+  }
+
+  /** 某个数据项当前的高亮强度：只有被悬停的那一项 > 0。 */
+  protected hoverBoost(index: number, amount = 0.12, t?: number): number {
+    if (this.hoverIndex !== index) return 1;
+    return 1 + amount * (t === undefined ? this.highlightT() : Math.max(0, Math.min(1, t)));
+  }
+
+  /** 悬停叠加层的强度（0~1）：只有被悬停的那一项 > 0。 */
+  protected hoverAlpha(index: number): number {
+    if (this.hoverIndex !== index) return 0;
+    return Math.max(0, Math.min(1, this.highlightT()));
+  }
+
+  /**
+   * 在被悬停的矩形上叠一层「提亮 + 描边」。
+   *
+   * 刻意**只叠加、不改几何**：像热力图 / 树图 / K 线这种相邻图元紧挨着的类型，
+   * 改宽高会让命中区域与渲染区域分叉（指针停在边缘会来回抖），
+   * 叠加描边既能表达强调，又完全不动命中判定。
+   */
+  protected drawHoverOverlay(
+    index: number,
+    rect: Rect,
+    options: { radius?: number; fill?: string; stroke?: string; lineWidth?: number } = {}
+  ): void {
+    const alpha = this.hoverAlpha(index);
+    if (alpha <= 0.01 || rect.width <= 0 || rect.height <= 0) return;
+    const ctx = this.ctx;
+    const unit = this.unit();
+    const radius = Number(options.radius) || 0;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (options.fill !== 'none') {
+      roundRect(ctx, rect.x, rect.y, rect.width, rect.height, radius);
+      ctx.fillStyle = options.fill || 'rgba(255,255,255,0.16)';
+      ctx.fill();
+    }
+    roundRect(ctx, rect.x, rect.y, rect.width, rect.height, radius);
+    ctx.strokeStyle = options.stroke || 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = Math.max(unit, (options.lineWidth || 2) * unit);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
    * 派生几何的缓存键。
    *
    * **必须**把参与动画的 state 字段一起放进来（progress / 阶段 / 错峰），
@@ -200,7 +287,29 @@ export abstract class SeriesBase extends ChartComponent {
    * 子类覆写 `rebuildPixels` 时用自己的几何参数组键，请一律走这个方法。
    */
   protected buildSeriesKey(parts: Array<any>): string {
-    return [...parts, this.progress(), this.animationKind, this.stagger].join('|');
+    return [...parts, this.coordKey(), this.progress(), this.animationKind, this.stagger].join('|');
+  }
+
+  /**
+   * 坐标系指纹：绘图区矩形 + 各比例尺的数据域。
+   *
+   * 子类自己拼键时最容易漏的就是数据域 —— 表面看不出来，实际后果是
+   * **像素缓存不失效**：缩放 / 平移 / 数据域过渡之后 `pixels` 还是旧位置，
+   * 「看得见的点」与「点得到的点」就此分叉（悬停高亮画在别处、命中判空）。
+   * 只在键里放域的**端点 + 长度**，因为这个函数动画期间每帧都会被调用，不能全量 join。
+   */
+  private coordKey(): string {
+    const coord: any = this.coord;
+    if (!coord) return '-';
+    const parts: string[] = [];
+    if (coord.plot) parts.push(`p${coord.plot.x},${coord.plot.y},${coord.plot.width},${coord.plot.height}`);
+    for (const name of ['xScale', 'yScale']) {
+      const scale = coord[name];
+      const domain = scale && scale.domain;
+      if (!domain || !domain.length) continue;
+      parts.push(`${name}[${domain.length}]:${String(domain[0])}~${String(domain[domain.length - 1])}`);
+    }
+    return parts.join(';');
   }
 
   /**

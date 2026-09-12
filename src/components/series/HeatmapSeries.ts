@@ -107,6 +107,8 @@ export class HeatmapSeries extends SeriesBase {
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
       if (entering) ctx.globalAlpha = 1;
     }
+    // 悬停：给单元格叠一层提亮 + 描边（不改几何 —— 单元格紧挨着，改大小会盖住邻居）
+    if (this.hoverIndex !== null) this.drawHoverOverlay(this.hoverIndex, this.cellRectAt(this.hoverIndex) as Rect, { radius: 0 });
     this.endDraw();
   }
 

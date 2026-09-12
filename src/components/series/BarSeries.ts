@@ -106,6 +106,35 @@ export class BarSeries extends SeriesBase {
     return this.pointColor(index);
   }
 
+  /**
+   * 悬停时实际绘制的矩形：沿柱子的「值方向」外扩一点点，锚点始终在基线，
+   * 所以柱子只会变长，不会整体平移（水平柱同理，往值增大的方向伸长）。
+   * 越出绘图区的部分由引擎裁剪，不会盖到坐标轴。
+   *
+   * `t` 用来取「动画到某个进度时」的矩形：高亮描边层用 `t = 1` 取终态，
+   * 这样描边始终贴着柱子的最终轮廓，不会出现「描边画在柱子中间」的接缝。
+   */
+  public barDrawRectAt(index: number, t?: number): Rect | null {
+    const rect = this.barRectAt(index);
+    const coord = this.coord;
+    if (!rect || !coord) return rect;
+    const amount = this.hoverBoost(index, 0.08, t) - 1;
+    if (amount <= 0) return rect;
+    const base = this.effective[index * 2];
+    if (this.isHorizontal()) {
+      const grow = rect.width * amount;
+      const growsRight = rect.x + rect.width / 2 >= coord.xScale.map(base);
+      return growsRight
+        ? { x: rect.x, y: rect.y, width: rect.width + grow, height: rect.height }
+        : { x: rect.x - grow, y: rect.y, width: rect.width + grow, height: rect.height };
+    }
+    const grow = rect.height * amount;
+    const growsUp = rect.y + rect.height / 2 <= coord.yScale.map(base);
+    return growsUp
+      ? { x: rect.x, y: rect.y - grow, width: rect.width, height: rect.height + grow }
+      : { x: rect.x, y: rect.y, width: rect.width, height: rect.height + grow };
+  }
+
   protected doRender(): void {
     this.rebuildPixels();
     const coord = this.coord;
@@ -114,16 +143,17 @@ export class BarSeries extends SeriesBase {
     const ctx = this.ctx;
     this.beginDraw();
     for (let i = 0; i < this.series.points.length; i++) {
-      const rect = this.barRectAt(i);
+      const rect = this.barDrawRectAt(i);
       if (!rect || rect.height <= 0) continue;
       const color = this.barColorAt(i);
+      const drawRect = rect;
       ctx.beginPath();
-      roundRect(ctx, rect.x, rect.y, rect.width, rect.height, isFinite(radius) ? radius : 0);
+      roundRect(ctx, drawRect.x, drawRect.y, drawRect.width, drawRect.height, isFinite(radius) ? radius : 0);
       if (ctx.createLinearGradient) {
         // 渐变方向跟着柱子的长度方向走
         const gradient = this.isHorizontal()
-          ? ctx.createLinearGradient(rect.x, 0, rect.x + rect.width, 0)
-          : ctx.createLinearGradient(0, rect.y, 0, rect.y + rect.height);
+          ? ctx.createLinearGradient(drawRect.x, 0, drawRect.x + drawRect.width, 0)
+          : ctx.createLinearGradient(0, drawRect.y, 0, drawRect.y + drawRect.height);
         gradient.addColorStop(0, hexToRgba(color, 0.95));
         gradient.addColorStop(1, hexToRgba(color, 0.7));
         ctx.fillStyle = gradient;

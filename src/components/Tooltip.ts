@@ -3,6 +3,7 @@ import { roundRect } from './Legend';
 import type { ChartTheme, TooltipOption } from '../types';
 import type { ChartLayout } from '../internal';
 import { measureTextWidth } from '../util/text';
+import { shouldAnimate } from '../animation/motion';
 
 export interface TooltipRow {
   name: string;
@@ -29,27 +30,84 @@ export class Tooltip extends ChartComponent {
   public follow = true;
   /** 最近一次实际绘制的面板矩形（图表坐标系），供外观审计 / 测试断言使用。 */
   public lastRect: { x: number; y: number; width: number; height: number } | null = null;
+  /** 淡出中：等透明度到 0 再清内容（避免「淡入很柔、消失很硬」）。 */
+  private pendingClear = false;
 
   constructor(props: { width: number; height: number; zIndex?: number }) {
     super({ interactive: false, ...props });
   }
 
   public show(content: TooltipContent, anchor: [number, number]): this {
+    // 淡出中被重新唤起时也要重新淡入，否则会停在半透明的中间态
+    const needsFadeIn = !this.content || this.pendingClear || this.currentOpacity() < 0.999;
     this.content = content;
     this.anchor = anchor;
+    this.pendingClear = false;
+    if (needsFadeIn) this.playFade(true);
     return this.markDirty();
   }
 
   public hide(): this {
     if (!this.content) return this;
-    this.content = null;
-    this.lastRect = null;
+    if (!shouldAnimate()) {
+      this.content = null;
+      this.lastRect = null;
+      return this.markDirty();
+    }
+    this.pendingClear = true;
+    this.playFade(false);
     return this.markDirty();
+  }
+
+  /** 绘制用的透明度：没有动画状态时按「完全不透明」处理（向后兼容）。 */
+  public panelOpacity(): number {
+    const value = Number(this.state.panelOpacity);
+    return isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+  }
+
+  /** 动画起点用的当前透明度：还没有任何状态时是 0（面板尚未出现）。 */
+  private currentOpacity(): number {
+    const value = Number(this.state.panelOpacity);
+    return isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  }
+
+  /** 面板出现/消失：淡入 + 轻微上移（消失只淡出，不做位移，避免「飘走」的错觉）。 */
+  private playFade(inOut: boolean): void {
+    if (!shouldAnimate()) {
+      this.setState({ panelOpacity: inOut ? 1 : 0, slideY: 0 });
+      if (!inOut) {
+        this.content = null;
+        this.lastRect = null;
+      }
+      return;
+    }
+    const animations: any = { ...((this.props as any).animations || {}) };
+    animations.panelOpacity = {
+      from: this.currentOpacity(),
+      to: inOut ? 1 : 0,
+      duration: inOut ? 140 : 110,
+      easing: inOut ? 'easeOutCubic' : 'easeInQuad',
+      startTime: undefined,
+      finished: false,
+    };
+    if (inOut) {
+      animations.slideY = { from: 6, to: 0, duration: 180, easing: 'easeOutCubic', startTime: undefined, finished: false };
+      this.state.slideY = 6;
+    }
+    (this.props as any).animations = animations;
+    if (this.ice && this.ice.animationManager) this.ice.animationManager.add(this);
+    this.markDirty();
   }
 
   protected doRender(): void {
     this.lastRect = null;
     if (!this.content || !this.theme || !this.layout) return;
+    const alpha = this.panelOpacity();
+    if (this.pendingClear && alpha <= 0.02) {
+      this.content = null;
+      this.pendingClear = false;
+      return;
+    }
     const theme = this.theme;
     const option = this.option;
     const cfg = theme.tooltip;
@@ -101,6 +159,9 @@ export class Tooltip extends ChartComponent {
     const unit = this.unit();
     ctx.beginPath();
     ctx.save();
+    ctx.globalAlpha = alpha;
+    // 出现时从下方 6px 滑入
+    y += Number(this.state.slideY) || 0;
     // 阴影 + 面板
     ctx.shadowColor = cfg.shadowColor;
     ctx.shadowBlur = 10 * unit;

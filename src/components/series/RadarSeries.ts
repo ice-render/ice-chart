@@ -96,7 +96,9 @@ export class RadarSeries extends SeriesBase {
 
     // 顶点
     for (let i = 0; i < n; i++) {
-      this.drawSymbol(this.pixels[i * 2], this.pixels[i * 2 + 1], 'circle', this.symbolSizeAt(i), color, '#ffffff');
+      // 悬停：该指标顶点鼓起来（命中容差本来就比顶点大，不需要跟着改）
+      const boost = this.hoverBoost(i, 0.3);
+      this.drawSymbol(this.pixels[i * 2], this.pixels[i * 2 + 1], 'circle', this.symbolSizeAt(i) * boost, color, '#ffffff');
     }
     void cx;
     void cy;

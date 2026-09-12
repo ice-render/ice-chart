@@ -151,6 +151,8 @@ export class BoxplotSeries extends SeriesBase {
       ctx.lineTo(boxRect.x + boxRect.width, yMedian);
       ctx.lineWidth = Math.max(unit, 2 * unit);
       ctx.stroke();
+      // 悬停：箱体叠一层提亮 + 描边（不改几何，箱体宽度代表分组宽度，不该变形）
+      this.drawHoverOverlay(i, boxRect, { radius: 1 });
       void q1;
       void q3;
       void theme;

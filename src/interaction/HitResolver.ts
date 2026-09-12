@@ -64,8 +64,17 @@ export class HitResolver {
   }
 
   public seriesComponentOf(series: InternalSeries): SeriesBase | null {
+    if (!series) return null;
     for (const component of this.host.seriesComponents) {
       if (component.series === series) return component;
+    }
+    // 数据 / 配置更新会重建 norm（系列对象是新的），而悬停状态里还留着上一轮的系列对象。
+    // 按 id 兜底匹配，否则「更新数据时悬停被清掉」——实时刷新（仪表盘、监控）最明显。
+    const id = (series as any).id;
+    if (id !== undefined && id !== null) {
+      for (const component of this.host.seriesComponents) {
+        if (component.series && (component.series as any).id === id) return component;
+      }
     }
     return null;
   }

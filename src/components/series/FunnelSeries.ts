@@ -132,7 +132,9 @@ export class FunnelSeries extends SeriesBase {
       const geom = this.stageGeom[i];
       if (!geom) continue;
       if (localY < geom.y0 - 1 || localY > geom.y1 + 1) continue;
-      if (Math.abs(localX - geom.cx) <= this.widthAt(geom, localY) / 2 + 1) return i;
+      // 命中宽度跟着悬停放大，指针停在加宽后的边缘上不会「忽进忽出」
+      const half = (this.widthAt(geom, localY) / 2) * this.hoverBoost(i, 0.06) + 1;
+      if (Math.abs(localX - geom.cx) <= half) return i;
     }
     return -1;
   }
@@ -160,11 +162,15 @@ export class FunnelSeries extends SeriesBase {
       if (!geom) continue;
       const point = this.series.points[i];
       const color = point.color || this.series.color;
+      // 悬停：整级向两侧摊开一点（保持中心不动，仍不越过绘图区）
+      const boost = this.hoverBoost(i, 0.06);
+      const topWidth = geom.topWidth * boost;
+      const bottomWidth = geom.bottomWidth * boost;
       ctx.beginPath();
-      ctx.moveTo(geom.cx - geom.topWidth / 2, geom.y0);
-      ctx.lineTo(geom.cx + geom.topWidth / 2, geom.y0);
-      ctx.lineTo(geom.cx + geom.bottomWidth / 2, geom.y1);
-      ctx.lineTo(geom.cx - geom.bottomWidth / 2, geom.y1);
+      ctx.moveTo(geom.cx - topWidth / 2, geom.y0);
+      ctx.lineTo(geom.cx + topWidth / 2, geom.y0);
+      ctx.lineTo(geom.cx + bottomWidth / 2, geom.y1);
+      ctx.lineTo(geom.cx - bottomWidth / 2, geom.y1);
       ctx.closePath();
       const gradient = ctx.createLinearGradient(0, geom.y0, 0, geom.y1);
       gradient.addColorStop(0, hexToRgba(color, 0.95));

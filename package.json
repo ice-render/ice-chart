@@ -54,6 +54,7 @@
     "examples:prepare": "node scripts/prepare-examples.cjs",
     "examples:serve": "npm run examples:prepare && node scripts/serve-examples.cjs",
     "audit:interactions": "node scripts/audit-interactions.mjs",
+    "audit:hover": "node scripts/hover-sweep.mjs",
     "verify": "npm run lint && npm run types:check && npm run build && npm test -- --runInBand"
   },
   "peerDependencies": {

@@ -186,13 +186,19 @@ export class PieSeries extends SeriesBase {
       const outer = this.slices[i * 4 + 3];
       if (Math.abs(a1 - a0) <= 1e-9) continue;
       const color = this.series.points[i].color || this.series.color;
+      // 悬停反馈：扇形沿中角向外「脱出」一点（经典饼图交互）
+      const boost = this.hoverBoost(i, 1);
+      const offset = boost > 1 ? 7 * (boost - 1) * this.unit() : 0;
+      const midAngle = (a0 + a1) / 2;
+      const ox = Math.cos(midAngle) * offset;
+      const oy = Math.sin(midAngle) * offset;
       ctx.beginPath();
       if (inner > 0) {
-        ctx.arc(cx, cy, outer, a0, a1, dir < 0);
-        ctx.arc(cx, cy, inner, a1, a0, dir > 0);
+        ctx.arc(cx + ox, cy + oy, outer, a0, a1, dir < 0);
+        ctx.arc(cx + ox, cy + oy, inner, a1, a0, dir > 0);
       } else {
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, outer, a0, a1, dir < 0);
+        ctx.moveTo(cx + ox, cy + oy);
+        ctx.arc(cx + ox, cy + oy, outer, a0, a1, dir < 0);
       }
       ctx.closePath();
       ctx.fillStyle = color;

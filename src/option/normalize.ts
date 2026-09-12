@@ -509,8 +509,12 @@ function buildPoints(
         points.push({ index: i, xValue: i, y: null, raw: item, base: 0, top: 0 });
         continue;
       }
+      // 恰好 5 个数 = 已经算好的五数概括 [min, Q1, median, Q3, max]；
+      // 其它长度 = 原始观测值，自动算分位数（曾经用 >= 5 判断，
+      // 于是 40 个原始观测值被当成五数概括 —— min/max 包不住四分位，箱体是错乱的，
+      // 命中判定也跟着失效。这个 bug 只在真实浏览器里悬停才看得出来。）
       const summary: [number, number, number, number, number] =
-        tuple.length >= 5 ? [tuple[0], tuple[1], tuple[2], tuple[3], tuple[4]] : computeBoxplotSummary(tuple);
+        tuple.length === 5 ? [tuple[0], tuple[1], tuple[2], tuple[3], tuple[4]] : computeBoxplotSummary(tuple);
       hasExplicitX = true;
       points.push({
         index: i,
