@@ -33,7 +33,11 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
    某些路径下事件对象上的 `preventDefault` 还是未绑定的原生方法（抛 `Illegal invocation`）。
    统一走 `InteractionController.preventDefault()`（取 `originalEvent` + try/catch）。
 5. **引擎的原生事件监听挂在 window 上**：同一页面上的每张图都会收到**全页面**的事件。
-   一切指针入口都必须先过 `isOverCanvas()`，否则会出现「在 A 图移动鼠标，B 图清掉刚镜像的悬停」。
+  一切指针入口都必须先过 `isOverCanvas()`，否则会出现「在 A 图移动鼠标，B 图清掉刚镜像的悬停」。
+   **注意**：坐标换算用的是引擎缓存的 canvas 内容盒，页面在画布上方插入内容 / 滚动会让它过期 ——
+   引擎 1.4.5 起移动事件每帧重读（`ICE.refreshInputRect()`），所以本包 peer 依赖是 `^1.4.5`；
+   在那之前**不要把会产生布局变化的面板放在画布上方**（示例页踩过：状态行出现后画布下推 26px，
+   悬停直接落空，8 个悬停探针失败）。
 6. **键盘只由最后激活的图响应**（模块级 `activeController`，`destroy()` 时释放）。
    不要在 `keydown` 里对所有图生效。
 7. **联动回显必须 `silent()`**：`linkCharts` 把事件转发给其它图时必须包在 `chart.silent()` 里，

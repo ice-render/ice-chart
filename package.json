@@ -58,7 +58,7 @@
     "verify": "npm run lint && npm run types:check && npm run build && npm test -- --runInBand"
   },
   "peerDependencies": {
-    "ice-render": "^1.3.0"
+    "ice-render": "^1.4.5"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",
