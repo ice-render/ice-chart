@@ -158,6 +158,7 @@ npm install ice-chart ice-render
 | `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、按权重定大小 |
 | `function` | `expression: 'sin(x)/x'`（+ `params` / `domain`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合 |
 | `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
+| `parametric`（极坐标） | `polarExpression: 'cos(3*t)'` + `polarGrid: true` | 极坐标 `r(θ)`（玫瑰线 / 心形线 / 螺线），配 `aspect: 'equal'` 出 MATLAB `polarplot` 观感 |
 
 ## 函数绘图（迷你 MATLAB）
 
@@ -216,6 +217,18 @@ chart.expressionErrors(); // 只取 error（标红用）
 - **等比坐标**：`aspect: 'equal'`（MATLAB 的 `axis equal`）让 x / y 一个数据单位在屏幕上等长，
   绘图区同时收缩成正方形。参数曲线 / 圆 / 几何图形不开它会被拉成椭圆 ——
   实测单位圆在不等比时 x 方向 438px/单位、y 方向 153px/单位（拉伸 2.86 倍）。
+- **极坐标 r(θ)**：`polarExpression` 写 r 的公式（自变量 θ 用 `t` 表示），组件按
+  `x = r·cosθ, y = r·sinθ` 展开成同一条参数曲线；配 `aspect: 'equal'` + `polarGrid: true`
+  就是 MATLAB 的 `polarplot`（同心圆 + 辐条底图，半径刻度沿 45° 方向）：
+
+  ```ts
+  { aspect: 'equal', polarGrid: { splitNumber: 4, spokeCount: 12 },
+    series: [{ type: 'parametric', polarExpression: 'cos(3*t)',  // 三瓣玫瑰线
+               domain: [0, Math.PI * 2], name: 'r = cos(3θ)' }] }
+  ```
+
+  网格圆心取**比例尺映射后的原点**、半径取「原点到最近边界」——所以同心圆永远完整落在绘图区内，
+  数据域不对称也不会跑偏。
 
 ## 动画
 

@@ -14,6 +14,7 @@ import { Crosshair } from './components/Crosshair';
 import { Highlight } from './components/Highlight';
 import { Brush } from './components/Brush';
 import { RadarGrid } from './components/RadarGrid';
+import { PolarGrid } from './components/PolarGrid';
 import { DataZoomSlider } from './components/DataZoomSlider';
 import { createSeriesComponent } from './components/series/createSeries';
 import type { SeriesBase } from './components/series/SeriesBase';
@@ -120,6 +121,8 @@ export class ICEChart {
   public plotArea: PlotArea;
   public grid: GridLines;
   public radarGrid: RadarGrid;
+  /** 极坐标网格（r(θ) 曲线用；画在直角坐标场景里，配合 aspect:'equal'）。 */
+  public polarGrid: PolarGrid;
   public axisX: Axis;
   /** y 轴组件，与 norm.yAxes 一一对应（axisYList[0] 是主 y 轴）。 */
   public axisYList: Axis[] = [];
@@ -204,6 +207,7 @@ export class ICEChart {
     this.plotArea = new PlotArea({ left: 0, top: 0, width: 1, height: 1, zIndex: Z.plotArea });
     this.grid = new GridLines({ width: canvas.width, height: canvas.height, zIndex: Z.grid });
     this.radarGrid = new RadarGrid({ width: canvas.width, height: canvas.height, zIndex: Z.grid + 5 });
+    this.polarGrid = new PolarGrid({ width: canvas.width, height: canvas.height, zIndex: Z.grid + 6 });
     this.axisX = new Axis({ orientation: 'x', width: canvas.width, height: canvas.height, zIndex: Z.axis });
     this.axisYList = [
       new Axis({ orientation: 'y', width: canvas.width, height: canvas.height, zIndex: Z.axis, axisIndex: 0, position: 'left' }),
@@ -220,6 +224,7 @@ export class ICEChart {
       this.plotArea,
       this.grid,
       this.radarGrid,
+      this.polarGrid,
       this.axisX,
       ...this.axisYList,
       this.titleComponent,
@@ -869,6 +874,22 @@ export class ICEChart {
           }
         : null;
     this.radarGrid.markDirty();
+
+    // 极坐标网格：直角坐标场景 + aspect:'equal' 时才是「圆」，所以只在这种组合下显示
+    const polarGridOption = norm.option.polarGrid;
+    const showPolarGrid = norm.kind === 'cartesian' && !!polarGridOption && norm.option.aspect === 'equal';
+    this.polarGrid.setState({ width: canvas.width, height: canvas.height, display: showPolarGrid });
+    this.polarGrid.theme = theme;
+    this.polarGrid.layout = layout;
+    this.polarGrid.coord = showPolarGrid
+      ? {
+          plot,
+          xScale: norm.xAxis.scale as any,
+          yScale: norm.yAxis.scale as any,
+          options: polarGridOption === true ? {} : (polarGridOption as any),
+        }
+      : null;
+    this.polarGrid.markDirty();
 
     this.syncAxisComponents();
     for (let i = 0; i < this.axisYList.length; i++) {

@@ -115,25 +115,32 @@ for (const name of pages) {
           const chart = list[i];
           const comp = chart.seriesComponents[s];
           const n = comp.series.points.length;
-          const targets = [...new Set(n <= 3 ? [0, n - 1] : [0, Math.floor(n / 2), n - 1])];
+          // 候选点铺得密一些：玫瑰线 / 参数曲线的极值点往往正好压在绘图区边缘，
+          // 只取首/中/尾会被「贴边跳过」全部过滤掉，于是新图表默默没有探针。
+          const fractions = [0, 1 / 8, 1 / 4, 3 / 8, 1 / 2, 5 / 8, 3 / 4, 7 / 8, 1];
+          const candidates = [...new Set(fractions.map((f) => Math.round((n - 1) * f)))];
           // 画布在页面里的位置 + CSS 缩放：布局坐标是画布内部坐标，鼠标事件是视口坐标
           const canvasRect = chart.canvasElement.getBoundingClientRect();
           const canvas = chart.layout.canvas;
           const scaleX = canvasRect.width / (canvas.width || 1);
           const scaleY = canvasRect.height / (canvas.height || 1);
-          return targets.map((t) => {
+          const valid = [];
+          for (const t of candidates) {
             const pixel = comp.pixelAt(t);
-            if (!pixel) return null;
+            if (!pixel) continue;
             // 组件盒的左上角 + 组件本地像素：极坐标 / 桑基 / 雷达的盒不等于 layout.plot
             const localX = comp.state.left + pixel[0];
             const localY = comp.state.top + pixel[1];
             const plot = { x: comp.state.left, y: comp.state.top, width: comp.state.width, height: comp.state.height };
-            const margin = 4;
-            // 贴边点（尤其时间轴的首尾）本来就落在绘图区边缘外，不能算交互缺陷
-            if (localX < plot.x + margin || localX > plot.x + plot.width - margin) return null;
-            if (localY < plot.y + margin || localY > plot.y + plot.height - margin) return null;
-            return [canvasRect.x + localX * scaleX, canvasRect.y + localY * scaleY, t];
-          });
+            const margin = 6;
+            // 贴边点（尤其时间轴的首尾、极坐标曲线的极值点）本来就在绘图区边缘，不算交互缺陷
+            if (localX < plot.x + margin || localX > plot.x + plot.width - margin) continue;
+            if (localY < plot.y + margin || localY > plot.y + plot.height - margin) continue;
+            valid.push({ t, view: [canvasRect.x + localX * scaleX, canvasRect.y + localY * scaleY] });
+          }
+          // 有效点里挑首 / 中 / 尾三个，保证分散
+          const picked = valid.length <= 3 ? valid : [valid[0], valid[Math.floor(valid.length / 2)], valid[valid.length - 1]];
+          return picked.map((item) => [item.view[0], item.view[1], item.t]);
         },
         { i: meta.index, s }
       );

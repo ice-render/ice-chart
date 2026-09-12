@@ -230,6 +230,19 @@ export interface SweepOption {
   mode?: 'loop' | 'pingpong';
 }
 
+/** 极坐标网格（画 `r(θ)` 时的同心圆 + 辐条底图）。 */
+export interface PolarGridOption {
+  show?: boolean;
+  /** 同心圆数量，默认 4。 */
+  splitNumber?: number;
+  /** 辐条数量（角度刻度），默认 12（每 30°）。 */
+  spokeCount?: number;
+  /** 0° 的方向（度），默认 0 = 3 点方向。 */
+  startAngle?: number;
+  /** 是否画半径刻度，默认 true。 */
+  showLabels?: boolean;
+}
+
 export interface SeriesOption {
   id?: string;
   type: SeriesType;
@@ -306,6 +319,12 @@ export interface SeriesOption {
   /** 参数曲线（`type: 'parametric'`）：`x = xExpression, y = yExpression`（自变量是 `t`）。 */
   xExpression?: string;
   yExpression?: string;
+  /**
+   * 极坐标函数简写：`r = polarExpression`（自变量 θ 用 `t` 表示）。
+   * 组件按 `x = r·cosθ, y = r·sinθ` 展开成参数曲线 —— 玫瑰线 `1+cos(3*t)` 直接能用。
+   * 配 `aspect: 'equal'`（圆才是圆）与 `polarGrid: true`（极坐标底图）就是 MATLAB 的 polarplot。
+   */
+  polarExpression?: string;
   /** 参数范围：function 是 x 的取值范围（默认 [-10,10]），parametric 是 t 的范围（默认 [0, 2π]）。 */
   domain?: [number, number];
   /** 基础采样点数（默认 240 / 360），自适应细分在此之上加点。 */
@@ -482,6 +501,8 @@ export interface ChartOption {
   treemap?: TreemapOption;
   /** 力导向关系图配置。 */
   graph?: GraphOption;
+  /** 极坐标网格（画 `r(θ)` 时的同心圆 + 辐条底图）。 */
+  polarGrid?: boolean | PolarGridOption;
   /**
    * 坐标轴比例：`'equal'` = x/y 一个数据单位在屏幕上等长（MATLAB 的 `axis equal`）。
    * 画圆 / 参数曲线 / 几何图形时必须开，否则圆会被拉成椭圆（绘图区本身也会收缩成正方形）。

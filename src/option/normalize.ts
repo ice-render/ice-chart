@@ -125,6 +125,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.dataZoom = option.dataZoom || null;
   merged.theme = option.theme;
   merged.aspect = option.aspect === 'equal' ? 'equal' : 'auto';
+  merged.polarGrid = option.polarGrid || null;
   merged.tooltip = { show: option.tooltip?.show !== false, ...merged.tooltip };
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };
 
@@ -744,13 +745,16 @@ function buildCurvePoints(option: SeriesOption, context?: NormalizeContext): { p
   const points: DataPoint[] = [];
   const params = option.params || {};
   const isFunction = option.type === 'function';
-  const source = isFunction ? String(option.expression || '') : String(option.xExpression || '');
-  const sourceY = isFunction ? '' : String(option.yExpression || '');
+  // 极坐标简写：`polarExpression` = r(θ)，展开成 (r·cosθ, r·sinθ) 的参数曲线
+  const polarSource = option.polarExpression === undefined || option.polarExpression === null ? '' : String(option.polarExpression).trim();
+  const isPolar = !isFunction && polarSource !== '';
+  const source = isFunction ? String(option.expression || '') : isPolar ? polarSource : String(option.xExpression || '');
+  const sourceY = isFunction || isPolar ? '' : String(option.yExpression || '');
   let compiledX: { evaluate: (scope: Record<string, number>) => number } | null = null;
   let compiledY: { evaluate: (scope: Record<string, number>) => number } | null = null;
   try {
     compiledX = compileExpression(source);
-    if (!isFunction) compiledY = compileExpression(sourceY);
+    if (!isFunction && !isPolar) compiledY = compileExpression(sourceY);
   } catch (err) {
     // 编译失败：点全部为空（曲线不画），原因由 applyCurveDomain 记录到 expressionError
     compiledX = null;
@@ -785,9 +789,14 @@ function buildCurvePoints(option: SeriesOption, context?: NormalizeContext): { p
     scope[variable] = parameter;
     let x = parameter;
     let y = NaN;
+    let radius = NaN;
     if (compiledX) {
       if (isFunction) {
         y = compiledX.evaluate(scope);
+      } else if (isPolar) {
+        radius = compiledX.evaluate(scope);
+        x = radius * Math.cos(parameter);
+        y = radius * Math.sin(parameter);
       } else if (compiledY) {
         x = compiledX.evaluate(scope);
         y = compiledY.evaluate(scope);
@@ -799,10 +808,10 @@ function buildCurvePoints(option: SeriesOption, context?: NormalizeContext): { p
       // function 的 xValue 就是横坐标；parametric 的 xValue 是参数 t（横坐标另存在 raw.x）
       xValue: isFunction ? parameter : parameter,
       y: finite ? y : null,
-      raw: isFunction ? { x: parameter, y } : { t: parameter, x, y },
+      raw: isFunction ? { x: parameter, y } : isPolar ? { t: parameter, x, y, r: radius } : { t: parameter, x, y },
       base: 0,
       top: finite ? y : 0,
-      name: isFunction ? source : `(${source}, ${sourceY})`,
+      name: isFunction ? source : isPolar ? `r = ${source}` : `(${source}, ${sourceY})`,
     });
   }
   return { points, hasExplicitX: true };
@@ -836,6 +845,17 @@ function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?
       params,
       values: ys,
     });
+  } else if (option.polarExpression !== undefined && option.polarExpression !== null && String(option.polarExpression).trim() !== '') {
+    // 极坐标：诊断看的是 r(θ) 本身（x/y 是它的派生值，用它俩判断会给出误导性的提示）
+    const radii: number[] = [];
+    for (const point of series.points) {
+      const raw: any = point.raw;
+      if (raw && typeof raw === 'object' && typeof raw.r === 'number') radii.push(raw.r);
+    }
+    diagnostics = diagnoseExpression(String(option.polarExpression), { variable: 't', params, values: radii }).map((item) => ({
+      ...item,
+      message: `r(θ)：${item.message}`,
+    }));
   } else {
     const sourceX = String(option.xExpression || '');
     const sourceY = String(option.yExpression || '');

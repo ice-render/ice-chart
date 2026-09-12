@@ -180,6 +180,21 @@
 
     <div class="card">
       <div class="snapshot-head">
+        <span class="snapshot-title">极坐标 r(θ)（polarplot）</span>
+        <span class="snapshot-actions">
+          <button type="button" id="btn-polar-1">玫瑰线 cos(3θ)</button>
+          <button type="button" id="btn-polar-2">心形 1−cosθ</button>
+          <button type="button" id="btn-polar-3">螺线 θ/4</button>
+          <button type="button" id="btn-polar-4">毛毛虫 1+0.3cos(8θ)</button>
+        </span>
+        <span class="spacer"></span>
+        <span class="snapshot-meta">同心圆 + 辐条底图，r 的取值直接决定形状</span>
+      </div>
+      <canvas id="polar" width="960" height="520"></canvas>
+    </div>
+
+    <div class="card">
+      <div class="snapshot-head">
         <span class="snapshot-title">参数曲线（李萨如）</span>
         <span class="snapshot-actions">
           <button type="button" id="btn-shape-1">(sin3t, cos2t)</button>
@@ -260,6 +275,61 @@
             color: '#0d6efd',
           },
         ],
+      });
+
+      // 极坐标 r(θ)：polarExpression 就是 r 的公式（自变量 θ 写成 t）
+      const polar = ICEChart.createChart('polar', {
+        title: { text: '极坐标函数', subtext: 'r = cos(3θ)' },
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        aspect: 'equal',
+        polarGrid: { splitNumber: 4, spokeCount: 12 },
+        xAxis: { type: 'value' },
+        yAxis: {},
+        animation: { enter: { duration: 800, easing: 'easeOutCubic' } },
+        series: [
+          {
+            id: 'rp',
+            type: 'parametric',
+            name: 'r = cos(3θ)',
+            polarExpression: 'cos(3*t)',
+            domain: [0, Math.PI * 2],
+            samples: 360,
+            lineWidth: 2,
+            color: '#0d6efd',
+          },
+        ],
+      });
+
+      const polarShapes = [
+        { r: 'cos(3*t)', name: 'r = cos(3θ)', domain: [0, Math.PI * 2] },
+        { r: '1 - cos(t)', name: 'r = 1 − cosθ', domain: [0, Math.PI * 2] },
+        { r: 't/4', name: 'r = θ/4', domain: [0, Math.PI * 6] },
+        { r: '1 + 0.3*cos(8*t)', name: 'r = 1 + 0.3cos(8θ)', domain: [0, Math.PI * 2] },
+      ];
+      polarShapes.forEach((shape, index) => {
+        document.getElementById(`btn-polar-${index + 1}`).addEventListener('click', () => {
+          polar.setOption(
+            {
+              ...polar.getOption(),
+              title: { text: '极坐标函数', subtext: shape.name },
+              series: [
+                {
+                  id: 'rp',
+                  type: 'parametric',
+                  name: shape.name,
+                  polarExpression: shape.r,
+                  domain: shape.domain,
+                  samples: 360,
+                  lineWidth: 2,
+                  color: '#0d6efd',
+                },
+              ],
+            },
+            { animate: true, preserveView: false }
+          );
+          write(`切换极坐标曲线：${shape.name}`);
+        });
       });
 
       const shapes = [
@@ -417,7 +487,8 @@
       parametric.on('item:hover', (p) => write(`参数曲线 hover  ${p.name}`));
 
       window.__chart = chart;
-      window.__charts = { functions: chart, parametric };
+      polar.on('item:hover', (p) => write(`极坐标 hover  ${p.name}`));
+      window.__charts = { functions: chart, parametric, polar };
       showErrors();
       mountSnapshotPanel();
     </script>
