@@ -54,6 +54,7 @@
       chart.on('item:hover', (p) => write(`hover  ${p.seriesName} @ ${new Date(p.xValue).toISOString()} = ${p.value}`));
       chart.on('zoom:change', (r) => write(`zoom   ${new Date(r.x[0]).toISOString()} → ${new Date(r.x[1]).toISOString()}`));
       chart.on('brush:end', (r) => write(`brush  完成（mode=zoom，自动应用为数据域）`));
+      window.__chart = chart;
     </script>
   </body>
 </html>

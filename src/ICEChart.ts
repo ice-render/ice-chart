@@ -14,6 +14,7 @@ import { Crosshair } from './components/Crosshair';
 import { Highlight } from './components/Highlight';
 import { Brush } from './components/Brush';
 import { RadarGrid } from './components/RadarGrid';
+import { DataZoomSlider } from './components/DataZoomSlider';
 import { createSeriesComponent } from './components/series/createSeries';
 import type { SeriesBase } from './components/series/SeriesBase';
 import { PieSeries } from './components/series/PieSeries';
@@ -74,6 +75,7 @@ export class ICEChart {
   public crosshair: Crosshair | null = null;
   public highlight: Highlight | null = null;
   public brushComponent: Brush | null = null;
+  public dataZoomSlider: DataZoomSlider | null = null;
   public seriesComponents: SeriesBase[] = [];
   public controller: InteractionController;
 
@@ -145,6 +147,7 @@ export class ICEChart {
     this.crosshair = new Crosshair({ width: canvas.width, height: canvas.height, zIndex: Z.crosshair });
     this.highlight = new Highlight({ width: canvas.width, height: canvas.height, zIndex: Z.highlight });
     this.brushComponent = new Brush({ width: canvas.width, height: canvas.height, zIndex: Z.brush });
+    this.dataZoomSlider = new DataZoomSlider({ left: 0, top: 0, width: canvas.width, height: 26, zIndex: Z.brush + 5 });
     this.tooltip = new Tooltip({ width: canvas.width, height: canvas.height, zIndex: Z.tooltip });
 
     this.root.addChildren([
@@ -158,6 +161,7 @@ export class ICEChart {
       this.crosshair,
       this.highlight,
       this.brushComponent,
+      this.dataZoomSlider,
       this.tooltip,
     ]);
 
@@ -648,7 +652,68 @@ export class ICEChart {
           : null;
     }
 
+    if (this.dataZoomSlider) {
+      const sliderRect = layout.slider;
+      if (sliderRect) {
+        this.dataZoomSlider.setState({
+          left: sliderRect.x,
+          top: sliderRect.y,
+          width: sliderRect.width,
+          height: sliderRect.height,
+          display: true,
+        });
+        const [startFraction, endFraction] = this.domainFractions();
+        this.dataZoomSlider.setWindow(startFraction, endFraction);
+      } else {
+        this.dataZoomSlider.setState({ display: false });
+      }
+      this.dataZoomSlider.theme = theme;
+      this.dataZoomSlider.markDirty();
+    }
+
     this.syncSeries(animate);
+  }
+
+  /** 当前 x 数据域在完整数据域中的比例窗口（0~1），供 dataZoom 滑块显示。 */
+  public domainFractions(): [number, number] {
+    const full = this.fullXDomain;
+    const domain = this.norm.xAxis.domain;
+    if (!full || full.length < 2 || !domain || domain.length < 2) return [0, 1];
+    if (this.norm.xAxis.type === 'category') {
+      const n = full.length;
+      if (n <= 1) return [0, 1];
+      const from = Math.max(0, full.indexOf(domain[0]));
+      const to = full.indexOf(domain[domain.length - 1]);
+      // 类目轴的窗口比例按「类目数」计：窗口 [from..to] 对应 [from/n, (to+1)/n]，
+      // 与 dataZoom.start/end 的语义（占类目总数的百分比）保持一致。
+      return [from / n, ((to < 0 ? n - 1 : to) + 1) / n];
+    }
+    const f0 = Number(full[0]);
+    const f1 = Number(full[1]);
+    const span = f1 - f0 || 1;
+    return [(Number(domain[0]) - f0) / span, (Number(domain[1]) - f0) / span];
+  }
+
+  /** 由 dataZoom 滑块的比例窗口反推数据域。 */
+  public setDomainFromFractions(start: number, end: number, source = 'slider'): this {
+    if (this.norm.kind !== 'cartesian') return this;
+    const [currentStart, currentEnd] = this.domainFractions();
+    if (Math.abs(currentStart - start) < 1e-4 && Math.abs(currentEnd - end) < 1e-4) return this;
+    const full = this.fullXDomain;
+    if (this.norm.xAxis.type === 'category') {
+      const n = full.length;
+      if (n < 2) return this;
+      let from = Math.round(start * n);
+      let to = Math.round(end * n) - 1;
+      from = Math.max(0, Math.min(n - 1, from));
+      to = Math.max(0, Math.min(n - 1, to));
+      if (to <= from) to = Math.min(n - 1, from + 1);
+      return this.setDomain('x', [full[from], full[to]], source);
+    }
+    const f0 = Number(full[0]);
+    const f1 = Number(full[1]);
+    const span = f1 - f0;
+    return this.setDomain('x', [f0 + span * start, f0 + span * end], source);
   }
 
   /** 让 y 轴组件数量 / 位置与 norm.yAxes 保持一致（轴数量变化时增删组件）。 */

@@ -176,6 +176,16 @@ export interface DataZoomOption {
   /** 缩放的最小/最大跨度（占数据域比例），默认 0.02 / 1。 */
   minSpan?: number;
   maxSpan?: number;
+  /** 底部滑块组件。不配置时，只要声明了 dataZoom 就默认显示。 */
+  slider?: {
+    show?: boolean;
+    /** 轨道高度（像素），默认 26。 */
+    height?: number;
+    /** 选中窗口颜色。 */
+    color?: string;
+    /** 是否在两端显示当前区间文本。 */
+    showDetail?: boolean;
+  };
 }
 
 export interface ZoomInteractionOption {

@@ -3,6 +3,7 @@ import type { BrushRange, DataPointParams, TooltipParams } from '../types';
 import type { Crosshair } from '../components/Crosshair';
 import type { Highlight, HighlightItem } from '../components/Highlight';
 import type { Brush } from '../components/Brush';
+import type { DataZoomSlider, SliderPart } from '../components/DataZoomSlider';
 import type { Legend } from '../components/Legend';
 import type { PlotArea } from '../components/PlotArea';
 import type { Tooltip } from '../components/Tooltip';
@@ -22,6 +23,10 @@ export interface InteractionHost extends HitHost {
   toggleSeries(seriesId: string, forceSelected?: boolean): void;
   /** 切换饼图扇区显隐（极坐标图例）。 */
   toggleSlice(seriesId: string, dataIndex: number, forceSelected?: boolean): void;
+  /** dataZoom 滑块（未启用时为 null）。 */
+  dataZoomSlider: DataZoomSlider | null;
+  /** 由滑块的 0~1 比例窗口反推数据域。 */
+  setDomainFromFractions(start: number, end: number, source?: string): void;
   formatAxisValue(axis: 'x' | 'y', value: any): string;
   /** 未经缩放的完整数据域（缩放约束用）。 */
   fullDomain(axis: 'x' | 'y'): any[];
@@ -30,7 +35,17 @@ export interface InteractionHost extends HitHost {
 type DragState =
   | null
   | { mode: 'brush'; startX: number; startY: number; moved: boolean }
-  | { mode: 'pan'; startX: number; startY: number; domainX: [any, any] | null; domainY: [any, any] | null; moved: boolean };
+  | { mode: 'pan'; startX: number; startY: number; domainX: [any, any] | null; domainY: [any, any] | null; moved: boolean }
+  | {
+      mode: 'slider';
+      part: SliderPart;
+      startX: number;
+      startY: number;
+      originStart: number;
+      originEnd: number;
+      anchorFraction: number;
+      moved: boolean;
+    };
 
 /**
  * 当前持有键盘焦点的控制器。
@@ -420,6 +435,36 @@ export class InteractionController {
     activeController = this;
     const target = this.resolveTarget(screenX, screenY);
     if (target.kind === 'legend') return true;
+    const slider = this.host.dataZoomSlider;
+    if (slider && target.component === slider) {
+      const part = slider.hitPart(target.local[0], target.local[1]);
+      if (part) {
+        this.preventDefault(evt);
+        const fraction = slider.fractionAt(target.local[0]);
+        this.drag = {
+          mode: 'slider',
+          part,
+          startX: screenX,
+          startY: screenY,
+          originStart: slider.start,
+          originEnd: slider.end,
+          anchorFraction: fraction,
+          moved: false,
+        };
+        slider.setActive(part);
+        if (part === 'track') {
+          // 点击轨道：把窗口平移到点击处
+          const span = slider.end - slider.start;
+          const start = clamp(fraction - span / 2, 0, 1 - span);
+          this.host.setDomainFromFractions(start, start + span, 'slider');
+          slider.setActive('window');
+          this.drag.part = 'window';
+          this.drag.originStart = start;
+          this.drag.originEnd = start + span;
+        }
+        return true;
+      }
+    }
     if (!this.resolver.isInsidePlot(target.chart[0], target.chart[1])) return false;
 
     const interaction = this.host.norm.option.interaction || {};
@@ -463,6 +508,11 @@ export class InteractionController {
         if (this.host.brush) this.host.brush.setRect(null);
       }
       this.host.emit('brush:end', range);
+      return;
+    }
+    if (drag.mode === 'slider') {
+      const slider = this.host.dataZoomSlider;
+      if (slider) slider.setActive(null);
     }
   }
 
@@ -487,6 +537,29 @@ export class InteractionController {
       }
       const range = this.brushRange();
       if (range) this.host.emit('brush:change', range);
+      return;
+    }
+
+    if (drag.mode === 'slider') {
+      const slider = this.host.dataZoomSlider;
+      if (!slider) return;
+      drag.moved = true;
+      const [worldX, worldY] = this.host.ice.screenToWorld(screenX, screenY);
+      const localX = slider.globalToLocal(worldX, worldY)[0];
+      const fraction = slider.fractionAt(localX);
+      const span = drag.originEnd - drag.originStart;
+      let start = drag.originStart;
+      let end = drag.originEnd;
+      if (drag.part === 'start') {
+        start = clamp(fraction, 0, drag.originEnd - 0.02);
+      } else if (drag.part === 'end') {
+        end = clamp(fraction, drag.originStart + 0.02, 1);
+      } else {
+        const shift = fraction - drag.anchorFraction;
+        start = clamp(drag.originStart + shift, 0, 1 - span);
+        end = start + span;
+      }
+      this.host.setDomainFromFractions(start, end, 'slider');
       return;
     }
 

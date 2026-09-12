@@ -14,6 +14,8 @@ const TICK_LENGTH = 4;
 const LABEL_GAP = 6;
 const AXIS_NAME_GAP = 6;
 const LEGEND_GAP = 8;
+const SLIDER_GAP = 14;
+const SLIDER_HEIGHT = 26;
 
 /**
  * 计算图表布局（标题 / 图例 / 绘图区 / 坐标轴）。
@@ -85,6 +87,18 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     if (norm.xAxis.option.name) bottom -= xAxisLayout.nameHeight + AXIS_NAME_GAP;
   }
 
+  // dataZoom 滑块：在坐标轴之下预留一条轨道
+  const sliderOption = norm.option.dataZoom && norm.option.dataZoom.slider;
+  const showSlider = norm.kind === 'cartesian' && !!norm.option.dataZoom && (!sliderOption || sliderOption.show !== false);
+  const sliderHeight = Math.max(12, Number(sliderOption && sliderOption.height) || SLIDER_HEIGHT);
+  let sliderY: number | null = null;
+  if (showSlider) {
+    const limit = canvas.height - margin.bottom;
+    const need = sliderHeight + SLIDER_GAP;
+    if (bottom + need > limit) bottom -= bottom + need - limit;
+    sliderY = bottom + SLIDER_GAP;
+  }
+
   let plot: Rect = {
     x: Math.round(Math.max(0, left)),
     y: Math.round(Math.max(0, top)),
@@ -112,6 +126,11 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     title.y = margin.top;
   }
 
+  const slider: Rect | null =
+    showSlider && sliderY !== null
+      ? { x: plot.x, y: Math.round(sliderY), width: plot.width, height: Math.round(sliderHeight) }
+      : null;
+
   return {
     canvas,
     plot,
@@ -120,6 +139,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     legend,
     title,
     polar,
+    slider,
     xAxisLayout,
     yAxes: yAxisLayouts,
     yAxisLayout,

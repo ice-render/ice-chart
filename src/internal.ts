@@ -111,6 +111,8 @@ export interface ChartLayout {
   title: TitleLayout | null;
   /** 极坐标圆心与半径；直角坐标场景为 null。 */
   polar: PolarLayout | null;
+  /** dataZoom 滑块占用的矩形；未启用时为 null。 */
+  slider: Rect | null;
   xAxisLayout: AxisLayout;
   /** 每个 y 轴的刻度布局，与 norm.yAxes 一一对应。 */
   yAxes: AxisLayout[];

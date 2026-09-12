@@ -79,7 +79,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.title = option.title;
   merged.xAxis = option.xAxis || {};
   merged.yAxis = option.yAxis || {};
-  merged.dataZoom = option.dataZoom || {};
+  merged.dataZoom = option.dataZoom || null;
   merged.theme = option.theme;
   merged.tooltip = { show: option.tooltip?.show !== false, ...merged.tooltip };
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };

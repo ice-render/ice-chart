@@ -128,8 +128,15 @@ export class Axis extends ChartComponent {
       if (this.orientation === 'x') {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const nameY = plot.y + plot.height + tickGap + axisLayout.labelHeight + 6 * unit + fontSize * 0.5;
-        ctx.fillText(option.name, plot.x + plot.width / 2, nameY);
+        if (this.layout.slider) {
+          // 下方有 dataZoom 滑块时，轴名挪到轴线末端上方，避免压住滑块
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(option.name, plot.x + plot.width, plot.y + plot.height - 4 * unit);
+        } else {
+          const nameY = plot.y + plot.height + tickGap + axisLayout.labelHeight + 6 * unit + fontSize * 0.5;
+          ctx.fillText(option.name, plot.x + plot.width / 2, nameY);
+        }
       } else {
         const nameOffset = axisLayout.labelWidth + tickGap + axisLayout.nameHeight + 4 * unit;
         const nameX = edgeX + direction * nameOffset;

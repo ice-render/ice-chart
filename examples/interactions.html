@@ -79,6 +79,7 @@
       chart.on('brush:end', (r) => write(`brush  完成 x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
       chart.on('zoom:change', (r) => write(`zoom   x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
       chart.on('plot:click', () => write('plot   click 空白处'));
+      window.__chart = chart;
     </script>
   </body>
 </html>
