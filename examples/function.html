@@ -134,9 +134,13 @@
           <button type="button" id="btn-shape-1">(sin3t, cos2t)</button>
           <button type="button" id="btn-shape-2">螺线</button>
           <button type="button" id="btn-shape-3">心形线</button>
+          <label class="snapshot-meta" for="aspect-equal">
+            <input type="checkbox" id="aspect-equal" checked />
+            等比坐标（axis equal）
+          </label>
         </span>
         <span class="spacer"></span>
-        <span class="snapshot-meta">x(t)、y(t) 两条表达式合成一条曲线</span>
+        <span class="snapshot-meta">x(t)、y(t) 两条表达式合成一条曲线；等比坐标下圆才是圆</span>
       </div>
       <canvas id="parametric" width="960" height="420"></canvas>
     </div>
@@ -188,6 +192,8 @@
         title: { text: '参数曲线', subtext: 'x = sin(3t)、y = cos(2t)' },
         legend: { show: false },
         tooltip: { trigger: 'item' },
+        // 等比坐标：x/y 一个数据单位等长，圆才是圆（MATLAB 的 axis equal）
+        aspect: 'equal',
         xAxis: { type: 'value', name: 'x(t)' },
         yAxis: { name: 'y(t)' },
         animation: { enter: { duration: 900, easing: 'easeOutCubic' } },
@@ -218,6 +224,7 @@
         parametric.setOption(
           {
             ...parametric.getOption(),
+            aspect: document.getElementById('aspect-equal').checked ? 'equal' : 'auto',
             title: { text: '参数曲线', subtext: `x = ${shape.x}，y = ${shape.y}` },
             series: [
               {
@@ -236,6 +243,14 @@
         );
         write(`切换参数曲线：${shape.name}`);
       }
+
+      document.getElementById('aspect-equal').addEventListener('change', (event) => {
+        parametric.setOption(
+          { ...parametric.getOption(), aspect: event.target.checked ? 'equal' : 'auto' },
+          { animate: false, preserveView: true }
+        );
+        write(event.target.checked ? '等比坐标：一个数据单位在屏幕上等长' : '自动比例：绘图区铺满可用空间');
+      });
 
       /** 把表单内容同步到图上（表达式 / 参数 / 范围 / 采样密度）。 */
       function syncFunctions(animate) {

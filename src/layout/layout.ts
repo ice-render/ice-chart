@@ -128,6 +128,18 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     };
   }
 
+  // 等比坐标：绘图区收缩成正方形（数据跨度已经由 normalize 拉齐，两者合起来才是「单位等长」）。
+  // 这里只动绘图区，刻度值早就量好了，位置在渲染时按 plot 现算 —— 所以不需要二次布局。
+  if (norm.kind === 'cartesian' && norm.option.aspect === 'equal') {
+    const side = Math.min(plot.width, plot.height);
+    plot = {
+      x: Math.round(plot.x + (plot.width - side) / 2),
+      y: Math.round(plot.y + (plot.height - side) / 2),
+      width: Math.round(side),
+      height: Math.round(side),
+    };
+  }
+
   if (title) {
     title.y = margin.top;
   }

@@ -482,6 +482,11 @@ export interface ChartOption {
   treemap?: TreemapOption;
   /** 力导向关系图配置。 */
   graph?: GraphOption;
+  /**
+   * 坐标轴比例：`'equal'` = x/y 一个数据单位在屏幕上等长（MATLAB 的 `axis equal`）。
+   * 画圆 / 参数曲线 / 几何图形时必须开，否则圆会被拉成椭圆（绘图区本身也会收缩成正方形）。
+   */
+  aspect?: 'auto' | 'equal';
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;

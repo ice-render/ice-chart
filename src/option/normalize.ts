@@ -123,6 +123,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.yAxis = option.yAxis || {};
   merged.dataZoom = option.dataZoom || null;
   merged.theme = option.theme;
+  merged.aspect = option.aspect === 'equal' ? 'equal' : 'auto';
   merged.tooltip = { show: option.tooltip?.show !== false, ...merged.tooltip };
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };
 
@@ -263,6 +264,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     };
   });
   const yAxis = yAxes[0];
+  applyEqualAspect(option, kind, xAxis, yAxes);
 
   return {
     kind,
@@ -900,6 +902,42 @@ function resolveXDomain(type: string, fullDomain: any[], window: [any, any] | nu
   if (from >= 0 && to >= from) return fullDomain.slice(from, to + 1);
   // 窗口端点不在类目里（例如来自滑块的比例换算抖动）：退化为原域
   return fullDomain;
+}
+
+/**
+ * 等比坐标（`aspect: 'equal'`，MATLAB 的 `axis equal`）。
+ *
+ * 做法：把两个轴的数据**跨度**拉齐到较大的那个（各自按中心扩展），
+ * 配合布局阶段把绘图区收缩成正方形 —— 于是「1 个单位 = 相同像素数」。
+ *
+ * 为什么不是只收缩绘图区：正方形只保证画布上的宽高相等，
+ * x 跨度 2、y 跨度 10 时单位长度仍然不等，圆还是椭圆。
+ * 为什么不是只拉数据域：绘图区还是长方形，网格会空出一大片，曲线缩在中间很别扭。
+ *
+ * 类目轴不参与（把类目之间的间距拉齐没有意义）。
+ */
+function applyEqualAspect(option: ChartOption, kind: string, xAxis: InternalAxis, yAxes: InternalAxis[]): void {
+  if (option.aspect !== 'equal' || kind !== 'cartesian') return;
+  if (xAxis.type === 'category') return;
+  const yAxis = yAxes[0];
+  if (!yAxis || yAxis.type === 'category') return;
+  const x0 = Number(xAxis.domain[0]);
+  const x1 = Number(xAxis.domain[1]);
+  const y0 = Number(yAxis.domain[0]);
+  const y1 = Number(yAxis.domain[1]);
+  if (![x0, x1, y0, y1].every((v) => isFinite(v))) return;
+  const xSpan = Math.abs(x1 - x0);
+  const ySpan = Math.abs(y1 - y0);
+  const span = Math.max(xSpan, ySpan);
+  if (!(span > 0)) return;
+  if (xSpan < span) {
+    const center = (x0 + x1) / 2;
+    xAxis.domain = [center - span / 2, center + span / 2];
+  }
+  if (ySpan < span) {
+    const center = (y0 + y1) / 2;
+    yAxis.domain = [center - span / 2, center + span / 2];
+  }
 }
 
 function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisOption, type: string): [number, number] {

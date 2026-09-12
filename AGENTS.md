@@ -199,6 +199,10 @@ npm run audit:interactions -- ./.audit
   （`paramKey()`），否则曲线会冻在第一帧 —— 与「缓存键要带动画进度」是同一类坑。
 - **表达式编译结果要缓存**：参数扫动时每帧上万次求值，`compileExpression` / `compileSampler`
   都带缓存并复用 scope；不要在采样循环里新建对象。
+- **画圆必须开 `aspect: 'equal'`**：直角坐标的绘图区是长方形，x / y 的单位长度天然不等
+  （实测差 2.86 倍，圆会被看成椭圆）。等比坐标要**两件事一起做**：
+  normalize 把两个轴的数据跨度拉齐（`applyEqualAspect`）+ 布局把绘图区收缩成正方形；
+  只做一件都不成立。收敛判断放在 `ChartOption.aspect`，默认 `'auto'`（不影响既有图）。
 
 ## 已实现 / 未实现
 

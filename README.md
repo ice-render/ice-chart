@@ -163,6 +163,7 @@ npm install ice-chart ice-render
 
 ```ts
 ICEChart.createChart('chart', {
+  aspect: 'equal', // 等比坐标：一个数据单位等长（画圆 / 参数曲线必开）
   xAxis: { type: 'value' },
   yAxis: {},
   series: [
@@ -187,6 +188,9 @@ ICEChart.createChart('chart', {
 - **极点是真断点**：`tan(x)` 的渐近线两侧不会连出一条竖直假线（采样阶段就写成 NaN 分段）；
 - **参数扫动动画**：`sweep: { name: 'a', from: -3, to: 3 }` 让曲线连续变形 ——
   表达式每帧重新求值（实测 3 条曲线同屏 58fps），这是引擎持续重绘能力最自然的用法。
+- **等比坐标**：`aspect: 'equal'`（MATLAB 的 `axis equal`）让 x / y 一个数据单位在屏幕上等长，
+  绘图区同时收缩成正方形。参数曲线 / 圆 / 几何图形不开它会被拉成椭圆 ——
+  实测单位圆在不等比时 x 方向 438px/单位、y 方向 153px/单位（拉伸 2.86 倍）。
 
 ## 动画
 

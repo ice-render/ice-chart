@@ -229,4 +229,70 @@ describe('函数绘图（引擎集成）', () => {
     expect(later).toBeGreaterThanOrEqual(-2);
     expect(later).toBeLessThanOrEqual(2);
   });
+
+  it('aspect: equal —— 单位圆在像素上是圆的，绘图区是正方形', async () => {
+    const option: ChartOption = {
+      aspect: 'equal',
+      legend: { show: false },
+      xAxis: { type: 'value' },
+      yAxis: {},
+      series: [
+        {
+          id: 'c',
+          type: 'parametric',
+          name: 'circle',
+          xExpression: 'cos(t)',
+          yExpression: 'sin(t)',
+          domain: [0, Math.PI * 2],
+          samples: 240,
+        },
+      ],
+    };
+    const c = await mount(option);
+    const plot = c.layout.plot;
+    // 1) 绘图区是正方形
+    expect(Math.abs(plot.width - plot.height)).toBeLessThanOrEqual(1);
+    // 2) 单位长度在 x / y 上等长（圆才是圆）
+    const xScale: any = c.norm.xAxis.scale;
+    const yScale: any = c.norm.yAxis.scale;
+    const pxPerUnitX = Math.abs(xScale.map(1) - xScale.map(0));
+    const pxPerUnitY = Math.abs(yScale.map(1) - yScale.map(0));
+    expect(pxPerUnitX).toBeCloseTo(pxPerUnitY, 1);
+    // 3) 曲线在像素上确实是圆（取 t=0 与 t=π/2 两点，到圆心距离相等）
+    const component: any = c.seriesComponents[0];
+    const points = component.series.points;
+    const nearest = (tx: number, ty: number) => {
+      let best = 0;
+      let bestDist = Infinity;
+      points.forEach((point: any, i: number) => {
+        const d = Math.hypot(point.raw.x - tx, point.raw.y - ty);
+        if (d < bestDist) {
+          bestDist = d;
+          best = i;
+        }
+      });
+      return component.pixelAt(best)!;
+    };
+    const right = nearest(1, 0);
+    const top = nearest(0, 1);
+    const centerX = plot.width / 2;
+    const centerY = plot.height / 2;
+    const radiusRight = Math.hypot(right[0] - centerX, right[1] - centerY);
+    const radiusTop = Math.hypot(top[0] - centerX, top[1] - centerY);
+    expect(radiusRight).toBeCloseTo(radiusTop, 0);
+    // 不等比时会被拉伸 2 倍以上 —— 这条断言就是回归门禁
+    expect(Math.abs(radiusRight - radiusTop)).toBeLessThan(2);
+  });
+
+  it('aspect: equal 不影响类目轴（照旧按 band 排布）', async () => {
+    const c = await mount({
+      aspect: 'equal',
+      legend: { show: false },
+      xAxis: { type: 'category' },
+      yAxis: {},
+      series: [{ id: 'b', type: 'bar', name: 'B', data: [3, 8, 5] }],
+    });
+    expect(c.norm.xAxis.domain).toEqual([0, 1, 2]);
+    expect(c.seriesComponents[0].pixelAt(1)).not.toBeNull();
+  });
 });
