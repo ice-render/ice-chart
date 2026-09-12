@@ -110,7 +110,11 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   let polar: { cx: number; cy: number; radius: number } | null = null;
   if (norm.kind === 'polar' || norm.kind === 'radar') {
     const ratio = polarRadiusRatio(norm);
-    const radius = Math.max(10, (Math.min(plot.width, plot.height) * ratio) / 2);
+    // 饼图默认带引导线标签，标签要画到圆外，因此预留一圈文字空间
+    const halfMin = Math.min(plot.width, plot.height) / 2;
+    const hasLabels = norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false));
+    const labelAllowance = hasLabels ? Math.min(46, halfMin * 0.26) : 6;
+    const radius = Math.max(10, halfMin * ratio - labelAllowance);
     const cx = plot.x + plot.width / 2;
     const cy = plot.y + plot.height / 2;
     polar = { cx, cy, radius };
@@ -158,7 +162,7 @@ function polarRadiusRatio(norm: NormalizedOption): number {
     const raw = Number(series.option.radius);
     if (isFinite(raw) && raw > 0) return Math.max(0.1, Math.min(1, raw));
   }
-  return 0.78;
+  return 0.92;
 }
 
 /** 单个 y 轴占用的横向空间。 */
