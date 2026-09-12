@@ -22,7 +22,18 @@ export type SeriesType =
   | 'heatmap'
   | 'sankey'
   | 'funnel'
-  | 'gauge';
+  | 'gauge'
+  | 'boxplot'
+  | 'waterfall';
+
+/** 瀑布图配置。 */
+export interface WaterfallOption {
+  increaseColor?: string;
+  decreaseColor?: string;
+  totalColor?: string;
+  /** 是否画相邻柱子之间的连接虚线，默认 true。 */
+  connector?: boolean;
+}
 
 /** 漏斗图配置。 */
 export interface FunnelOption {
@@ -202,6 +213,8 @@ export interface SeriesOption {
   candle?: { upColor?: string; downColor?: string; borderWidth?: number };
   /** 热力图配色（默认从浅到深）。 */
   heatmap?: { minColor?: string; maxColor?: string };
+  /** 瀑布图配色与连接线（也可写在 option.waterfall 上，两者等价，series 优先）。 */
+  waterfall?: WaterfallOption;
   /** 饼图标签。 */
   label?: { show?: boolean; position?: 'outside' | 'inside'; formatter?: (params: PieLabelParams) => string };
 }
@@ -341,6 +354,8 @@ export interface ChartOption {
   funnel?: FunnelOption;
   /** 仪表盘配置。 */
   gauge?: GaugeOption;
+  /** 瀑布图配置。 */
+  waterfall?: WaterfallOption;
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;

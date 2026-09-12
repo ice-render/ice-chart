@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.6.0
+
+继续补齐常见图表类型：横向柱状图、气泡图、漏斗图、仪表盘、箱线图、瀑布图。
+
+### 新增
+
+- **横向柱状图**：`yAxis` 声明为类目轴（`type: 'category'` 或 `data: [...]`）、`xAxis` 为数值轴即自动转置，
+  与 ECharts 写法一致。支持轴声明类目（按下标回填数据点）与对象数据的 `name`；
+  横向图默认 `tooltip.trigger: 'item'` 并收起十字准星，提示框标题用类目、数值走 x 轴格式化。
+  同时兼容 `type: 'value'` 这个 ECharts 数值轴别名。
+- **气泡图**：`scatter` 的第三维 `[x, y, size]` 经 `symbolSizeRange`（默认 `[8, 40]`）映射成直径；
+  `symbolSize` 也支持函数形式。尺寸解析统一收敛到 `SeriesBase.symbolSizeAt()`。
+- **漏斗图**：阶段按数值排序、相邻阶段画梯形（`trapezoid: false` 退化为矩形）、
+  `minSize` 保证最小阶段仍可见可点；图例项是「阶段」，复用扇区显隐机制。
+- **仪表盘**：角度沿用 ECharts 习惯（0° = 3 点、逆时针为正、90° = 12 点），默认 225° → -45° 扫 270°；
+  轴线按阈值分段配色、刻度与刻度值、指针（可配宽度/长度）、数值文本与名称。
+- **箱线图**：`[min, Q1, median, Q3, max]`，或给原始观测值自动算五数概括（`computeBoxplotSummary`）；
+  须的末端进 y 轴数据域，命中判定覆盖整条须。
+- **瀑布图**：`base/top` 由累计值推导，合计项（`total: true`）从 0 画到累计值且不改变累计；
+  增 / 减 / 合计三色可配，柱子之间画连接虚线。
+
+### 变更
+
+- `hiddenSlices` / `setHiddenSlices` 上提到 `SeriesBase`（饼图与漏斗图共用）。
+- 柱形的像素锚点统一为「柱心」，并新增 `barColorAt()` / `highlightRectAt()` 两个扩展点。
+- 新增 `data:change` 事件（`setData` 后触发），示例页的 JSON 面板会跟随刷新。
+
+### 修复
+
+- 横向柱状图的槽位偏移没有跟随 y 轴 range 方向，导致最下方那根柱子越过绘图区底边（像素探针定位）。
+- 柱形按数据下标定位类目、`BandScale` 的数值兜底把数值类目当下标（缩放后柱子锚错位置）。
+
+### 示例与门禁
+
+- 新增 `horizontal-bubble.html`、`funnel-gauge.html`、`boxplot-waterfall.html` 三个示例页；
+  交互审计扩展到 16 页 / 176 步，当前 0 问题；21 个测试套件 / 197 个用例全绿。
+
 ## 0.5.0
 
 每个示例页新增「序列化 JSON」面板，实时显示图表的真实快照。

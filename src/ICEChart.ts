@@ -17,7 +17,6 @@ import { RadarGrid } from './components/RadarGrid';
 import { DataZoomSlider } from './components/DataZoomSlider';
 import { createSeriesComponent } from './components/series/createSeries';
 import type { SeriesBase } from './components/series/SeriesBase';
-import { PieSeries } from './components/series/PieSeries';
 import { InteractionController } from './interaction/InteractionController';
 import { Emitter } from './util/emitter';
 import { clamp } from './util/math';

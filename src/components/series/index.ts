@@ -15,4 +15,6 @@ export { FunnelSeries } from './FunnelSeries';
 export type { FunnelSeriesCoord } from './FunnelSeries';
 export { GaugeSeries } from './GaugeSeries';
 export type { GaugeSeriesCoord } from './GaugeSeries';
+export { BoxplotSeries } from './BoxplotSeries';
+export { WaterfallSeries } from './WaterfallSeries';
 export { BarSeries } from './BarSeries';

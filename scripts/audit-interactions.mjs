@@ -23,6 +23,7 @@ const pages = [
   'pie',
   'radar',
   'funnel-gauge',
+  'boxplot-waterfall',
   'finance',
   'sankey',
   'serialize',

@@ -444,6 +444,38 @@ export class InteractionController {
         ],
       };
     }
+    // 箱线图：五数概括
+    if (anchorItem && anchorItem.series.type === 'boxplot') {
+      const point: any = anchorItem.point;
+      const summary = point.boxplot;
+      if (summary) {
+        const labels = ['最小值', '下四分位', '中位数', '上四分位', '最大值'];
+        return {
+          title: point.name || this.host.formatAxisValue('x', point.xValue),
+          rows: summary.map((value: number, i: number) => ({
+            name: labels[i],
+            value: String(value),
+            color: anchorItem.series.color,
+          })),
+        };
+      }
+    }
+    // 瀑布图：变化量 + 累计
+    if (anchorItem && anchorItem.series.type === 'waterfall') {
+      const point = anchorItem.point;
+      const delta = point.y || 0;
+      return {
+        title: point.name || this.host.formatAxisValue('x', point.xValue),
+        rows: [
+          {
+            name: delta >= 0 ? '增加' : '减少',
+            value: `${delta >= 0 ? '+' : ''}${delta}`,
+            color: anchorItem.series.color,
+          },
+          { name: '累计', value: String(point.top), color: this.host.norm.theme.subTextColor },
+        ],
+      };
+    }
     if (anchorItem && anchorItem.series.type === 'heatmap') {
       const point = anchorItem.point;
       return {

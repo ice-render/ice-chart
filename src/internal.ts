@@ -34,6 +34,8 @@ export interface DataPoint {
   size?: number;
   /** K 线的 [open, close, low, high]。 */
   ohlc?: [number, number, number, number];
+  /** 箱线图的 [min, Q1, median, Q3, max]。 */
+  boxplot?: [number, number, number, number, number];
 }
 
 /** 极坐标布局：圆心与半径（图表坐标系）。 */

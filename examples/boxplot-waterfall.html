@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 箱线图 / 瀑布图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>箱线图 / 瀑布图</h1>
+    <p class="lead">
+      左图箱线图：数据项是 <code>[min, Q1, median, Q3, max]</code>；如果给的是一串原始观测值，
+      会自动算五数概括（<code>computeBoxplotSummary</code>）。须的末端也进 y 轴数据域，命中判定覆盖整条须。
+      右图瀑布图：base/top 由累计值推导（数据项标 <code>total: true</code> 的柱子从 0 画到累计值且不改变累计），
+      增 / 减 / 合计三色区分，柱子之间画连接虚线。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="boxplot" width="620" height="440"></canvas></div>
+      <div class="card"><canvas id="waterfall" width="620" height="440"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      // ---- 箱线图：每个渠道一组原始观测值（随机采样）
+      const sample = (base, spread) => Array.from({ length: 40 }, () => Math.round(base + (Math.random() - 0.5) * spread));
+      const boxplot = ICEChart.createChart('boxplot', {
+        title: { text: '各渠道接口响应时长分布' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { type: 'category', data: ['支付网关', '订单中心', '搜索服务', '推荐引擎'] },
+        yAxis: { name: '毫秒' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [
+          {
+            id: 'latency',
+            type: 'boxplot',
+            name: '响应时长',
+            barWidth: 0.5,
+            data: [sample(240, 260), sample(180, 180), sample(320, 420), sample(140, 120)],
+          },
+        ],
+      });
+
+      // ---- 瀑布图：利润构成
+      const waterfall = ICEChart.createChart('waterfall', {
+        title: { text: '净利润构成（万元）' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { type: 'category' },
+        yAxis: { name: '万元' },
+        tooltip: { trigger: 'item' },
+        waterfall: { increaseColor: '#198754', decreaseColor: '#dc3545', totalColor: '#0d6efd', connector: true },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+        series: [
+          {
+            id: 'profit',
+            type: 'waterfall',
+            name: '利润',
+            barWidth: 0.55,
+            data: [
+              { name: '营业收入', value: 4200 },
+              { name: '营业成本', value: -1860 },
+              { name: '销售费用', value: -720 },
+              { name: '管理费用', value: -430 },
+              { name: '其它收益', value: 260 },
+              { name: '净利润', value: 0, total: true },
+            ],
+          },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      boxplot.on('item:hover', (p) => write(`箱线 hover  中位数 ${p.value}`));
+      waterfall.on('item:hover', (p) => write(`瀑布 hover  ${p.xValue} = ${p.value}`));
+      waterfall.on('item:click', (p) => write(`瀑布 click  ${p.xValue} = ${p.value}`));
+
+      window.__charts = { boxplot, waterfall };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

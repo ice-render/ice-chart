@@ -101,17 +101,22 @@ export class BarSeries extends SeriesBase {
     return raw <= 1 ? Math.max(1, bandWidth * raw) : Math.max(1, raw * this.unit());
   }
 
+  /** 单根柱子的颜色（瀑布图按增/减/合计覆写）。 */
+  protected barColorAt(index: number): string {
+    return this.pointColor(index);
+  }
+
   protected doRender(): void {
     this.rebuildPixels();
     const coord = this.coord;
     if (!coord) return;
-    const color = this.pointColor(0);
     const radius = Number(this.series.option.barRadius);
     const ctx = this.ctx;
     this.beginDraw();
     for (let i = 0; i < this.series.points.length; i++) {
       const rect = this.barRectAt(i);
       if (!rect || rect.height <= 0) continue;
+      const color = this.barColorAt(i);
       ctx.beginPath();
       roundRect(ctx, rect.x, rect.y, rect.width, rect.height, isFinite(radius) ? radius : 0);
       if (ctx.createLinearGradient) {

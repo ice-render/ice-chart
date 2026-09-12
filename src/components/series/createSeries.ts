@@ -10,6 +10,8 @@ import { HeatmapSeries } from './HeatmapSeries';
 import { SankeySeries } from './SankeySeries';
 import { FunnelSeries } from './FunnelSeries';
 import { GaugeSeries } from './GaugeSeries';
+import { BoxplotSeries } from './BoxplotSeries';
+import { WaterfallSeries } from './WaterfallSeries';
 import { SeriesBase } from './SeriesBase';
 
 /** 按系列类型创建对应的渲染组件（工厂，便于后续扩展 candlestick / pie 等）。 */
@@ -38,6 +40,10 @@ export function createSeriesComponent(
       return new FunnelSeries(series, props);
     case 'gauge':
       return new GaugeSeries(series, props);
+    case 'boxplot':
+      return new BoxplotSeries(series, props);
+    case 'waterfall':
+      return new WaterfallSeries(series, props);
     case 'line':
     default:
       return new LineSeries(series, props);

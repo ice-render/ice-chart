@@ -163,6 +163,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const xDomain = resolveXDomain(xType, rawXDomain, context.xDomain);
 
   applyStacking(series);
+  applyWaterfall(series);
 
   const xAxis: InternalAxis = {
     option: xAxisOption,
@@ -409,6 +410,50 @@ function buildPoints(
     }
     return { points, hasExplicitX };
   }
+  // 箱线图：数据项是 [min, Q1, median, Q3, max]，或一串原始观测值（自动算分位数）
+  if (option.type === 'boxplot') {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i];
+      const tuple = Array.isArray(item) ? item.map((v) => Number(v)) : null;
+      if (!tuple || !tuple.length) {
+        points.push({ index: i, xValue: i, y: null, raw: item, base: 0, top: 0 });
+        continue;
+      }
+      const summary: [number, number, number, number, number] =
+        tuple.length >= 5 ? [tuple[0], tuple[1], tuple[2], tuple[3], tuple[4]] : computeBoxplotSummary(tuple);
+      hasExplicitX = true;
+      points.push({
+        index: i,
+        xValue: i,
+        // 数据点的「值」取中位数（提示框、键盘导航都用它）
+        y: summary[2],
+        raw: item,
+        base: 0,
+        top: summary[2],
+        boxplot: summary,
+      });
+    }
+    return { points, hasExplicitX };
+  }
+  // 瀑布图：base/top 由累计值推导（见 applyWaterfall）
+  if (option.type === 'waterfall') {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i];
+      let value: number | null = null;
+      let name: string | undefined;
+      if (typeof item === 'number') value = toNumber(item);
+      else if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const obj: any = item;
+        value = toNumber(obj.value === undefined ? obj.y : obj.value);
+        if (obj.name !== undefined) name = String(obj.name);
+      } else {
+        value = toNumber(item);
+      }
+      hasExplicitX = true;
+      points.push({ index: i, xValue: name === undefined ? i : name, y: value, raw: item, base: 0, top: value === null ? 0 : value, name });
+    }
+    return { points, hasExplicitX };
+  }
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
     let xValue: any = i;
@@ -469,7 +514,10 @@ function toNumber(value: any): number | null {
 /** 推断 x 轴类型：显式配置优先，其次是「有柱状图 → 类目」。 */
 function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear' | 'category' | 'time' | 'log' {
   if (option.type) return option.type;
-  if (series.some((s) => s.type === 'bar' || s.type === 'candlestick' || s.type === 'heatmap')) return 'category';
+  if (
+    series.some((s) => s.type === 'bar' || s.type === 'candlestick' || s.type === 'heatmap' || s.type === 'boxplot' || s.type === 'waterfall')
+  )
+    return 'category';
   const values: any[] = [];
   for (const s of series) {
     for (const p of s.points) {
@@ -603,9 +651,17 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
       if (p.ohlc) {
         values.push(p.ohlc[2], p.ohlc[3]);
       }
+      // 箱线图的须（min/max）也要进数据域
+      if (p.boxplot) {
+        values.push(p.boxplot[0], p.boxplot[4]);
+      }
       if (s.option.stack) {
         values.push(p.base);
         values.push(p.top);
+      }
+      // 瀑布图的每根柱子都从 base 长到 top，两端都要进数据域
+      if (s.type === 'waterfall') {
+        values.push(p.base, p.top);
       }
     }
   }
@@ -656,6 +712,46 @@ function buildRadarDomains(radar: RadarOption, series: InternalSeries[]): Array<
 }
 
 /** 堆叠：同名 stack 的系列在同一 x 上累加，写入每个点的 base/top。 */
+/**
+ * 瀑布图：按累计值推导每根柱子的 base / top。
+ *
+ * - 普通项：base = 当前累计，top = 累计 + 数值，然后累计 += 数值；
+ * - 合计项（数据项标了 `total: true`）：base = 0、top = 当前累计，**不改变累计**。
+ */
+function applyWaterfall(series: InternalSeries[]): void {
+  for (const s of series) {
+    if (s.type !== 'waterfall') continue;
+    let cumulative = 0;
+    for (const point of s.points) {
+      const raw: any = point.raw;
+      const isTotal = !!(raw && typeof raw === 'object' && !Array.isArray(raw) && raw.total);
+      const value = point.y || 0;
+      if (isTotal) {
+        point.base = 0;
+        point.top = cumulative;
+      } else {
+        point.base = cumulative;
+        point.top = cumulative + value;
+        cumulative += value;
+      }
+    }
+  }
+}
+
+/** 箱线图：原始观测值 → [min, Q1, median, Q3, max]（五数概括）。 */
+export function computeBoxplotSummary(values: number[]): [number, number, number, number, number] {
+  const sorted = values.filter((v) => isFinite(v)).sort((a, b) => a - b);
+  if (!sorted.length) return [0, 0, 0, 0, 0];
+  const quantile = (p: number): number => {
+    const pos = (sorted.length - 1) * p;
+    const lower = Math.floor(pos);
+    const upper = Math.ceil(pos);
+    if (lower === upper) return sorted[lower];
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (pos - lower);
+  };
+  return [sorted[0], quantile(0.25), quantile(0.5), quantile(0.75), sorted[sorted.length - 1]];
+}
+
 function applyStacking(series: InternalSeries[]): void {
   const groups: Record<string, InternalSeries[]> = {};
   for (const s of series) {

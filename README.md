@@ -74,7 +74,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar / scatter / pie / radar / candlestick / heatmap / sankey | 折线支持平滑曲线与断点（null 断开） |
+| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / candlestick / heatmap / sankey / funnel / gauge / boxplot / waterfall | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter |
@@ -134,6 +134,26 @@ npm install ice-chart ice-render
 
 `DataPointParams` 同时携带 `dataIndex / xValue / value / data`（原始数据项）与 `screen` 像素坐标，
 业务层做下钻、联动、埋点都不需要再碰比例尺。
+
+## 图表类型与写法
+
+每种类型都是「声明式 option + 相同的交互语义」，切换类型只需要改 `series[].type`。
+
+| 类型 | 关键写法 | 说明 |
+| --- | --- | --- |
+| `line` / `area` | `data: [1, 2, 3]` 或 `[[x, y]]` | 平滑曲线 `smooth`、断点（`null` 断开）、面积 `areaOpacity` |
+| `bar` | 类目在 x（默认） | 分组（多系列）与堆叠（同 `stack` 名） |
+| `bar`（横向） | `yAxis: { type: 'category', data: [...] }` + `xAxis: { type: 'value' }` | 排行榜；类目也可写在数据项的 `name` 上 |
+| `scatter` | `data: [[x, y, size]]` + `symbolSizeRange` | 第三维映射成直径即气泡图；`symbolSize` 也可传函数 |
+| `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
+| `radar` | `radar.indicators` + `data: [数值...]` | 一个系列一个多边形，顶点命中 |
+| `candlestick` | `data: [[open, close, low, high]]` | 影线进数据域，提示框给 OHLC |
+| `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一串原始观测值 | 后者自动算五数概括；命中覆盖整条须 |
+| `heatmap` | `data: [[x类目, y类目, 数值]]` | y 轴自动变类目轴，颜色线性插值 |
+| `waterfall` | `data: [{ name, value }]`，合计项标 `total: true` | 增/减/合计三色 + 连接虚线 |
+| `funnel` | `data: [{ name, value }]` | 阶段梯形、`minSize` 保护最小阶段、图例按阶段显隐 |
+| `gauge` | `gauge: { min, max, axisLineColor }` + `data: [{ name, value }]` | 指针随数值转动，轴线按阈值分段配色 |
+| `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
 
 ## 主要 API
 

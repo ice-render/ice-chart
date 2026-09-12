@@ -105,6 +105,26 @@ npm run audit:interactions -- ./.audit
   否则补丁的第 N 条会被误合并到快照的第 N 条上（曾把 A 系列改名成 B）。
 - 快照带 `version`；加载更高版本必须显式报错，不要静默降级。
 
+## 新增一种图表类型的固定动作（照这个清单走，别漏）
+
+1. `types.ts`：加 `SeriesType`，写该类型需要的 `XxxOption`（配色、尺寸、角度等）。
+2. `internal.ts`：如果这个类型引入了新的**场景**（不是直角坐标），把它加进 `kind`，并在
+   `NormalizedOption` 上挂一个配置字段。
+3. `option/normalize.ts`：数据点归一化（`buildPoints` 里加分支）、场景判定、数据域。
+   纯几何能算的（五数概括、累计 base/top）也放在这里，保证可单测。
+4. 组件 `src/components/series/XxxSeries.ts`：
+   - `seriesType`；
+   - 覆盖 `paintPad()`（脏矩形留白）；
+   - `rebuildPixels()` 填 `this.pixels`（**必须是绘制与命中共用的同一份几何**）；
+   - `hitTestIndex(lx, ly)`（本地坐标，返回数据下标）；
+   - `doRender()`（本地坐标绘制；直角坐标系列记得 `clipToBox = true`）；
+   - 需要矩形高亮就实现 `highlightRectAt(index)`。
+5. `createSeriesComponent` 加 case；`src/components/series/index.ts` 与 `src/index.ts` 导出。
+6. `ICEChart.syncSeries` 里给该类型分派 coord；非直角场景要在 `syncComponents` 里隐藏坐标轴/网格。
+7. `InteractionController.buildTooltipContent` 加该类型的提示框分支（别的类型都有，别让它退化成默认格式）。
+8. 测试三类：纯函数（归一化 / 几何）、组件命中、引擎集成（真实 hitTest + 事件）；
+   再加一个示例页并把页面名加进 `scripts/audit-interactions.mjs` 的 pages 列表。
+
 ## 已实现 / 未实现
 
 已实现：直角坐标 / 极坐标（饼图、玫瑰图）/ 雷达图 / 桑基图；多 y 轴；dataZoom 滑块；
