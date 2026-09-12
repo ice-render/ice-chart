@@ -24,4 +24,6 @@ export type { GraphSeriesCoord } from './GraphSeries';
 export { CurveSeriesBase } from './CurveSeriesBase';
 export { FunctionSeries } from './FunctionSeries';
 export { ParametricSeries } from './ParametricSeries';
+export { LiquidSeries } from './LiquidSeries';
+export type { LiquidSeriesCoord } from './LiquidSeries';
 export { BarSeries } from './BarSeries';

@@ -108,13 +108,14 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
   let polar: { cx: number; cy: number; radius: number } | null = null;
-  if (norm.kind === 'polar' || norm.kind === 'radar' || norm.kind === 'gauge') {
+  if (norm.kind === 'polar' || norm.kind === 'radar' || norm.kind === 'gauge' || norm.kind === 'liquid') {
     const ratio = polarRadiusRatio(norm);
     // 饼图默认带引导线标签，标签要画到圆外，因此预留一圈文字空间
     const halfMin = Math.min(plot.width, plot.height) / 2;
     const hasLabels =
       (norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false))) ||
-      norm.kind === 'gauge';
+      norm.kind === 'gauge' ||
+      norm.kind === 'liquid';
     const labelAllowance = hasLabels ? Math.min(46, halfMin * 0.26) : 6;
     const radius = Math.max(10, halfMin * ratio - labelAllowance);
     const cx = plot.x + plot.width / 2;
@@ -170,6 +171,10 @@ function polarRadiusRatio(norm: NormalizedOption): number {
   if (norm.kind === 'gauge') {
     // 仪表盘是 270° 的弧，半径可以比整圆更饱满一些
     return 0.62;
+  }
+  if (norm.kind === 'liquid') {
+    // 水位球是整圆，而且数值文字在球心 —— 半径给足才好看
+    return 0.8;
   }
   if (norm.kind === 'radar') {
     const raw = Number(norm.radar && norm.radar.radius);

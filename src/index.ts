@@ -53,6 +53,8 @@ export type {
   LegendToggleParams,
   DataItem,
   SweepOption,
+  LiquidOption,
+  PolarGridOption,
 } from './types';
 
 // 主题
@@ -115,6 +117,8 @@ export type { GraphSeriesCoord } from './components/series/GraphSeries';
 export { CurveSeriesBase } from './components/series/CurveSeriesBase';
 export { FunctionSeries } from './components/series/FunctionSeries';
 export { ParametricSeries } from './components/series/ParametricSeries';
+export { LiquidSeries } from './components/series/LiquidSeries';
+export type { LiquidSeriesCoord } from './components/series/LiquidSeries';
 // 表达式引擎（纯函数，可单独使用：表单校验、DSL 编译、参数扫描都靠它）
 export { compileExpression, compileSampler, evaluateExpression, ExpressionError } from './expr/expr';
 export type { CompiledExpression, CompiledSampler, ExpressionErrorCode } from './expr/expr';

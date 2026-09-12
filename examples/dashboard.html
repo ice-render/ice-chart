@@ -3,155 +3,292 @@
   <head>
     <meta charset="utf-8" />
     <title>ice-chart · 运营监控大屏</title>
+    <!--
+      视觉基调：近黑蓝底 + 单一强调色（青）+ 卡片化面板（半透明深蓝渐变 + 1px 描边 +
+      四角 L 形亮角）+ 一条整宽的 KPI 分隔条 + 水位球这类标志性图形。
+
+      栅格：12 列 × 120px + 12px 间距 = 1572px 固定宽（大屏按设计稿固定宽度，不做响应式缩放 ——
+      canvas 被 CSS 缩放后引擎的命中检测会失准）。面板 = 列宽的整数倍 + 同一个间距，
+      画布宽 = 面板宽 - 内边距 16 - 边框 2，所以每个面板的左右边缘、标题基线都严格对齐。
+    -->
     <style>
       :root {
-        --bg: #070d1a;
-        --panel: rgba(15, 26, 46, 0.92);
-        --panel-border: rgba(77, 148, 255, 0.22);
-        --panel-glow: rgba(77, 148, 255, 0.12);
-        --text: #dbe4f3;
-        --muted: #7d8ba3;
-        --accent: #4d94ff;
-        --ok: #479f76;
-        --warn: #ffda6a;
-        --danger: #ea868f;
+        /* 底色与面板：近黑蓝，叠一点点青色辉光 */
+        --bg: #030711;
+        --bg-2: #04101f;
+        --panel-tint: rgba(9, 32, 52, 0.55);
+        --panel-tint-2: rgba(6, 20, 36, 0.85);
+        --line: rgba(0, 229, 255, 0.16);
+        --line-strong: rgba(0, 229, 255, 0.55);
+        --corner: rgba(0, 229, 255, 0.75);
+        /* 文字 */
+        --text: #e6f1ff;
+        --text-dim: #9fb6d4;
+        --muted: #6b83a6;
+        /* 强调色：青（主）/ 蓝 / 绿 / 黄 / 橙 / 红 */
+        --cyan: #00e5ff;
+        --blue: #2e9bff;
+        --green: #22c55e;
+        --amber: #fac858;
+        --orange: #fb923c;
+        --red: #ff5b6a;
         --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Roboto Mono', monospace;
+        /* 栅格 */
+        --col: 120px;
+        --gap: 12px;
       }
       * { box-sizing: border-box; }
       html, body {
         margin: 0;
         padding: 0;
+        min-height: 100%;
         background:
-          radial-gradient(1200px 600px at 20% -10%, rgba(77, 148, 255, 0.14), transparent 60%),
-          radial-gradient(900px 500px at 90% 0%, rgba(110, 223, 246, 0.1), transparent 55%),
-          var(--bg);
+          radial-gradient(900px 420px at 50% -8%, rgba(0, 229, 255, 0.1), transparent 62%),
+          radial-gradient(700px 380px at 8% 6%, rgba(46, 155, 255, 0.1), transparent 60%),
+          radial-gradient(700px 380px at 92% 6%, rgba(0, 229, 255, 0.07), transparent 60%),
+          linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 42%, #01040c 100%);
         color: var(--text);
         font-family: var(--font);
-        min-height: 100vh;
+        font-size: 14px;
       }
-      .screen { max-width: 1400px; margin: 0 auto; padding: 14px 16px 28px; }
+      /* 点阵网格：背景的「科技感」来自这里（轻量，不抢图表） */
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image: radial-gradient(rgba(0, 229, 255, 0.09) 1px, transparent 1px);
+        background-size: 26px 26px;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 78%);
+        -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 78%);
+        pointer-events: none;
+      }
+      .screen {
+        position: relative;
+        width: calc(var(--col) * 12 + var(--gap) * 11);
+        margin: 0 auto;
+        padding: 10px 0 18px;
+        display: grid;
+        grid-template-columns: repeat(12, var(--col));
+        gap: var(--gap);
+        align-content: start;
+      }
 
-      header.bar {
+      /* ---------------- 顶栏：居中标题 + 两侧翼形装饰 ---------------- */
+      .topbar {
+        grid-column: span 12;
+        position: relative;
+        height: 58px;
         display: flex;
         align-items: center;
-        gap: 16px;
-        padding: 10px 14px;
-        border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        background: linear-gradient(180deg, rgba(28, 46, 78, 0.95), rgba(12, 21, 38, 0.95));
-        box-shadow: 0 0 24px var(--panel-glow);
+        justify-content: center;
+        border-bottom: 1px solid rgba(0, 229, 255, 0.22);
+        background: linear-gradient(180deg, rgba(0, 229, 255, 0.08), rgba(0, 229, 255, 0));
       }
-      header.bar h1 {
+      .topbar::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: -1px;
+        width: 320px;
+        height: 2px;
+        transform: translateX(-50%);
+        background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+        box-shadow: 0 0 12px rgba(0, 229, 255, 0.8);
+      }
+      .topbar h1 {
         margin: 0;
-        font-size: 18px;
+        font-size: 26px;
         font-weight: 600;
-        letter-spacing: 2px;
+        letter-spacing: 6px;
+        text-shadow: 0 0 18px rgba(0, 229, 255, 0.45);
       }
-      header.bar h1 span { color: var(--accent); }
-      .bar .spacer { flex: 1 1 auto; }
+      /* 翼形装饰：两条对称的渐隐线 + 端点小方块 */
+      .topbar .wing {
+        position: absolute;
+        top: 50%;
+        width: 300px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.65));
+      }
+      .topbar .wing.left { left: 210px; }
+      .topbar .wing.right { right: 210px; transform: scaleX(-1); }
+      .topbar .wing::after {
+        content: '';
+        position: absolute;
+        right: 0;
+        top: -2px;
+        width: 5px;
+        height: 5px;
+        background: var(--cyan);
+        box-shadow: 0 0 8px var(--cyan);
+      }
+      .topbar .side {
+        position: absolute;
+        top: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 100%;
+      }
+      .topbar .side.left { left: 0; }
+      .topbar .side.right { right: 0; }
+
       .pill {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 3px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--panel-border);
+        height: 24px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        background: rgba(0, 229, 255, 0.05);
         font-family: var(--mono);
         font-size: 12px;
         color: var(--muted);
+        white-space: nowrap;
       }
       .pill b { color: var(--text); font-weight: 600; }
-      .pill.ok { border-color: rgba(71, 159, 118, 0.5); color: var(--ok); }
-      .pill.warn { border-color: rgba(255, 218, 106, 0.55); color: var(--warn); }
-      .pill.danger { border-color: rgba(234, 134, 143, 0.6); color: var(--danger); }
+      .pill.ok { color: var(--green); border-color: rgba(34, 197, 94, 0.45); }
+      .pill.danger {
+        color: var(--red);
+        border-color: rgba(255, 91, 106, 0.55);
+        background: rgba(255, 91, 106, 0.1);
+        animation: blink 1.1s steps(2, end) infinite;
+      }
+      @keyframes blink { 50% { opacity: 0.45; } }
       .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
-      .bar button {
+
+      button.ghost {
         font: inherit;
         font-size: 12px;
-        padding: 4px 12px;
-        border-radius: 6px;
-        border: 1px solid var(--panel-border);
-        background: rgba(77, 148, 255, 0.12);
-        color: var(--text);
+        height: 24px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        background: rgba(0, 229, 255, 0.07);
+        color: var(--text-dim);
         cursor: pointer;
       }
-      .bar button:hover { border-color: var(--accent); color: #fff; }
+      button.ghost:hover { border-color: var(--cyan); color: #fff; box-shadow: 0 0 12px rgba(0, 229, 255, 0.25); }
 
-      .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 12px; }
-      .kpi {
-        position: relative;
-        padding: 10px 12px;
-        border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        background: var(--panel);
-        overflow: hidden;
-      }
-      .kpi::after {
-        content: '';
-        position: absolute;
-        left: 0; top: 0; bottom: 0;
-        width: 3px;
-        background: var(--accent);
-        box-shadow: 0 0 12px var(--accent);
-      }
-      .kpi .label { font-size: 12px; color: var(--muted); }
-      .kpi .value { margin-top: 2px; font-family: var(--mono); font-size: 24px; line-height: 1.15; }
-      .kpi .value small { font-size: 12px; color: var(--muted); margin-left: 4px; }
-      .kpi .trend { font-family: var(--mono); font-size: 12px; color: var(--ok); }
-      .kpi .trend.down { color: var(--danger); }
-      .kpi.alert { border-color: rgba(234, 134, 143, 0.65); box-shadow: 0 0 18px rgba(234, 134, 143, 0.25); }
-      .kpi.alert::after { background: var(--danger); box-shadow: 0 0 12px var(--danger); }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(3, 420px);
-        justify-content: center;
-        gap: 12px;
-        margin-top: 12px;
-      }
+      /* ---------------- 面板：切角亮边 + 四角 L 形描边 ---------------- */
       .panel {
         position: relative;
-        border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        background: var(--panel);
-        box-shadow: inset 0 0 30px rgba(9, 18, 34, 0.8);
+        background:
+          linear-gradient(180deg, var(--panel-tint) 0%, var(--panel-tint-2) 100%);
+        border: 1px solid var(--line);
         padding: 8px;
       }
-      .panel.wide { grid-column: span 2; }
-      .panel .panel-title {
+      .panel::before {
+        /* 八个渐变层拼出四个 L 形亮角（大屏面板的标志性边框） */
+        content: '';
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        background-image:
+          linear-gradient(var(--corner), var(--corner)), linear-gradient(var(--corner), var(--corner)),
+          linear-gradient(var(--corner), var(--corner)), linear-gradient(var(--corner), var(--corner)),
+          linear-gradient(var(--corner), var(--corner)), linear-gradient(var(--corner), var(--corner)),
+          linear-gradient(var(--corner), var(--corner)), linear-gradient(var(--corner), var(--corner));
+        background-repeat: no-repeat;
+        background-size: 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px;
+        background-position:
+          left top, left top, right top, right top,
+          left bottom, left bottom, right bottom, right bottom;
+        opacity: 0.85;
+      }
+      .panel.span3 { grid-column: span 3; }
+      .panel.span6 { grid-column: span 6; }
+      .panel.span12 { grid-column: span 12; }
+      .panel.alert { border-color: rgba(255, 91, 106, 0.6); }
+      .panel.alert::before { --corner: var(--red); }
+      .panel.alert { box-shadow: inset 0 0 26px rgba(255, 91, 106, 0.12); }
+
+      .panel-title {
         display: flex;
         align-items: center;
         gap: 8px;
-        font-size: 13px;
+        height: 26px;
+        margin-bottom: 6px;
+        font-size: 14px;
+        letter-spacing: 0.5px;
         color: var(--text);
-        padding: 2px 2px 6px;
       }
-      .panel .panel-title i {
-        width: 3px; height: 12px; border-radius: 2px;
-        background: var(--accent);
-        box-shadow: 0 0 10px var(--accent);
+      .panel-title::before {
+        content: '';
+        width: 3px;
+        height: 13px;
+        background: var(--cyan);
+        box-shadow: 0 0 8px var(--cyan);
       }
-      .panel .panel-title .meta { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
-      .panel.alert { border-color: rgba(234, 134, 143, 0.65); box-shadow: 0 0 22px rgba(234, 134, 143, 0.2); }
+      .panel-title .meta {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 400;
+        color: var(--muted);
+        letter-spacing: 0;
+      }
       canvas { display: block; touch-action: none; }
-      .footnote { margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.9; text-align: center; }
-      .footnote code { color: var(--accent); font-family: var(--mono); }
 
-      /* 序列化 JSON 面板（assets/snapshot-panel.js 的 class 名）—— 大屏是深色，这里覆盖成暗色 */
+      /* ---------------- KPI 条：一条整宽面板 + 竖直分隔线 ---------------- */
+      .kpis {
+        grid-column: span 12;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, var(--panel-tint) 0%, var(--panel-tint-2) 100%);
+      }
+      .kpi {
+        position: relative;
+        padding: 12px 18px 13px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .kpi + .kpi::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 12px;
+        bottom: 12px;
+        width: 1px;
+        background: linear-gradient(180deg, transparent, rgba(0, 229, 255, 0.35), transparent);
+      }
+      .kpi .label { font-size: 13px; color: var(--text-dim); letter-spacing: 1px; }
+      .kpi .value {
+        font-family: var(--mono);
+        font-size: 30px;
+        line-height: 1.1;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--cyan);
+        text-shadow: 0 0 18px rgba(0, 229, 255, 0.35);
+      }
+      .kpi .value small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+      .kpi .trend { font-family: var(--mono); font-size: 12px; color: var(--green); }
+      .kpi .trend.down { color: var(--red); }
+      .kpi.alert .value { color: var(--red); text-shadow: 0 0 18px rgba(255, 91, 106, 0.4); }
+
+      /* ---------------- 底部：序列化 JSON 面板（深色） ---------------- */
+      .footer {
+        grid-column: span 12;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .footer code { color: var(--cyan); font-family: var(--mono); }
+
       #snapshot-panel {
-        margin-top: 12px;
-        border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        background: var(--panel);
+        grid-column: span 12;
+        border: 1px solid var(--line);
+        background: rgba(6, 20, 36, 0.85);
         padding: 10px 12px;
       }
-      #snapshot-panel .snapshot-head {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 6px;
-      }
+      #snapshot-panel .snapshot-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
       #snapshot-panel .snapshot-title { font-size: 13px; }
       #snapshot-panel .spacer { flex: 1 1 auto; }
       #snapshot-panel .snapshot-meta,
@@ -161,27 +298,22 @@
         font: inherit;
         font-size: 11px;
         padding: 2px 8px;
-        border-radius: 5px;
-        border: 1px solid var(--panel-border);
-        background: rgba(77, 148, 255, 0.1);
+        border-radius: 2px;
+        border: 1px solid var(--line);
+        background: rgba(0, 229, 255, 0.06);
         color: var(--muted);
         cursor: pointer;
       }
-      #snapshot-panel button:hover { border-color: var(--accent); color: var(--text); }
-      #snapshot-panel .snapshot-tabs button.active {
-        border-color: var(--accent);
-        color: var(--accent);
-        background: rgba(77, 148, 255, 0.16);
-      }
+      #snapshot-panel button:hover { border-color: var(--cyan); color: var(--text); }
+      #snapshot-panel .snapshot-tabs button.active { border-color: var(--cyan); color: var(--cyan); }
       #snapshot-panel .snapshot-json {
         margin: 0;
         padding: 8px 10px;
-        max-height: 15rem;
+        max-height: 14rem;
         overflow: auto;
-        border: 1px solid rgba(77, 148, 255, 0.16);
-        border-radius: 6px;
-        background: rgba(6, 12, 24, 0.9);
-        color: var(--text);
+        border: 1px solid var(--line);
+        background: rgba(2, 8, 18, 0.92);
+        color: var(--text-dim);
         font-family: var(--mono);
         font-size: 11px;
         line-height: 1.6;
@@ -189,21 +321,27 @@
       }
       #snapshot-panel .tok-key { color: #6edff6; }
       #snapshot-panel .tok-str { color: #79dfc1; }
-      #snapshot-panel .tok-num { color: #ffda6a; }
+      #snapshot-panel .tok-num { color: #fac858; }
       #snapshot-panel .tok-bool { color: #e685b5; }
       #snapshot-panel .tok-null { color: var(--muted); }
     </style>
   </head>
   <body>
     <div class="screen">
-      <header class="bar">
-        <h1>运营监控<span>大屏</span></h1>
-        <span class="pill ok"><i class="dot"></i>链路正常</span>
-        <span class="pill" id="pill-clock">--:--:--</span>
-        <span class="pill">运行 <b id="pill-uptime">00:00</b></span>
-        <span class="pill" id="pill-alert">告警 <b>0</b></span>
-        <span class="spacer"></span>
-        <button id="btn-toggle">暂停</button>
+      <header class="topbar">
+        <span class="wing left"></span>
+        <h1>运营监控大屏</h1>
+        <span class="wing right"></span>
+        <div class="side left">
+          <span class="pill ok"><i class="dot"></i>链路正常</span>
+          <span class="pill" id="pill-clock">--:--:--</span>
+          <span class="pill">运行 <b id="pill-uptime">00:00</b></span>
+        </div>
+        <div class="side right">
+          <span class="pill" id="pill-alert">告警 0</span>
+          <button class="ghost" id="btn-spike">注入尖峰</button>
+          <button class="ghost" id="btn-toggle">暂停</button>
+        </div>
       </header>
 
       <div class="kpis">
@@ -234,69 +372,61 @@
         </div>
       </div>
 
-      <div class="grid">
-        <div class="panel wide">
-          <div class="panel-title"><i></i>实时流量（滑动窗口）<span class="meta">60Hz 追加 · 与左侧联动</span></div>
-          <canvas id="flow" width="836" height="240"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>实时延迟<span class="meta">联动：悬停/缩放</span></div>
-          <canvas id="latency" width="404" height="240"></canvas>
-        </div>
-
-        <div class="panel">
-          <div class="panel-title"><i></i>负载仪表盘<span class="meta">弹簧指针</span></div>
-          <canvas id="gauge" width="404" height="240"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>机房能力对比<span class="meta">实时抖动</span></div>
-          <canvas id="radar" width="404" height="240"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>时段热力图<span class="meta">每 250ms 左移</span></div>
-          <canvas id="heat" width="404" height="240"></canvas>
-        </div>
-
-        <div class="panel wide">
-          <div class="panel-title"><i></i>流量来源 → 转化路径<span class="meta">桑基流动</span></div>
-          <canvas id="sankey" width="836" height="240"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>渠道占比<span class="meta">实时重排</span></div>
-          <canvas id="rose" width="404" height="240"></canvas>
-        </div>
-
-        <div class="panel">
-          <div class="panel-title"><i></i>服务拓扑<span class="meta">可拖拽节点</span></div>
-          <canvas id="graph" width="404" height="240"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>资源构成<span class="meta">矩形 morph</span></div>
-          <canvas id="treemap" width="404" height="240"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>转化漏斗<span class="meta">阶段显隐</span></div>
-          <canvas id="funnel" width="404" height="240"></canvas>
-        </div>
-
-        <div class="panel wide">
-          <div class="panel-title"><i></i>实时负载 K 线（每 8 个采样聚合一根）<span class="meta">最后一根随数据跳动</span></div>
-          <canvas id="candles" width="836" height="220"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><i></i>数据流说明<span class="meta"></span></div>
-          <div class="footnote" style="text-align:left; margin:2px 4px">
-            11 张图共用一条数据流：折线 / 延迟用 <code>appendData</code> 滑动窗口（60Hz），
-            仪表盘、雷达、热力图按不同频率 <code>setData</code>，玫瑰图 / 矩形树图 / 漏斗用更新动画做
-            <b>重排过渡</b>，K 线最后一根实时跳动。<code>linkCharts</code> 把流量与延迟按 x 值联动
-            （悬停 / 缩放 / 框选三路）。<br />
-            面板在 CPU &gt; 85% 时会亮红边 —— 点「注入尖峰」看整屏反应。
-          </div>
-        </div>
+      <div class="panel span6">
+        <div class="panel-title">实时流量<span class="meta">滑动窗口 60Hz · 与右侧联动</span></div>
+        <canvas id="flow" width="762" height="216"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">实时延迟<span class="meta">悬停 / 缩放联动</span></div>
+        <canvas id="latency" width="366" height="216"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">负载仪表盘<span class="meta">弹簧指针</span></div>
+        <canvas id="gauge" width="366" height="216"></canvas>
       </div>
 
-      <div class="footnote">
-        ice-chart · 全部交互（悬停 / 缩放 / 平移 / 框选 / 图例 / 拖拽节点 / 键盘）都是引擎内建能力
+      <div class="panel span6">
+        <div class="panel-title">流量来源 → 转化路径<span class="meta">桑基流动</span></div>
+        <canvas id="sankey" width="762" height="170"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">负载水位<span class="meta">水位随数据升降</span></div>
+        <canvas id="liquid" width="366" height="170"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">时段热力图<span class="meta">每 250ms 左移</span></div>
+        <canvas id="heat" width="366" height="170"></canvas>
+      </div>
+
+      <div class="panel span3">
+        <div class="panel-title">机房能力对比<span class="meta">实时抖动</span></div>
+        <canvas id="radar" width="366" height="150"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">渠道占比<span class="meta">实时重排</span></div>
+        <canvas id="rose" width="366" height="150"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">资源构成<span class="meta">矩形 morph</span></div>
+        <canvas id="treemap" width="366" height="150"></canvas>
+      </div>
+      <div class="panel span3">
+        <div class="panel-title">转化漏斗<span class="meta">阶段显隐</span></div>
+        <canvas id="funnel" width="366" height="150"></canvas>
+      </div>
+
+      <div class="panel span6">
+        <div class="panel-title">服务拓扑<span class="meta">可拖拽节点</span></div>
+        <canvas id="graph" width="762" height="210"></canvas>
+      </div>
+      <div class="panel span6">
+        <div class="panel-title">实时负载 K 线<span class="meta">每 8 个采样一根 · 最后一根跳动</span></div>
+        <canvas id="candles" width="762" height="210"></canvas>
+      </div>
+
+      <div class="footer">
+        <span>ice-chart · 悬停 / 缩放 / 平移 / 框选 / 图例 / 拖拽节点 / 键盘 全部为引擎内建能力</span>
+        <span>深色大屏基调：近黑蓝底 · 单一强调色 · 亮角面板 · 整宽 KPI 条</span>
       </div>
 
       <div id="snapshot-panel"></div>
@@ -310,11 +440,31 @@
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
       const WINDOW = 180;
       const CANDLE_TICKS = 8;
-      const CANDLE_COUNT = 26;
-      const HEAT_COLS = 20;
+      const CANDLE_COUNT = 40;
+      const HEAT_COLS = 22;
       const HEAT_ROWS = ['华东', '华北', '华南'];
+
+      // 大屏统一主题：包一层 dark 主题，换掉网格线/坐标轴/提示框的取色
+      const TINT = 'rgba(0, 229, 255, 0.1)';
+      const theme = {
+        colorPalette: ['#00e5ff', '#2e9bff', '#22c55e', '#fac858', '#fb923c', '#a78bfa', '#ff5b6a', '#79dfc1', '#6edff6', '#e685b5'],
+        textColor: '#e6f1ff',
+        // 轴文字刻意用近灰：大屏底是深蓝，稍微偏暖/冷的灰都够用；
+        // 太蓝会被「越界墨迹」审计判成饱和色（阈值是通道极差 45）
+        subTextColor: '#8895a8',
+        axisLineColor: 'rgba(0, 229, 255, 0.18)',
+        axisLabelColor: '#8b98a9',
+        splitLineColor: TINT,
+        labelHaloColor: 'rgba(3, 7, 17, 0.9)',
+        legend: { textColor: '#9fb6d4', inactiveColor: '#3b4c68' },
+        tooltip: { background: 'rgba(4, 16, 31, 0.96)', borderColor: 'rgba(0, 229, 255, 0.35)', textColor: '#e6f1ff' },
+        // 准星标签用深底 + 青字：亮青底既刺眼、也会被判成「压轴墨迹」
+        crosshair: { lineColor: 'rgba(0, 229, 255, 0.5)', labelBackground: 'rgba(3, 12, 24, 0.94)', labelColor: '#7ee7ff' },
+        brush: { fill: 'rgba(0, 229, 255, 0.12)', stroke: 'rgba(0, 229, 255, 0.8)' },
+        selection: { stroke: '#00e5ff', dimOpacity: 0.35 },
+      };
       const BASE = {
-        theme: 'dark',
+        theme,
         legend: { show: false },
         tooltip: { trigger: 'axis' },
         crosshair: { show: true, axis: 'x', showAxisLabel: true },
@@ -334,46 +484,35 @@
         users: 8600,
         latency: 180,
         errors: 0.4,
-        alerts: 0,
         startedAt: Date.now(),
         drift: (v, target, volatility, k = 0.08) => v + (target - v) * k + (Math.random() - 0.5) * volatility,
       };
 
-      // ---------------- 1) 实时流量（面积 + 折线） ----------------
       const flow = ICEChart.createChart('flow', {
         ...BASE,
-        title: null,
         yAxis: { name: 'req/s', min: 0, max: 2600 },
         series: [
-          { id: 'qps', type: 'area', name: 'QPS', data: [], color: '#4D94FF', areaOpacity: 0.22, lineWidth: 2, smooth: 0.25 },
-          { id: 'p95', type: 'line', name: 'P95(ms)', data: [], color: '#6EDFF6', lineWidth: 1.5, smooth: 0.25 },
+          { id: 'qps', type: 'area', name: 'QPS', data: [], color: '#00e5ff', areaOpacity: 0.24, lineWidth: 2, smooth: 0.25 },
+          { id: 'p95', type: 'line', name: 'P95(ms)', data: [], color: '#2e9bff', lineWidth: 1.5, smooth: 0.25 },
         ],
       });
 
-      // ---------------- 2) 实时延迟（与流量联动） ----------------
       const latency = ICEChart.createChart('latency', {
         ...BASE,
-        title: null,
         yAxis: { name: 'ms', min: 0, max: 600 },
-        series: [
-          {
-            id: 'lat',
-            type: 'area',
-            name: 'P95',
-            data: [],
-            color: '#479F76',
-            areaOpacity: 0.25,
-            lineWidth: 2,
-            smooth: 0.25,
-            // 延迟超阈值时用红色告警线
-            markLine: undefined,
-          },
-        ],
+        series: [{ id: 'lat', type: 'area', name: 'P95', data: [], color: '#22c55e', areaOpacity: 0.26, lineWidth: 2, smooth: 0.25 }],
       });
-      // 三路联动：悬停 / 缩放 / 框选（按 x 数据值对齐，不是按像素）
+      // 悬停 / 缩放 / 框选三路联动（按 x 数据值对齐，不是按像素）
       const link = ICEChart.linkCharts([flow, latency], { axis: 'x', hover: true, zoom: true, brush: true });
 
-      // ---------------- 3) 仪表盘 ----------------
+      // 水位图：这张是「大屏感」最强的一张，水位随 CPU 升降、水面持续起伏
+      const liquid = ICEChart.createChart('liquid', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        liquid: { min: 0, max: 100, color: '#00e5ff', borderWidth: 4, waveHeight: 0.05, waveLength: 1.4, waveSpeed: 1.7, unit: '%', detail: { fontSize: 34 } },
+        series: [{ id: 'wl', type: 'liquid', name: '占用率', data: [{ name: 'CPU', value: 0 }] }],
+      });
+
       const gauge = ICEChart.createChart('gauge', {
         ...BASE,
         tooltip: { trigger: 'item' },
@@ -383,18 +522,17 @@
           splitNumber: 5,
           lineWidth: 12,
           axisLineColor: [
-            [0.6, '#479F76'],
-            [0.85, '#FFDA6A'],
-            [1, '#EA868F'],
+            [0.6, '#22c55e'],
+            [0.85, '#fac858'],
+            [1, '#ff5b6a'],
           ],
           pointer: { show: true, width: 5, length: 0.7 },
-          detail: { formatter: (v) => `${v.toFixed(0)}%`, fontSize: 24 },
+          detail: { formatter: (v) => `${v.toFixed(0)}%`, fontSize: 22 },
           title: { show: false },
         },
         series: [{ id: 'g', type: 'gauge', name: '负载', data: [{ name: '负载', value: 0 }] }],
       });
 
-      // ---------------- 4) 雷达：机房能力 ----------------
       const radar = ICEChart.createChart('radar', {
         ...BASE,
         radar: {
@@ -409,12 +547,11 @@
         },
         animation: { enter: { duration: 600 }, update: { duration: 300, easing: 'linear' } },
         series: [
-          { id: 'east', type: 'radar', name: '华东', data: [82, 74, 88, 91, 66], color: '#4D94FF' },
-          { id: 'north', type: 'radar', name: '华北', data: [70, 88, 72, 84, 78], color: '#6EDFF6' },
+          { id: 'east', type: 'radar', name: '华东', data: [82, 74, 88, 91, 66], color: '#00e5ff' },
+          { id: 'north', type: 'radar', name: '华北', data: [70, 88, 72, 84, 78], color: '#2e9bff' },
         ],
       });
 
-      // ---------------- 5) 滚动热力图 ----------------
       const heatMatrix = Array.from({ length: HEAT_COLS }, () => [40, 50, 30]);
       const heatData = () => {
         const out = [];
@@ -430,10 +567,9 @@
         yAxis: { type: 'category' },
         grid: { x: false, y: false },
         animation: { enter: { duration: 400 }, update: { duration: 240, easing: 'linear' } },
-        series: [{ id: 'heat', type: 'heatmap', name: '负载', data: heatData(), heatmap: { minColor: '#12233d', maxColor: '#4D94FF' } }],
+        series: [{ id: 'heat', type: 'heatmap', name: '负载', data: heatData(), heatmap: { minColor: '#062036', maxColor: '#00e5ff' } }],
       });
 
-      // ---------------- 6) 桑基：来源 → 转化（流动效果） ----------------
       const sankey = ICEChart.createChart('sankey', {
         ...BASE,
         tooltip: { trigger: 'item' },
@@ -465,15 +601,15 @@
             { source: '加购', target: '下单', value: 300 },
             { source: '加购', target: '流失', value: 120 },
           ],
-          nodeWidth: 14,
-          nodePadding: 10,
+          nodeWidth: 12,
+          nodePadding: 8,
           flow: true,
           flowSpeed: 46,
+          linkOpacity: 0.62,
         },
         series: [{ id: 'flowmap', type: 'sankey', name: '流量' }],
       });
 
-      // ---------------- 7) 渠道占比（玫瑰图，实时重排） ----------------
       const roseData = [
         { name: '自然搜索', value: 420 },
         { name: '信息流', value: 300 },
@@ -484,18 +620,22 @@
       const rose = ICEChart.createChart('rose', {
         ...BASE,
         tooltip: { trigger: 'item' },
-        series: [{ id: 'ch', type: 'pie', name: '渠道', data: roseData, roseType: 'area', innerRadius: 0.35, label: { show: false } }],
+        series: [{ id: 'ch', type: 'pie', name: '渠道', data: roseData, roseType: 'area', innerRadius: 0.36, label: { show: false } }],
       });
 
-      // ---------------- 8) 服务拓扑（关系图，可拖节点） ----------------
       const graph = ICEChart.createChart('graph', {
         ...BASE,
         tooltip: { trigger: 'item' },
         graph: {
+          // 宽而矮的面板（762×150）：节点调小、斥力与边长调大，否则节点会挤成一团
+          symbolSizeRange: [8, 20],
+          repulsion: 11000,
+          edgeLength: 104,
+          gravity: 0.035,
           categories: [
-            { name: '接入层', color: '#4D94FF' },
-            { name: '服务层', color: '#479F76' },
-            { name: '存储层', color: '#FFDA6A' },
+            { name: '接入层', color: '#00e5ff' },
+            { name: '服务层', color: '#22c55e' },
+            { name: '存储层', color: '#fac858' },
           ],
           nodes: [
             { id: 'gw', name: '网关', value: 14, category: '接入层' },
@@ -519,9 +659,8 @@
         series: [{ id: 'topo', type: 'graph', name: '拓扑' }],
       });
 
-      // ---------------- 9) 资源构成（矩形树图，morph） ----------------
       const tree = [
-        { name: '计算', children: [{ name: '订单服务', value: 320 }, { name: '用户服务', value: 260 }, { name: '支付服务', value: 180 }] },
+        { name: '计算', children: [{ name: '订单', value: 320 }, { name: '用户', value: 260 }, { name: '支付', value: 180 }] },
         { name: '存储', children: [{ name: 'MySQL', value: 280 }, { name: 'Redis', value: 140 }] },
         { name: '网络', value: 160 },
       ];
@@ -529,11 +668,10 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         animation: { enter: { duration: 600 }, update: { duration: 520, easing: 'easeOutCubic' } },
-        treemap: { gap: 2, minLabelRatio: 0.03, depthFade: 0.18 },
+        treemap: { gap: 2, minLabelRatio: 0.05, depthFade: 0.16 },
         series: [{ id: 'res', type: 'treemap', name: '资源', data: tree }],
       });
 
-      // ---------------- 10) 转化漏斗 ----------------
       const funnelData = [
         { name: '曝光', value: 12000 },
         { name: '详情', value: 7400 },
@@ -545,10 +683,9 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         animation: { enter: { duration: 600 }, update: { duration: 420, easing: 'easeOutCubic' } },
-        series: [{ id: 'conv', type: 'funnel', name: '转化', data: funnelData, minSize: 0.16, gap: 2, label: { position: 'inside' } }],
+        series: [{ id: 'conv', type: 'funnel', name: '转化', data: funnelData, minSize: 0.18, gap: 2, label: { position: 'inside' } }],
       });
 
-      // ---------------- 11) 实时 K 线 ----------------
       const candles = [];
       let building = null;
       const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
@@ -556,12 +693,11 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         xAxis: { type: 'category' },
-        yAxis: { name: '负载', min: 0, max: 100 },
+        yAxis: { name: '负载', min: 20, max: 80 },
         animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
         series: [{ id: 'k', type: 'candlestick', name: '负载', data: [], barWidth: 0.5 }],
       });
 
-      // ---------------- KPI ----------------
       const prev = { qps: 0, users: 0, cpu: 0, latency: 0, errors: 0 };
       const setKpi = (id, value, text, invert = false) => {
         const box = $(id);
@@ -575,11 +711,8 @@
         box.classList.toggle('alert', id === 'cpu' && value > 85);
       };
 
-      // ---------------- 主循环 ----------------
       let last = performance.now();
       let budget = 0;
-      let frames = 0;
-      let fpsAt = performance.now();
       const tick = () => {
         state.t += 1;
         if (state.spike > 0) {
@@ -614,7 +747,10 @@
           candleChart.setData('k', candleData().concat([[building.o, building.c, building.l, building.h]]));
         }
 
-        if (t % 8 === 0) gauge.setData('g', [{ name: '负载', value: Number(state.cpu.toFixed(1)) }]);
+        if (t % 8 === 0) {
+          gauge.setData('g', [{ name: '负载', value: Number(state.cpu.toFixed(1)) }]);
+          liquid.setData('wl', [{ name: 'CPU', value: Number(state.cpu.toFixed(1)) }]);
+        }
         if (t % 16 === 0) {
           heatMatrix.shift();
           heatMatrix.push([state.cpu, 30 + state.qps / 26, state.latency / 6]);
@@ -624,7 +760,6 @@
           radar.setData('east', [clamp(82 + (Math.random() - 0.5) * 10, 30, 100), clamp(74 + (Math.random() - 0.5) * 10, 30, 100), clamp(88 + (Math.random() - 0.5) * 8, 30, 100), clamp(91 - state.errors * 2, 30, 100), clamp(66 + (Math.random() - 0.5) * 8, 30, 100)]);
           radar.setData('north', [clamp(70 + (Math.random() - 0.5) * 10, 30, 100), clamp(88 + (Math.random() - 0.5) * 6, 30, 100), clamp(72 + (Math.random() - 0.5) * 10, 30, 100), clamp(84 + (Math.random() - 0.5) * 6, 30, 100), clamp(78 + (Math.random() - 0.5) * 8, 30, 100)]);
         }
-        // 结构性图表：低频重排（走更新动画，肉眼看到的是 morph / 扇形滑动）
         if (t % 90 === 0) {
           rose.setData('ch', roseData.map((d) => ({ ...d, value: Math.round(d.value * (0.82 + Math.random() * 0.36)) })));
           funnel.setData('conv', funnelData.map((d, i) => ({ ...d, value: Math.round(d.value * (0.9 + Math.random() * 0.2 * (1 + i * 0.1))) })));
@@ -637,7 +772,6 @@
         }
 
         const alerting = state.cpu > 85;
-        state.alerts = alerting ? 1 : 0;
         document.querySelectorAll('.panel')[0].classList.toggle('alert', alerting);
         $('pill-alert').textContent = alerting ? '告警 1' : '告警 0';
         $('pill-alert').className = `pill ${alerting ? 'danger' : 'ok'}`;
@@ -649,6 +783,8 @@
         setKpi('kpi-errors', state.errors, `${state.errors.toFixed(2)}<small>%</small>`, true);
       };
 
+      let frames = 0;
+      let fpsAt = performance.now();
       const loop = (now) => {
         const delta = Math.min(100, now - last);
         last = now;
@@ -657,6 +793,7 @@
           $('pill-clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
           const up = Math.floor((Date.now() - state.startedAt) / 1000);
           $('pill-uptime').textContent = `${String(Math.floor(up / 60)).padStart(2, '0')}:${String(up % 60).padStart(2, '0')}`;
+          window.__fps = Math.round((frames / (now - fpsAt)) * 1000);
           fpsAt = now;
           frames = 0;
         }
@@ -677,9 +814,12 @@
         state.running = !state.running;
         event.target.textContent = state.running ? '暂停' : '继续';
       });
+      $('btn-spike').addEventListener('click', () => {
+        state.spike = 24;
+      });
 
       window.__chart = flow;
-      window.__charts = { flow, latency, gauge, radar, heat, sankey, rose, graph, treemap, funnel, candles: candleChart };
+      window.__charts = { flow, latency, liquid, gauge, radar, heat, sankey, rose, graph, treemap, funnel, candles: candleChart };
       window.__link = link;
       window.__dashboardState = state;
       mountSnapshotPanel();

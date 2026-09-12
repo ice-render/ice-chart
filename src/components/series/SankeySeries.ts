@@ -81,7 +81,8 @@ export class SankeySeries extends SeriesBase {
     else this.stopAnimating();
 
     // 连线
-    ctx.globalAlpha = 0.42;
+    const linkOpacity = Number(coord.options.linkOpacity);
+    ctx.globalAlpha = isFinite(linkOpacity) ? Math.max(0, Math.min(1, linkOpacity)) : 0.42;
     for (const link of links) {
       const source = nodes[link.source];
       const target = nodes[link.target];

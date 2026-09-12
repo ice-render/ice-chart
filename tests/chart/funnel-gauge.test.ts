@@ -1,4 +1,4 @@
-import { createChart } from '../../src/index';
+import { createChart, setMotionPreference } from '../../src/index';
 import { normalizeOption } from '../../src/option/normalize';
 import { computeLayout } from '../../src/layout/layout';
 import type { ICEChart } from '../../src/ICEChart';
@@ -172,5 +172,31 @@ describe('漏斗图 / 仪表盘（引擎集成）', () => {
     await c.render();
     const after = gauge.pixelAt(0)!;
     expect(Math.abs(after[0] - before[0]) + Math.abs(after[1] - before[1])).toBeGreaterThan(5);
+  });
+
+  it('高频更新时指针从当前值接着扫，不会每次从最小值重来', async () => {
+    setMotionPreference('full');
+    chart = createChart(canvas, {
+      ...JSON.parse(JSON.stringify(GAUGE)),
+      animation: { enter: { duration: 60 }, update: { duration: 420, easing: 'linear' } },
+    } as ChartOption);
+    const gauge: any = chart.seriesComponents[0];
+    chart.finishAnimations();
+    await chart.render();
+
+    chart.setData('g', [{ name: '季度目标', value: 80 }]);
+    await chart.render();
+    await new Promise((resolve) => setTimeout(resolve, 460));
+    await chart.render();
+    expect(gauge.renderedValue()).toBeCloseTo(80, 1);
+
+    // 每 130ms 更新一次（监控大屏的节奏）：指针必须待在 80 附近，而不是掉回 0 附近
+    for (let i = 0; i < 4; i++) {
+      chart.setData('g', [{ name: '季度目标', value: 78 + i }]);
+      await chart.render();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await chart.render();
+      expect(gauge.renderedValue()).toBeGreaterThan(70);
+    }
   });
 });

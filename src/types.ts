@@ -28,7 +28,8 @@ export type SeriesType =
   | 'treemap'
   | 'graph'
   | 'function'
-  | 'parametric';
+  | 'parametric'
+  | 'liquid';
 
 /** 力导向关系图的节点。 */
 export interface GraphNodeOption {
@@ -161,6 +162,8 @@ export interface SankeyOption {
   /** 纵向松弛迭代次数，默认 6。 */
   iterations?: number;
   label?: { show?: boolean };
+  /** 连线填充不透明度，默认 0.42（深色底上可以调高一点，否则连线发闷）。 */
+  linkOpacity?: number;
   /** 连线是否显示「流动」效果（虚线相位持续推进），默认 false。 */
   flow?: boolean;
   /** 流动速度（像素/秒），默认 40。 */
@@ -241,6 +244,35 @@ export interface PolarGridOption {
   startAngle?: number;
   /** 是否画半径刻度，默认 true。 */
   showLabels?: boolean;
+}
+
+/**
+ * 水位图 / 液位球：一个圆里装水，水位随数值升降、水面持续起伏。
+ * 数据大屏的常客（`type: 'liquid'`，`data: [{ name, value }]`）。
+ */
+export interface LiquidOption {
+  min?: number;
+  max?: number;
+  /** 水位颜色（缺省取系列色）。 */
+  color?: string;
+  /** 外圈颜色，缺省是水位色的半透明版。 */
+  borderColor?: string;
+  /** 外圈宽度（设备像素），默认 3。 */
+  borderWidth?: number;
+  /** 波高（占半径比例），默认 0.06。 */
+  waveHeight?: number;
+  /** 波长（半径的倍数），默认 1.2。 */
+  waveLength?: number;
+  /** 波速（相位/秒），默认 1.6。 */
+  waveSpeed?: number;
+  /** 数值单位后缀，默认 '%'；传 '' 表示不拼单位。 */
+  unit?: string;
+  /** 中心数值颜色，缺省用主题文本色。 */
+  textColor?: string;
+  /** 是否在球心显示系列名，默认显示（没有 name 时不画）。 */
+  title?: boolean;
+  /** 中心数值：字体大小与格式化。 */
+  detail?: { show?: boolean; fontSize?: number; formatter?: (value: number) => string };
 }
 
 export interface SeriesOption {
@@ -495,6 +527,8 @@ export interface ChartOption {
   funnel?: FunnelOption;
   /** 仪表盘配置。 */
   gauge?: GaugeOption;
+  /** 水位图配置（存在 liquid 系列时生效）。 */
+  liquid?: LiquidOption;
   /** 瀑布图配置。 */
   waterfall?: WaterfallOption;
   /** 矩形树图配置。 */

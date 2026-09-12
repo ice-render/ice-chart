@@ -735,7 +735,17 @@ export class ICEChart {
     this.hiddenSlices = normalized.hiddenSlices;
     this.rebuild(options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update');
     const trigger = options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update';
-    if (trigger === 'update' && shouldAnimate() && previousYDomain && this.norm && this.norm.yAxis.domain.length === 2) {
+    // 只有直角坐标才需要 y 域过渡：极坐标 / 雷达 / 仪表盘 / 水位 / 树图这些场景不按 y 轴排布，
+    // 数据一更新就启动过渡只会让它们每帧跑一次全量重建（而且永远不会结束 ——
+    // 每次 setData 都会把系列进度重置，过渡永远到不了终点）。实测大屏里 5 张图因此常驻重建循环。
+    if (
+      trigger === 'update' &&
+      shouldAnimate() &&
+      previousYDomain &&
+      this.norm &&
+      this.norm.kind === 'cartesian' &&
+      this.norm.yAxis.domain.length === 2
+    ) {
       const next = this.norm.yAxis.domain;
       const changed = Math.abs(Number(previousYDomain[0]) - Number(next[0])) > 1e-9 || Math.abs(Number(previousYDomain[1]) - Number(next[1])) > 1e-9;
       if (changed) this.startDomainTransition([Number(previousYDomain[0]), Number(previousYDomain[1])], [Number(next[0]), Number(next[1])]);
@@ -1125,6 +1135,8 @@ export class ICEChart {
               ? { plot, canvas: this.layout.canvas, options: norm.funnel || {} }
               : series.type === 'gauge'
                 ? { polar: polarLayout, plot, canvas: this.layout.canvas, options: norm.gauge || {} }
+                : series.type === 'liquid'
+                  ? { polar: polarLayout, plot, canvas: this.layout.canvas, options: norm.liquid || {} }
                 : series.type === 'treemap'
                   ? {
                       plot,
@@ -1249,10 +1261,15 @@ export class ICEChart {
       const animations: any = (component.props as any).animations;
       if (animations) {
         for (const key in animations) {
+          // `__` 前缀是「持续重绘」的循环补间（蚂蚁线 / 桑基流动 / 水位波浪）：
+          // 它们没有终态，收尾会把动效永久冻住（而且 keepAnimating 的 loopRegistered
+          // 还是 true，再也不会重新注册）。只收尾一次性补间。
+          if (key.indexOf('__') === 0) continue;
           if (animations[key]) animations[key].finished = true;
         }
       }
-      if (this.ice.animationManager) this.ice.animationManager.remove(component);
+      const hasLoop = !!animations && Object.keys(animations).some((key) => key.indexOf('__') === 0);
+      if (this.ice.animationManager && !hasLoop) this.ice.animationManager.remove(component);
       if (component.props && component.props.animations && component.props.animations.axisMorph) {
         component.setState({ axisMorph: 1 });
       }

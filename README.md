@@ -159,6 +159,7 @@ npm install ice-chart ice-render
 | `function` | `expression: 'sin(x)/x'`（+ `params` / `domain`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合 |
 | `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
 | `parametric`（极坐标） | `polarExpression: 'cos(3*t)'` + `polarGrid: true` | 极坐标 `r(θ)`（玫瑰线 / 心形线 / 螺线），配 `aspect: 'equal'` 出 MATLAB `polarplot` 观感 |
+| `liquid` | `liquid: { min, max }` + `data: [{ name, value }]` | 水位球（数据大屏常客）：水位随数值升降、水面持续起伏；整球可命中 |
 
 ### 实时数据流
 
@@ -182,15 +183,21 @@ chart.appendData('cpu', [[t, v1], [t2, v2]], { maxPoints: 180, animate: true });
 
 ### 大屏（深色主题）
 
-[examples/dashboard.html](./examples/dashboard.html)：**11 张图共用一条数据流**的运营监控大屏。
+[examples/dashboard.html](./examples/dashboard.html)：**12 张图共用一条数据流**的运营监控大屏。
 
 - 深色主题（`theme: 'dark'`）+ 自绘大屏外壳（KPI 卡片 / 面板标题栏 / 告警亮边）；
 - 折线与延迟用 `appendData` 滑动窗口（60Hz），并用 `linkCharts` 做**悬停 / 缩放 / 框选三路联动**；
+- **水位球**（`type: 'liquid'`）随 CPU 升降、水面持续起伏 —— 大屏里最有辨识度的一张；
 - 仪表盘（弹簧指针）、雷达（实时抖动）、热力图（每 250ms 左移一列）按不同频率 `setData`；
 - 玫瑰图 / 矩形树图 / 漏斗走更新动画做**重排过渡**（值变化时图形是滑过去的，不是瞬跳）；
 - 桑基图开 `flow`，链路方向用流动虚线表达；
 - CPU > 85% 时面板亮红边、顶部告警点亮起 —— 点「注入尖峰」看整屏反应；
-- 底部是序列化 JSON 面板（11 张图切换查看各自的真实快照）。
+- 底部是序列化 JSON 面板（12 张图切换查看各自的真实快照）。
+
+> 外观按大屏的通用视觉基调重做过一轮（近黑蓝底 + 单一强调色 + 亮角面板 + KPI 分隔条），
+> 布局用**严格 12 列栅格**（12 × 120px + 12px 间距 = 1572px 设计宽）：面板是列宽的整数倍，
+> 画布宽 = 面板宽 − 内边距 − 边框，所以所有面板的左右边缘与内部留白完全对齐。
+> 12 张图（含水位球）同时流动实测 41~60fps。
 
 ## 函数绘图（迷你 MATLAB）
 

@@ -140,7 +140,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'treemap' | 'graph' = series.some((s) => s.type === 'pie')
+  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'liquid' | 'treemap' | 'graph' = series.some((s) => s.type === 'pie')
     ? 'polar'
     : series.some((s) => s.type === 'radar')
       ? 'radar'
@@ -150,7 +150,9 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
           ? 'funnel'
           : series.some((s) => s.type === 'gauge')
             ? 'gauge'
-            : series.some((s) => s.type === 'treemap')
+            : series.some((s) => s.type === 'liquid')
+              ? 'liquid'
+              : series.some((s) => s.type === 'treemap')
               ? 'treemap'
               : series.some((s) => s.type === 'graph')
                 ? 'graph'
@@ -158,6 +160,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const sankey = kind === 'sankey' ? option.sankey || null : null;
   const funnel = kind === 'funnel' ? option.funnel || {} : null;
   const gauge = kind === 'gauge' ? option.gauge || {} : null;
+  const liquid = kind === 'liquid' ? option.liquid || {} : null;
   const treemap = kind === 'treemap' ? option.treemap || {} : null;
   const graph = kind === 'graph' ? graphOption : null;
   const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
@@ -275,6 +278,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     sankey,
     funnel,
     gauge,
+    liquid,
     treemap,
     graph,
     radarDomains,

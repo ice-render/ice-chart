@@ -436,6 +436,23 @@ export class InteractionController {
         rows: [{ name: series.name, value: point.y === null ? '-' : String(point.y), color: series.color }],
       };
     }
+    // 水位图：一个数值 + 水位比例
+    if (anchorItem && anchorItem.series.type === 'liquid') {
+      const series = anchorItem.series;
+      const point = anchorItem.point;
+      const option: any = (series.option as any).liquid || {};
+      const min = isFinite(Number(option.min)) ? Number(option.min) : 0;
+      const max = isFinite(Number(option.max)) ? Number(option.max) : 100;
+      const value = point.y === null ? min : Number(point.y);
+      const ratio = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0;
+      return {
+        title: point.name || series.name,
+        rows: [
+          { name: series.name, value: `${value}${option.unit === undefined ? '%' : option.unit}`, color: series.color },
+          { name: '水位', value: `${(ratio * 100).toFixed(1)}%`, color: this.host.norm.theme.subTextColor },
+        ],
+      };
+    }
     // 函数绘图 / 参数曲线：把「自变量 → 坐标」讲清楚（数学图的提示框就是这个信息）
     if (anchorItem && (anchorItem.series.type === 'function' || anchorItem.series.type === 'parametric')) {
       const series = anchorItem.series;

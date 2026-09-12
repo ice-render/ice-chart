@@ -24,6 +24,8 @@ export class GaugeSeries extends SeriesBase {
   public seriesType: SeriesType = 'gauge';
   public gauge: GaugeSeriesCoord | null = null;
   private gaugeKey = '';
+  /** 更新动画的起点数值（占「当前渲染值」，不是最小值 —— 高频 setData 才不会每次从头扫）。 */
+  private fromValue: number | null = null;
 
   public setCoord(coord: any): this {
     this.gauge = (coord || null) as GaugeSeriesCoord | null;
@@ -33,6 +35,27 @@ export class GaugeSeries extends SeriesBase {
 
   protected paintPad(): number {
     return 8;
+  }
+
+  /**
+   * 数据更新时把「此刻指针指向的数值」记为动画起点（理由同 LiquidSeries）。
+   *
+   * 刻意**不看** `preserveAnimation`：那个参数是给「值插值」（fromEffective）用的，
+   * 域过渡期间每帧的同步会带 `animate=false`，真正的数据更新（animate 为真）必须捕获起点，
+   * 否则高频 setData 下指针每次都从最小值重扫（实测 CPU 79.9% 指针停在 27%）。
+   */
+  public updateSeries(series: any, animate: boolean, preserveAnimation = false): this {
+    if (animate && this.gauge) this.fromValue = this.renderedValue();
+    return super.updateSeries(series, animate, preserveAnimation);
+  }
+
+  /** 当前**渲染**的数值（不是源数据）：测试与外观审计断言用。 */
+  public renderedValue(): number {
+    const { min } = this.range();
+    const target = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    const p = Math.max(0, Math.min(1, this.progress()));
+    const from = this.fromValue === null ? min : this.fromValue;
+    return from + (target - from) * p;
   }
 
   private angles(): { a0: number; a1: number; sweep: number } {
@@ -109,10 +132,10 @@ export class GaugeSeries extends SeriesBase {
     const { a0, sweep } = this.angles();
     const { min, max } = this.range();
     const lineWidth = Math.max(2, Number(options.lineWidth) || 14);
-    const targetValue = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
-    // 入场：指针从最小值扫到目标值，数值文本同步 count-up。
-    // 缓动交给引擎 —— 配 `easing: 'spring'` 就是仪表盘最自然的回弹手感。
-    const value = min + (targetValue - min) * this.progress();
+    // 入场：指针从最小值扫到目标值；更新：从**当前渲染值**扫到新值（高频更新才不会每次从头扫）。
+    // 数值文本与指针共用这个值，count-up 天然同步。缓动交给引擎 ——
+    // 配 `easing: 'spring'` 就是仪表盘最自然的回弹手感。
+    const value = this.renderedValue();
 
     this.beginDraw();
 

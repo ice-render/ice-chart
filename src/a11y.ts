@@ -304,6 +304,7 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   sankey: '桑基连线',
   funnel: '漏斗阶段',
   gauge: '仪表盘',
+  liquid: '水位球',
   boxplot: '箱线图',
   waterfall: '瀑布柱',
   treemap: '矩形树图单元',
