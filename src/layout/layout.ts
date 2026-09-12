@@ -94,7 +94,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
   let polar: { cx: number; cy: number; radius: number } | null = null;
-  if (norm.kind === 'polar') {
+  if (norm.kind !== 'cartesian') {
     const ratio = polarRadiusRatio(norm);
     const radius = Math.max(10, (Math.min(plot.width, plot.height) * ratio) / 2);
     const cx = plot.x + plot.width / 2;
@@ -129,6 +129,10 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
 /** 饼图半径占可用半径的比例（取第一个饼图系列的 radius 配置）。 */
 function polarRadiusRatio(norm: NormalizedOption): number {
+  if (norm.kind === 'radar') {
+    const raw = Number(norm.radar && norm.radar.radius);
+    return isFinite(raw) && raw > 0 ? Math.max(0.1, Math.min(1, raw)) : 0.72;
+  }
   for (const series of norm.series) {
     if (series.type !== 'pie') continue;
     const raw = Number(series.option.radius);

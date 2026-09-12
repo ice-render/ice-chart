@@ -69,6 +69,10 @@ export { BarSeries } from './components/series/BarSeries';
 export { ScatterSeries } from './components/series/ScatterSeries';
 export { PieSeries } from './components/series/PieSeries';
 export type { PolarSeriesCoord } from './components/series/PieSeries';
+export { RadarSeries } from './components/series/RadarSeries';
+export type { RadarSeriesCoord } from './components/series/RadarSeries';
+export { RadarGrid } from './components/RadarGrid';
+export type { RadarGridCoord } from './components/RadarGrid';
 export { createSeriesComponent } from './components/series/createSeries';
 
 // 交互

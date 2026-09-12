@@ -5,4 +5,6 @@ export { AreaSeries } from './AreaSeries';
 export { ScatterSeries } from './ScatterSeries';
 export { PieSeries } from './PieSeries';
 export type { PolarSeriesCoord } from './PieSeries';
+export { RadarSeries } from './RadarSeries';
+export type { RadarSeriesCoord } from './RadarSeries';
 export { BarSeries } from './BarSeries';

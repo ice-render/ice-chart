@@ -1,4 +1,5 @@
 import type { AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
+import type { RadarOption } from '../types';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
@@ -83,7 +84,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.tooltip = { show: option.tooltip?.show !== false, ...merged.tooltip };
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };
 
-  const series = buildSeries(option.series, theme, merged.legend?.selected || {});
+  const radar = option.radar || null;
+  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar);
   const hiddenIds: Record<string, boolean> = { ...(context.hiddenIds || {}) };
   for (const s of series) {
     if (merged.legend?.selected && merged.legend.selected[s.name] === false) {
@@ -92,8 +94,17 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' = series.some((s) => s.type === 'pie') ? 'polar' : 'cartesian';
+  const kind: 'cartesian' | 'polar' | 'radar' = series.some((s) => s.type === 'pie')
+    ? 'polar'
+    : series.some((s) => s.type === 'radar')
+      ? 'radar'
+      : 'cartesian';
   const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
+  const radarDomains: Array<[number, number]> = radar ? buildRadarDomains(radar, series) : [];
+  if (kind !== 'cartesian' && (!option.tooltip || option.tooltip.trigger === undefined)) {
+    // 非直角坐标没有「数据列」的概念，默认按数据项触发提示
+    merged.tooltip.trigger = 'item';
+  }
 
   const xAxisOption: AxisOption = merged.xAxis;
   const xType = resolveXAxisType(xAxisOption, series);
@@ -135,6 +146,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
 
   return {
     kind,
+    radar,
+    radarDomains,
     option: merged,
     theme,
     series,
@@ -148,7 +161,12 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   };
 }
 
-function buildSeries(seriesOptions: SeriesOption[], theme: ChartTheme, _selected: Record<string, boolean>): InternalSeries[] {
+function buildSeries(
+  seriesOptions: SeriesOption[],
+  theme: ChartTheme,
+  _selected: Record<string, boolean>,
+  radar?: RadarOption | null
+): InternalSeries[] {
   const out: InternalSeries[] = [];
   const usedNames: Record<string, number> = {};
   for (let i = 0; i < seriesOptions.length; i++) {
@@ -168,7 +186,7 @@ function buildSeries(seriesOptions: SeriesOption[], theme: ChartTheme, _selected
     }
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
-    const { points, hasExplicitX } = buildPoints(option);
+    const { points, hasExplicitX } = buildPoints(option, radar);
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
       for (let p = 0; p < points.length; p++) {
@@ -182,10 +200,31 @@ function buildSeries(seriesOptions: SeriesOption[], theme: ChartTheme, _selected
   return out;
 }
 
-function buildPoints(option: SeriesOption): { points: DataPoint[]; hasExplicitX: boolean } {
+function buildPoints(option: SeriesOption, radar?: RadarOption | null): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
   const points: DataPoint[] = [];
   let hasExplicitX = false;
+  // 雷达图：数据按指标顺序排列，每个指标一个顶点
+  if (option.type === 'radar' && radar && Array.isArray(radar.indicators)) {
+    for (let i = 0; i < radar.indicators.length; i++) {
+      const indicator = radar.indicators[i];
+      const item = raw[i];
+      const value =
+        item && typeof item === 'object' && !Array.isArray(item) && (item as any).value !== undefined
+          ? toNumber((item as any).value)
+          : toNumber(item);
+      points.push({
+        index: i,
+        xValue: indicator.name,
+        y: value,
+        raw: item,
+        base: 0,
+        top: value === null ? 0 : value,
+        name: indicator.name,
+      });
+    }
+    return { points, hasExplicitX: true };
+  }
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
     let xValue: any = i;
@@ -324,6 +363,27 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     if (isFiniteNumber(option.max as number) && (option.max as number) > 0) max = option.max as number;
   }
   return [round(min, 10), round(max, 10)];
+}
+
+/** 雷达图每个指标轴的数据域：indicator.max 优先，否则取各系列在该指标上的最大值。 */
+function buildRadarDomains(radar: RadarOption, series: InternalSeries[]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const count = Array.isArray(radar.indicators) ? radar.indicators.length : 0;
+  for (let i = 0; i < count; i++) {
+    const indicator = radar.indicators[i] || { name: String(i) };
+    let max = -Infinity;
+    for (const s of series) {
+      if (s.type !== 'radar' || s.hidden) continue;
+      const point = s.points[i];
+      if (!point || point.y === null) continue;
+      if (point.y > max) max = point.y;
+    }
+    if (!isFinite(max)) max = 1;
+    const min = isFiniteNumber(indicator.min as number) ? (indicator.min as number) : 0;
+    const declaredMax = isFiniteNumber(indicator.max as number) ? (indicator.max as number) : max;
+    out.push([min, declaredMax > min ? declaredMax : min + 1]);
+  }
+  return out;
 }
 
 /** 堆叠：同名 stack 的系列在同一 x 上累加，写入每个点的 base/top。 */

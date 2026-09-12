@@ -13,6 +13,7 @@ import { Tooltip } from './components/Tooltip';
 import { Crosshair } from './components/Crosshair';
 import { Highlight } from './components/Highlight';
 import { Brush } from './components/Brush';
+import { RadarGrid } from './components/RadarGrid';
 import { createSeriesComponent } from './components/series/createSeries';
 import type { SeriesBase } from './components/series/SeriesBase';
 import { PieSeries } from './components/series/PieSeries';
@@ -63,6 +64,7 @@ export class ICEChart {
   public root: ICEGroup;
   public plotArea: PlotArea;
   public grid: GridLines;
+  public radarGrid: RadarGrid;
   public axisX: Axis;
   /** y 轴组件，与 norm.yAxes 一一对应（axisYList[0] 是主 y 轴）。 */
   public axisYList: Axis[] = [];
@@ -133,6 +135,7 @@ export class ICEChart {
 
     this.plotArea = new PlotArea({ left: 0, top: 0, width: 1, height: 1, zIndex: Z.plotArea });
     this.grid = new GridLines({ width: canvas.width, height: canvas.height, zIndex: Z.grid });
+    this.radarGrid = new RadarGrid({ width: canvas.width, height: canvas.height, zIndex: Z.grid + 5 });
     this.axisX = new Axis({ orientation: 'x', width: canvas.width, height: canvas.height, zIndex: Z.axis });
     this.axisYList = [
       new Axis({ orientation: 'y', width: canvas.width, height: canvas.height, zIndex: Z.axis, axisIndex: 0, position: 'left' }),
@@ -147,6 +150,7 @@ export class ICEChart {
     this.root.addChildren([
       this.plotArea,
       this.grid,
+      this.radarGrid,
       this.axisX,
       ...this.axisYList,
       this.titleComponent,
@@ -556,7 +560,7 @@ export class ICEChart {
     }
 
     const polar = layout.polar;
-    const isPolar = norm.kind === 'polar';
+    const isPolar = norm.kind !== 'cartesian';
     this.plotArea.setState({ left: plot.x, top: plot.y, width: plot.width, height: plot.height });
     this.plotArea.setBackground(theme.backgroundColor === 'transparent' ? null : theme.backgroundColor);
 
@@ -573,6 +577,23 @@ export class ICEChart {
     this.grid.grid = norm.option.grid || {};
     this.grid.theme = theme;
     this.grid.markDirty();
+
+    this.radarGrid.setState({ width: canvas.width, height: canvas.height, display: norm.kind === 'radar' });
+    this.radarGrid.theme = theme;
+    this.radarGrid.coord =
+      norm.kind === 'radar' && polar && norm.radar
+        ? {
+            polar,
+            plot,
+            indicators: norm.radar.indicators.map((indicator, index) => ({
+              name: indicator.name,
+              max: norm.radarDomains[index] ? norm.radarDomains[index][1] : 1,
+            })),
+            shape: norm.radar.shape || 'polygon',
+            splitNumber: Math.max(1, Number(norm.radar.splitNumber) || 4),
+          }
+        : null;
+    this.radarGrid.markDirty();
 
     this.syncAxisComponents();
     for (let i = 0; i < this.axisYList.length; i++) {
@@ -692,6 +713,8 @@ export class ICEChart {
       const coord =
         series.type === 'pie'
           ? { polar: polarLayout, plot, canvas: this.layout.canvas }
+          : series.type === 'radar'
+            ? { polar: polarLayout, plot, canvas: this.layout.canvas, domains: norm.radarDomains }
           : {
               plot,
               canvas: this.layout.canvas,

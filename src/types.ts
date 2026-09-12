@@ -11,7 +11,26 @@ export type DataItem = number | null | [any, number | null] | Record<string, any
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
-export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie';
+export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie' | 'radar';
+
+/** 雷达图的指标轴。 */
+export interface RadarIndicator {
+  name: string;
+  min?: number;
+  max?: number;
+}
+
+export interface RadarOption {
+  indicators: RadarIndicator[];
+  /** 网格形状：多边形（默认）或圆环。 */
+  shape?: 'polygon' | 'circle';
+  /** 网格环数，默认 4。 */
+  splitNumber?: number;
+  /** 半径占可用半径的比例，默认 0.72。 */
+  radius?: number;
+  /** 指标名称标签。 */
+  label?: { show?: boolean };
+}
 
 export interface AxisOption {
   type?: ScaleType;
@@ -213,6 +232,8 @@ export interface ChartOption {
   tooltip?: TooltipOption;
   crosshair?: CrosshairOption;
   dataZoom?: DataZoomOption;
+  /** 雷达图配置（存在雷达系列时必填）。 */
+  radar?: RadarOption;
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;

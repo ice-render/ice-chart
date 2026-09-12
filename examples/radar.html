@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 雷达图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>雷达图</h1>
+    <p class="lead">
+      每个系列是一个多边形，数据按 <code>radar.indicators</code> 的顺序排列。
+      命中判定按顶点距离：指针靠近某个顶点就命中该指标，落在多边形内部则按角度取最近指标；
+      提示框一次列出全部指标，方便对比。
+    </p>
+    <div class="row">
+      <div class="card"><canvas id="polygon" width="560" height="460"></canvas></div>
+      <div class="card"><canvas id="circle" width="560" height="460"></canvas></div>
+    </div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const indicators = [
+        { name: '攻击', max: 100 },
+        { name: '防御', max: 100 },
+        { name: '速度', max: 100 },
+        { name: '耐力', max: 100 },
+        { name: '技巧', max: 100 },
+        { name: '意识', max: 100 },
+      ];
+      const base = {
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: true, duration: 650, easing: 'easeOutCubic' },
+        radar: { indicators, splitNumber: 4 },
+      };
+
+      const polygon = ICEChart.createChart('polygon', {
+        ...base,
+        title: { text: '选手能力对比（多边形网格）' },
+        series: [
+          { id: 'a', type: 'radar', name: '选手 A', data: [85, 62, 90, 74, 78, 70] },
+          { id: 'b', type: 'radar', name: '选手 B', data: [62, 88, 66, 86, 72, 84] },
+        ],
+      });
+
+      const circle = ICEChart.createChart('circle', {
+        ...base,
+        title: { text: '单品评分（圆形网格）' },
+        radar: { indicators, splitNumber: 3, shape: 'circle', radius: 0.8 },
+        series: [
+          { id: 'p1', type: 'radar', name: '产品 A', data: [78, 84, 66, 92, 70, 80] },
+          { id: 'p2', type: 'radar', name: '产品 B', data: [88, 70, 82, 68, 86, 74] },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      for (const [name, chart] of [['多边形', polygon], ['圆形', circle]]) {
+        chart.on('item:hover', (p) => write(`${name} hover  ${p.seriesName} · ${p.xValue} = ${p.value}`));
+        chart.on('item:click', (p) => write(`${name} click  ${p.seriesName} · ${p.xValue} = ${p.value}`));
+        chart.on('legend:toggle', (p) => write(`${name} legend ${p.seriesName} → ${p.selected ? '显示' : '隐藏'}`));
+      }
+      window.__charts = { polygon, circle };
+    </script>
+  </body>
+</html>

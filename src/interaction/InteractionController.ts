@@ -269,7 +269,7 @@ export class InteractionController {
     }
     const crosshair = this.host.crosshair;
     if (crosshair) {
-      if (this.host.norm.kind === 'polar') {
+      if (this.host.norm.kind !== 'cartesian') {
         // 极坐标没有直角准星的概念，直接收起
         crosshair.hide();
       } else {
@@ -318,6 +318,17 @@ export class InteractionController {
             color: point.color || series.color,
           },
         ],
+      };
+    }
+    if (anchorItem && anchorItem.series.type === 'radar') {
+      const series = anchorItem.series;
+      return {
+        title: series.name,
+        rows: series.points.map((point) => ({
+          name: point.name || `${point.index + 1}`,
+          value: point.y === null ? '-' : String(point.y),
+          color: point.index === anchorItem.point.index ? series.color : this.host.norm.theme.subTextColor,
+        })),
       };
     }
     const xValue = state.kind === 'item' ? state.item.point.xValue : state.column.xValue;
