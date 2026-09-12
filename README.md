@@ -1,8 +1,8 @@
 # ICEChart · 交互式图表库
 
-[![npm](https://img.shields.io/npm/v/@ice-render/ice-chart.svg?label=npm)](https://www.npmjs.com/package/@ice-render/ice-chart)
-[![downloads](https://img.shields.io/npm/dm/@ice-render/ice-chart.svg)](https://www.npmjs.com/package/@ice-render/ice-chart)
-[![license](https://img.shields.io/npm/l/@ice-render/ice-chart.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@damoqiongqiu/ice-chart.svg?label=npm)](https://www.npmjs.com/package/@damoqiongqiu/ice-chart)
+[![downloads](https://img.shields.io/npm/dm/@damoqiongqiu/ice-chart.svg)](https://www.npmjs.com/package/@damoqiongqiu/ice-chart)
+[![license](https://img.shields.io/npm/l/@damoqiongqiu/ice-chart.svg)](./LICENSE)
 [![CI](https://github.com/ice-render/ice-chart/actions/workflows/ci.yml/badge.svg)](https://github.com/ice-render/ice-chart/actions/workflows/ci.yml)
 
 构建在 [ice-render](https://github.com/ice-render/ice-render) Canvas 引擎之上的**交互式图表库**。
@@ -17,14 +17,14 @@
 ## 快速开始
 
 ```bash
-npm install @ice-render/ice-chart ice-render
+npm install @damoqiongqiu/ice-chart ice-render
 ```
 
 > 包名带作用域不是偏好，是 npm 的「相似名保护」：无作用域的 `ice-chart` 与已存在的 `icechart`
-> 太像，会被直接拒发，所以本包统一发布在 `@ice-render` 作用域下。
+> 太像，会被直接拒发，所以本包发布在 `@damoqiongqiu` 作用域下。
 
 ```ts
-import { createChart } from '@ice-render/ice-chart';
+import { createChart } from '@damoqiongqiu/ice-chart';
 
 const chart = createChart('canvas-id', {
   title: { text: '近 30 天流量' },
@@ -52,14 +52,14 @@ chart.on('item:click', (params) => {
 
 `ice-render` 是 peer 依赖：一个页面上多张图共用同一个引擎实例池，跨图联动才有统一的事件语义。
 包同时提供 ESM / CJS / UMD 三种产物与完整类型声明（`dist/types`），
-Vite / webpack / Rollup 直接 import，Node 侧 `require('@ice-render/ice-chart')` 也拿得到 CJS。
+Vite / webpack / Rollup 直接 import，Node 侧 `require('@damoqiongqiu/ice-chart')` 也拿得到 CJS。
 
 浏览器直接用（CDN 或本地文件，注意引擎要先于图表引入）：
 
 ```html
 <canvas id="chart" width="960" height="420"></canvas>
 <script src="https://unpkg.com/ice-render/dist/index.umd.js"></script>
-<script src="https://unpkg.com/@ice-render/ice-chart/dist/index.umd.js"></script>
+<script src="https://unpkg.com/@damoqiongqiu/ice-chart/dist/index.umd.js"></script>
 <script>
   ICEChart.createChart('chart', { series: [{ type: 'line', data: [1, 3, 2] }] });
 </script>
