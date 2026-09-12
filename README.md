@@ -155,6 +155,36 @@ chart.destroy();
 
 ## 架构
 
+### 序列化：持久化的单位是 option 快照，不是组件树
+
+- `chart.toJSON()` 产出 `{ version, option, view, hidden, hiddenSlices }`：
+  option 是声明式规格（**唯一事实来源**），view 是缩放窗口，hidden / hiddenSlices 是图例与扇区显隐。
+- `chart.fromJSONObject(snapshot)` / `fromJSONString(json)` 原地重建；
+  `ICEChart.restore(canvas, snapshot)`、或 `createChart(canvas, snapshot)`（识别到快照自动走还原）
+  用于在新画布上重建。
+- 往返**无损且幂等**：还原后再导出，JSON 与原文逐字节一致；浏览器里两张画布
+  `toDataURL()` 也完全一致（`examples/serialize.html` 现场做这个比对）。
+- 函数字段（`formatter` 等）进不了 JSON，导出时被丢弃，还原时用 `optionPatch` 补回来：
+
+```ts
+const chart = ICEChart.restore('canvas-2', json, {
+  optionPatch: {
+    tooltip: { formatter: (p) => `${p.xValue} → ${p.items[0].value}` },
+    series: [{ id: 'visits', label: { formatter: (p) => `${p.name} ${p.percent}%` } }],
+  },
+});
+```
+
+**为什么不用引擎的组件树？** `ice.toJSONString()` 确实能存下组件树（几何 + 样式），
+但组件树是 option 的**渲染投影**：没有比例尺、数据点、命中缓存这些语义，
+反序列化回来只是一棵空壳（未注册类型会被整段跳过）。所以 ice-chart 刻意让
+「规格 → 组件树」保持单向编译，持久化只认规格。
+
+```ts
+const json = chart.toJSONString();               // 导出：纯数据，KB 级别
+const restored = createChart('canvas-2', json);  // 还原：语义 / 窗口 / 显隐全部一致
+```
+
 ```
             ChartOption（纯 JSON）
                     │  normalizeOption()   纯函数：数据点 / 数据域 / 堆叠

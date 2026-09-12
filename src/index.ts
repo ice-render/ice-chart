@@ -7,8 +7,8 @@
  */
 
 // 图表主类
-export { ICEChart, createChart, computeBarSlots } from './ICEChart';
-export type { ICEChartOptions, ApplyOptionOptions } from './ICEChart';
+export { ICEChart, createChart, computeBarSlots, isChartSnapshot, mergeOptionPatch, SNAPSHOT_VERSION } from './ICEChart';
+export type { ICEChartOptions, ApplyOptionOptions, ChartSnapshot, SnapshotRestoreOptions } from './ICEChart';
 
 // 类型
 export type {

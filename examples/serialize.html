@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 序列化 / 反序列化</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      button {
+        font: inherit;
+        font-size: 0.875rem;
+        padding: 0.375rem 0.75rem;
+        border-radius: var(--bs-border-radius);
+        border: 1px solid var(--bs-primary);
+        background: var(--bs-primary);
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #fff;
+        color: var(--bs-primary);
+      }
+      .badge {
+        font-size: 0.8125rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        background: #d1e7dd;
+        color: #0f5132;
+      }
+      .badge.bad {
+        background: #f8d7da;
+        color: #842029;
+      }
+      .badge.idle {
+        background: #e9ecef;
+        color: #495057;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>序列化 / 反序列化</h1>
+    <p class="lead">
+      图表的持久化格式是 <b>option 快照</b>（声明式规格 + 视图窗口 + 图例/扇区显隐），
+      而不是引擎的组件树：组件树只是 option 的渲染投影。左边是原始图表，
+      点「导出 → 还原」会用 JSON 在右边重建一份，并逐像素比对两张画布。
+    </p>
+
+    <div class="card">
+      <div class="toolbar">
+        <button id="btn-export">导出 JSON</button>
+        <button id="btn-restore" class="secondary">从 JSON 还原到右图</button>
+        <button id="btn-zoom" class="secondary">左图缩放 + 隐藏一个系列</button>
+        <button id="btn-reset" class="secondary">重置右图</button>
+        <span id="status" class="badge idle">等待操作</span>
+      </div>
+      <div class="row">
+        <div class="card" style="margin: 0"><canvas id="chart-a" width="620" height="380"></canvas></div>
+        <div class="card" style="margin: 0"><canvas id="chart-b" width="620" height="380"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tips" id="meta">快照信息：—</div>
+      <div class="log" id="json" style="max-height: 180px">（导出的 JSON 会显示在这里）</div>
+    </div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const days = [];
+      for (let i = 1; i <= 30; i++) days.push(`6-${String(i).padStart(2, '0')}`);
+      const visits = [820, 932, 901, 1290, 1330, 1320, 1450, 1560, 1420, 1380, 1290, 1480, 1720, 1890, 2010, 1980, 2150, 2320, 2210, 2080, 2350, 2480, 2610, 2540, 2700, 2880, 2750, 2910, 3120, 3280];
+      const orders = visits.map((v) => Math.round(v * 0.28 + 40));
+      const refund = visits.map((v, i) => Math.round(v * 0.04 + (i % 5) * 3));
+
+      const OPTION = {
+        title: { text: '近 30 天流量与订单', subtext: '导出 JSON → 在右侧重建' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        xAxis: { type: 'category', name: '日期' },
+        yAxis: { name: '数量' },
+        interaction: { hover: { enabled: true }, zoom: { enabled: true, axes: 'x' } },
+        animation: { enabled: false },
+        series: [
+          { id: 'visits', type: 'line', name: '访问量', data: visits, smooth: true },
+          { id: 'orders', type: 'area', name: '订单量', data: orders, smooth: true, areaOpacity: 0.22 },
+          { id: 'refund', type: 'line', name: '退款量', data: refund, lineDash: [5, 4] },
+        ],
+      };
+
+      const left = ICEChart.createChart('chart-a', OPTION);
+      const right = ICEChart.createChart('chart-b', OPTION);
+      const initialSnapshot = left.toJSON();
+
+      const status = document.getElementById('status');
+      const meta = document.getElementById('meta');
+      const jsonBox = document.getElementById('json');
+      let latest = left.toJSONString();
+
+      const setStatus = (text, kind) => {
+        status.textContent = text;
+        status.className = 'badge' + (kind === 'ok' ? '' : kind === 'bad' ? ' bad' : ' idle');
+      };
+
+      const refreshMeta = () => {
+        const snapshot = JSON.parse(latest);
+        meta.textContent =
+          `快照版本 v${snapshot.version} ｜ 体积 ${(latest.length / 1024).toFixed(1)} KB ｜ ` +
+          `系列 ${snapshot.option.series.length} 个 ｜ x 窗口 ${JSON.stringify(snapshot.view.x)} ｜ ` +
+          `隐藏系列 ${JSON.stringify(Object.keys(snapshot.hidden).filter((k) => snapshot.hidden[k]))}`;
+      };
+
+      document.getElementById('btn-export').addEventListener('click', () => {
+        latest = left.toJSONString();
+        jsonBox.textContent = latest.slice(0, 1200) + (latest.length > 1200 ? '\n…（已截断）' : '');
+        refreshMeta();
+        setStatus('已导出', 'idle');
+      });
+
+      document.getElementById('btn-restore').addEventListener('click', async () => {
+        // 同一个实例原地重新水合；也可以销毁后用 ICEChart.restore(canvas, snapshot) 重建
+        right.fromJSONObject(JSON.parse(latest));
+        await right.render();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const samePixels = left.toDataURL() === right.toDataURL();
+        const sameJson = left.toJSONString() === right.toJSONString();
+        setStatus(samePixels ? '还原完成：与左侧逐像素一致 ✓' : '还原完成：像素不一致 ✗', samePixels ? 'ok' : 'bad');
+        meta.textContent += sameJson ? ' ｜ 再导出 JSON 也完全一致 ✓' : ' ｜ 再导出 JSON 不一致 ✗';
+      });
+
+      document.getElementById('btn-zoom').addEventListener('click', async () => {
+        left.setDomain('x', [8, 20]);
+        left.toggleSeries('refund');
+        await left.render();
+        latest = left.toJSONString();
+        jsonBox.textContent = latest.slice(0, 1200) + '…';
+        refreshMeta();
+        setStatus('左图已缩放并隐藏「退款量」，点「还原」看右图是否同步', 'idle');
+      });
+
+      document.getElementById('btn-reset').addEventListener('click', async () => {
+        right.fromJSONObject(initialSnapshot);
+        await right.render();
+        setStatus('右图已重置为初始配置', 'idle');
+      });
+
+      window.__charts = { left, right };
+      window.__latest = () => latest;
+    </script>
+  </body>
+</html>

@@ -37,6 +37,52 @@ const Z = {
   tooltip: 700,
 };
 
+/** 快照格式版本：结构变化时递增，还原时校验。 */
+export const SNAPSHOT_VERSION = 1;
+
+export interface SnapshotRestoreOptions {
+  /**
+   * 还原时叠加的非序列化配置补丁（formatter、函数型回调等）。
+   * series 按 id 或下标逐项合并，不会覆盖快照里的数据。
+   */
+  optionPatch?: Partial<ChartOption> & { series?: any[] };
+}
+
+export interface ChartSnapshot {
+  version: number;
+  option: ChartOption;
+  view: { x: [any, any] | null; y: [any, any] | null; yAxes: Array<[any, any] | null> };
+  hidden: Record<string, boolean>;
+  hiddenSlices: Record<string, boolean>;
+}
+
+/** 判断一个对象是不是 ice-chart 快照（用于 createChart 的入参分派）。 */
+export function isChartSnapshot(value: any): boolean {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !!value.option &&
+    ('version' in value || 'view' in value || 'hidden' in value)
+  );
+}
+
+/** 把补丁合进快照里的 option：series 按 id/下标逐项合并，其余字段浅覆盖。 */
+export function mergeOptionPatch(base: any, patch: any): any {
+  const out: any = { ...base, ...patch };
+  if (Array.isArray(patch && patch.series) && Array.isArray(base && base.series)) {
+    out.series = base.series.map((series: any, index: number) => {
+      const byId = patch.series.find((p: any) => p && p.id && series && series.id && p.id === series.id);
+      const positional = patch.series[index];
+      // 带 id 的补丁只按 id 合并；按下标的补丁必须自己没有 id。
+      // 否则「补丁里的第 0 条是 B」会被误合并到快照里的第 0 条 A 上（把 A 变成 B）。
+      const match = byId || (positional && !positional.id ? positional : undefined);
+      return match ? { ...series, ...match } : series;
+    });
+  }
+  return out;
+}
+
 export interface ICEChartOptions {
   renderMode?: 'dirty-rect' | 'full';
   dpr?: number;
@@ -473,15 +519,59 @@ export class ICEChart {
     return formatTick(value, scale, index < 0 ? 0 : index, internal.option.formatter);
   }
 
+  /** 导出成图片（透传引擎的 canvas 能力）：常用于「保存为 PNG」。 */
+  public toDataURL(type?: string, quality?: any): string {
+    if (!this.ice || typeof this.ice.toDataURL !== 'function') return '';
+    return this.ice.toDataURL(type, quality);
+  }
+
+  /** 导出成 Blob（浏览器环境）。 */
+  public toBlob(callback: (blob: any) => void, type?: string, quality?: any): void {
+    if (this.ice && typeof this.ice.toBlob === 'function') this.ice.toBlob(callback, type, quality);
+    else callback(null);
+  }
+
   // ------------------------------------------------------------- 序列化
 
+  /**
+   * 从快照还原一个图表（静态工厂，等价于先 new 再 fromJSONObject）。
+   *
+   * ```ts
+   * const json = chart.toJSONString();
+   * const restored = ICEChart.restore('canvas-2', json);
+   * ```
+   */
+  public static restore(
+    target: any,
+    snapshot: ChartSnapshot | string,
+    options: SnapshotRestoreOptions & { chartOptions?: ICEChartOptions; initialOption?: ChartOption } = {}
+  ): ICEChart {
+    // 先建一张空图（normalizeOption 要求 series 是数组），再立刻用快照替换
+    const chart = new ICEChart(target, options.initialOption || ({ series: [] } as ChartOption), options.chartOptions);
+    chart.fromJSONObject(snapshot, options);
+    return chart;
+  }
+
+  /**
+   * 导出图表快照（可 JSON 化）。
+   *
+   * 序列化的**唯一事实来源是 option**（声明式规格），不是引擎的组件树：
+   * 组件树只是 option 的渲染投影，里面没有数据语义（比例尺、数据点、命中缓存），
+   * 反序列化一棵组件树只会得到一个空壳。所以这里存的是
+   * 「option + 视图窗口 + 图例/扇区显隐」，这三样足以完整重建图形。
+   *
+   * 注意：函数字段（formatter 等）无法进 JSON，导出时会被丢弃；
+   * 还原时用 `restore(target, snapshot, { optionPatch })` 或 `fromJSONObject(snapshot, { patch })` 补回来。
+   */
   public toJSON(): {
+    version: number;
     option: ChartOption;
     view: { x: [any, any] | null; y: [any, any] | null; yAxes: Array<[any, any] | null> };
     hidden: Record<string, boolean>;
     hiddenSlices: Record<string, boolean>;
   } {
     return {
+      version: SNAPSHOT_VERSION,
       option: toSerializableOption(this.option),
       view: { x: this.viewState.x, y: this.viewState.y, yAxes: this.viewState.yAxes },
       hidden: { ...this.hiddenIds },
@@ -493,26 +583,33 @@ export class ICEChart {
     return JSON.stringify(this.toJSON());
   }
 
-  public fromJSONString(json: string): this {
+  public fromJSONString(json: string, options: SnapshotRestoreOptions = {}): this {
     const parsed = JSON.parse(json);
-    this.loadSnapshot(parsed);
+    this.loadSnapshot(parsed, options);
     return this;
   }
 
-  public fromJSONObject(snapshot: any): this {
-    this.loadSnapshot(snapshot);
+  public fromJSONObject(snapshot: any, options: SnapshotRestoreOptions = {}): this {
+    this.loadSnapshot(snapshot, options);
     return this;
   }
 
-  private loadSnapshot(snapshot: any): void {
+  private loadSnapshot(snapshot: any, options: SnapshotRestoreOptions = {}): void {
     if (!snapshot) return;
-    const option = snapshot.option || snapshot;
-    this.hiddenIds = snapshot.hidden || {};
-    this.hiddenSlices = snapshot.hiddenSlices || {};
-    const view = snapshot.view || {};
+    const parsed = typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot;
+    // 兼容两种输入：完整快照（{ version, option, view, hidden }）或裸 option
+    const rawOption = parsed.option || parsed;
+    if (typeof parsed.version === 'number' && parsed.version > SNAPSHOT_VERSION) {
+      throw new Error(
+        `[ice-chart] 快照版本 ${parsed.version} 高于当前实现支持的 ${SNAPSHOT_VERSION}，请升级 ice-chart 后再还原。`
+      );
+    }
+    const option = options.optionPatch ? mergeOptionPatch(rawOption, options.optionPatch) : rawOption;
+    this.hiddenIds = parsed.hidden || {};
+    this.hiddenSlices = parsed.hiddenSlices || {};
+    const view = parsed.view || {};
     this.viewState = { x: view.x || null, y: view.y || null, yAxes: view.yAxes || [] };
-    this.option = option;
-    this.rebuild(false);
+    this.applyOption(option, { animate: false, preserveView: true });
   }
 
   // ------------------------------------------------------------- 编译管线
@@ -1025,7 +1122,22 @@ function toAlpha(color: string, alpha: number): string {
   return color;
 }
 
-/** 工厂函数：与 `new ICEChart(...)` 等价，风格更贴近函数式调用。 */
-export function createChart(target: any, option: ChartOption, chartOptions?: ICEChartOptions): ICEChart {
-  return new ICEChart(target, option, chartOptions);
+/**
+ * 工厂函数：第二个参数既可以是声明式 option，也可以是 `toJSON()` 产出的快照。
+ *
+ * ```ts
+ * const chart = createChart('canvas-1', option);
+ * const snapshot = chart.toJSONString();
+ * const restored = createChart('canvas-2', snapshot);   // 直接吃快照
+ * ```
+ */
+export function createChart(
+  target: any,
+  optionOrSnapshot: ChartOption | ChartSnapshot | string,
+  chartOptions?: ICEChartOptions
+): ICEChart {
+  if (typeof optionOrSnapshot === 'string' || isChartSnapshot(optionOrSnapshot)) {
+    return ICEChart.restore(target, optionOrSnapshot as ChartSnapshot | string, { chartOptions });
+  }
+  return new ICEChart(target, optionOrSnapshot as ChartOption, chartOptions);
 }

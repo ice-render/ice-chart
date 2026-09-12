@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.0
+
+把「图表可序列化 / 可反序列化」做成显式契约，并给出可复现的证据。
+
+### 新增
+
+- `chart.toJSON()` 增加 `version`；新增 `ChartSnapshot` / `SnapshotRestoreOptions` 类型。
+- `ICEChart.restore(target, snapshot, options)`；`createChart(target, snapshotOrJson)`
+  现在能直接吃快照（自动识别并走还原路径）。
+- `fromJSONObject(snapshot, { optionPatch })`：还原时补回无法进 JSON 的函数字段（formatter 等），
+  series 按 id 或下标逐项合并，不覆盖快照里的数据。
+- `chart.toDataURL()` / `chart.toBlob()`：透传引擎的图片导出能力。
+- 导出 `isChartSnapshot` / `mergeOptionPatch` / `SNAPSHOT_VERSION`。
+- `examples/serialize.html`：导出 → 还原 → **逐像素比对**，并显示快照体积与摘要。
+
+### 证据
+
+- 7 种场景（直角坐标 / 多 y 轴 / 饼图 / 雷达 / K 线 / 热力图 / 桑基）导出再还原后语义一致，
+  且再导出的 JSON 与原文逐字节相同（幂等）。
+- 浏览器实测：缩放窗口 `[8,20]` + 隐藏系列后还原，两张画布 `toDataURL()` **完全一致**。
+- 明确记录设计边界：`ice.toJSONString()` 的组件树**不是**图表持久化格式
+  （实测还原后 `unknownTypes` 列出全部 chart 组件、只落地一个根节点）。
+
+### 修复
+
+- `mergeOptionPatch` 里「带 id 的补丁在下标不匹配时退化按下标合并」会把快照的 A 系列
+  改名成 B（已补回归用例）。
+
 ## 0.3.0
 
 ### 修复：图形越出坐标轴（用户实测反馈）

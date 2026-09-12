@@ -91,6 +91,20 @@ npm run audit:interactions -- ./.audit
 - 标签防重叠的既定策略：内部标签按相邻角度逐级外推半径，弧长放不下就不画（交给图例 + 提示框）；
   桑基节点名用白色描边保证压在连线上也可读。
 
+## 序列化契约（改持久化相关代码前必读）
+
+- **唯一事实来源是 option 快照**：`{ version, option, view, hidden, hiddenSlices }`。
+  引擎组件树（`ice.toJSONString()`）**不是**图表的持久化格式：它只有几何与样式，
+  没有比例尺 / 数据点 / 命中缓存，反序列化回来是空壳。不要把「组件树能存下来」
+  当成「图表能存下来」，也不要把语义数据塞进组件 `state`。
+- 往返必须同时满足两条硬约束：**幂等**（还原后再导出与原文字节一致）与
+  **像素一致**（两张画布 `toDataURL()` 相同）。测试见 `tests/chart/serialization.test.ts`，
+  浏览器现场比对见 `examples/serialize.html`。
+- 函数字段（formatter 等）不进 JSON，靠 `optionPatch` 在还原时补。
+  `mergeOptionPatch` 里「带 id 的补丁只按 id 合并」这条规则不能回退 ——
+  否则补丁的第 N 条会被误合并到快照的第 N 条上（曾把 A 系列改名成 B）。
+- 快照带 `version`；加载更高版本必须显式报错，不要静默降级。
+
 ## 已实现 / 未实现
 
 已实现：直角坐标 / 极坐标（饼图、玫瑰图）/ 雷达图 / 桑基图；多 y 轴；dataZoom 滑块；

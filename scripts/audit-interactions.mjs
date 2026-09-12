@@ -23,6 +23,7 @@ const pages = [
   'radar',
   'finance',
   'sankey',
+  'serialize',
   'interactions',
   'time-series',
   'large-data',
