@@ -25,7 +25,59 @@ export type SeriesType =
   | 'gauge'
   | 'boxplot'
   | 'waterfall'
-  | 'treemap';
+  | 'treemap'
+  | 'graph';
+
+/** 力导向关系图的节点。 */
+export interface GraphNodeOption {
+  id?: string;
+  name: string;
+  /** 权重：影响节点大小与连线粗细。 */
+  value?: number;
+  /** 分类名（对应 `graph.categories`），用于配色。 */
+  category?: string | number;
+  color?: string;
+  /** 初始坐标（给了就用它，否则按 circular 均匀铺开）。 */
+  x?: number;
+  y?: number;
+  /** 固定不动（不参与力学迭代，但可以被拖拽）。 */
+  fixed?: boolean;
+}
+
+/** 关系图的连线。source / target 可以是节点 id、name 或下标。 */
+export interface GraphLinkOption {
+  source: string | number;
+  target: string | number;
+  value?: number;
+  color?: string;
+}
+
+export interface GraphOption {
+  nodes: GraphNodeOption[];
+  links: GraphLinkOption[];
+  /** 布局方式：force（默认，力导向）| circular（环形）| none（只用给定坐标）。 */
+  layout?: 'force' | 'circular' | 'none';
+  /** 节点之间的斥力，默认 6000。 */
+  repulsion?: number;
+  /** 连线的理想长度（像素），默认 70。 */
+  edgeLength?: number;
+  /** 向中心的向心力，默认 0.06。 */
+  gravity?: number;
+  /** 速度阻尼（0~1），默认 0.85。 */
+  damping?: number;
+  /** 迭代次数，默认 240。 */
+  iterations?: number;
+  /** 节点直径区间，默认 [12, 48]。 */
+  symbolSizeRange?: [number, number];
+  /** 连线是否画成曲线（默认 true）。 */
+  curve?: boolean;
+  /** 分类配色表：`categories: [{ name: '前端', color: '#0d6efd' }]`。 */
+  categories?: Array<{ name: string; color?: string }>;
+  /** 是否可以拖动节点，默认 true。 */
+  draggable?: boolean;
+  /** 拖完松手后是否再跑几轮力迭代让邻居跟随，默认 true。 */
+  settleOnDrop?: boolean;
+}
 
 /** 矩形树图配置。 */
 export interface TreemapOption {
@@ -369,6 +421,8 @@ export interface ChartOption {
   waterfall?: WaterfallOption;
   /** 矩形树图配置。 */
   treemap?: TreemapOption;
+  /** 力导向关系图配置。 */
+  graph?: GraphOption;
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;

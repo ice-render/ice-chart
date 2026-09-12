@@ -19,4 +19,6 @@ export { BoxplotSeries } from './BoxplotSeries';
 export { WaterfallSeries } from './WaterfallSeries';
 export { TreemapSeries } from './TreemapSeries';
 export type { TreemapSeriesCoord } from './TreemapSeries';
+export { GraphSeries } from './GraphSeries';
+export type { GraphSeriesCoord } from './GraphSeries';
 export { BarSeries } from './BarSeries';

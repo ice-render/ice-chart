@@ -45,6 +45,14 @@ type DragState =
       originEnd: number;
       anchorFraction: number;
       moved: boolean;
+    }
+  | {
+      mode: 'graph-node';
+      component: any;
+      nodeIndex: number;
+      startX: number;
+      startY: number;
+      moved: boolean;
     };
 
 /**
@@ -498,6 +506,41 @@ export class InteractionController {
         ],
       };
     }
+    // 关系图：节点给权重与度数，连线给两端与流量
+    if (anchorItem && anchorItem.series.type === 'graph') {
+      const component: any = this.resolver.seriesComponentOf(anchorItem.series);
+      const point: any = anchorItem.point;
+      const nodeCount = (component && component.nodeCount) || 0;
+      const isLink = point.index >= nodeCount;
+      if (isLink) {
+        const link = component && component.graph ? component.graph.layout.links[point.index - nodeCount] : null;
+        const nodes = component && component.graph ? component.graph.layout.nodes : [];
+        return {
+          title: point.name,
+          rows: [
+            {
+              name: '流量',
+              value: link ? String(link.value) : String(point.y),
+              color: link ? link.color : anchorItem.series.color,
+            },
+            ...(link && nodes[link.source] && nodes[link.target]
+              ? [{ name: '度数', value: String(nodes[link.source].degree + nodes[link.target].degree), color: this.host.norm.theme.subTextColor }]
+              : []),
+          ],
+        };
+      }
+      return {
+        title: point.name,
+        rows: [
+          { name: '权重', value: point.y === null ? '-' : String(point.y), color: anchorItem.series.color },
+          {
+            name: '连接数',
+            value: String(component && component.graph && component.graph.layout.nodes[point.index] ? component.graph.layout.nodes[point.index].degree : 0),
+            color: this.host.norm.theme.subTextColor,
+          },
+        ],
+      };
+    }
     if (anchorItem && anchorItem.series.type === 'heatmap') {
       const point = anchorItem.point;
       return {
@@ -652,6 +695,28 @@ export class InteractionController {
         return true;
       }
     }
+    // 关系图：按下节点即可拖动（这是力导向图最常用的交互）
+    if (
+      target.kind === 'series' &&
+      target.index >= 0 &&
+      target.component &&
+      target.component.seriesType === 'graph' &&
+      typeof target.component.moveNode === 'function' &&
+      target.index < (target.component.nodeCount || 0) &&
+      (!target.component.graph || target.component.graph.options.draggable !== false)
+    ) {
+      this.preventDefault(evt);
+      this.setHover(null);
+      this.drag = {
+        mode: 'graph-node',
+        component: target.component,
+        nodeIndex: target.index,
+        startX: screenX,
+        startY: screenY,
+        moved: false,
+      };
+      return true;
+    }
     if (!this.resolver.isInsidePlot(target.chart[0], target.chart[1])) return false;
 
     const interaction = this.host.norm.option.interaction || {};
@@ -709,6 +774,15 @@ export class InteractionController {
       this.updateHover(screenX, screenY);
       return;
     }
+    if (drag.mode === 'graph-node') {
+      // 松手后跑少量迭代让邻居跟随（被拖的节点保持固定）
+      const component = drag.component;
+      if (drag.moved && component && typeof component.settle === 'function' && component.graph && component.graph.options.settleOnDrop !== false) {
+        component.settle();
+      }
+      this.updateHover(screenX, screenY);
+      return;
+    }
     if (drag.mode === 'pan') {
       this.updateHover(screenX, screenY);
     }
@@ -758,6 +832,21 @@ export class InteractionController {
         end = start + span;
       }
       this.host.setDomainFromFractions(start, end, 'slider');
+      return;
+    }
+
+    if (drag.mode === 'graph-node') {
+      drag.moved = true;
+      const component = drag.component;
+      const [worldX, worldY] = this.host.ice.screenToWorld(screenX, screenY);
+      const local = component.globalToLocal(worldX, worldY);
+      component.moveNode(drag.nodeIndex, local[0], local[1]);
+      // 拖动时同步更新提示框锚点，手感更连贯
+      const series = this.seriesOfGraphComponent(component);
+      if (series) {
+        const item = this.resolver.buildActiveItem(series, drag.nodeIndex);
+        if (item) this.setHover({ kind: 'item', item });
+      }
       return;
     }
 
@@ -1096,6 +1185,14 @@ export class InteractionController {
   }
 
   /** 沿指定方向找到下一个「落在绘图区内」的数据下标；找不到返回 -1。 */
+  /** 关系图组件 → 对应的 InternalSeries。 */
+  private seriesOfGraphComponent(component: any): any {
+    for (const series of this.host.norm.series) {
+      if (this.resolver.seriesComponentOf(series) === component) return series;
+    }
+    return null;
+  }
+
   private stepVisibleIndex(series: any, direction: number): number {
     const total = series.points.length;
     if (!total) return -1;

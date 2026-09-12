@@ -13,6 +13,7 @@ import { GaugeSeries } from './GaugeSeries';
 import { BoxplotSeries } from './BoxplotSeries';
 import { WaterfallSeries } from './WaterfallSeries';
 import { TreemapSeries } from './TreemapSeries';
+import { GraphSeries } from './GraphSeries';
 import { SeriesBase } from './SeriesBase';
 
 /** 按系列类型创建对应的渲染组件（工厂，便于后续扩展 candlestick / pie 等）。 */
@@ -47,6 +48,8 @@ export function createSeriesComponent(
       return new WaterfallSeries(series, props);
     case 'treemap':
       return new TreemapSeries(series, props);
+    case 'graph':
+      return new GraphSeries(series, props);
     case 'line':
     default:
       return new LineSeries(series, props);

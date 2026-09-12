@@ -1,5 +1,5 @@
 import type { AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
-import type { RadarOption, SankeyNodeOption, SankeyOption } from '../types';
+import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
@@ -85,7 +85,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };
 
   const radar = option.radar || null;
-  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null);
+  const graphOption = option.graph || null;
+  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null, graphOption);
   const hiddenIds: Record<string, boolean> = { ...(context.hiddenIds || {}) };
   for (const s of series) {
     if (merged.legend?.selected && merged.legend.selected[s.name] === false) {
@@ -94,7 +95,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'treemap' = series.some((s) => s.type === 'pie')
+  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'treemap' | 'graph' = series.some((s) => s.type === 'pie')
     ? 'polar'
     : series.some((s) => s.type === 'radar')
       ? 'radar'
@@ -106,11 +107,14 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
             ? 'gauge'
             : series.some((s) => s.type === 'treemap')
               ? 'treemap'
-              : 'cartesian';
+              : series.some((s) => s.type === 'graph')
+                ? 'graph'
+                : 'cartesian';
   const sankey = kind === 'sankey' ? option.sankey || null : null;
   const funnel = kind === 'funnel' ? option.funnel || {} : null;
   const gauge = kind === 'gauge' ? option.gauge || {} : null;
   const treemap = kind === 'treemap' ? option.treemap || {} : null;
+  const graph = kind === 'graph' ? graphOption : null;
   const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
   const radarDomains: Array<[number, number]> = radar ? buildRadarDomains(radar, series) : [];
   if (kind !== 'cartesian' && (!option.tooltip || option.tooltip.trigger === undefined)) {
@@ -226,6 +230,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     funnel,
     gauge,
     treemap,
+    graph,
     radarDomains,
     option: merged,
     theme,
@@ -245,7 +250,8 @@ function buildSeries(
   theme: ChartTheme,
   _selected: Record<string, boolean>,
   radar?: RadarOption | null,
-  sankey?: SankeyOption | null
+  sankey?: SankeyOption | null,
+  graph?: GraphOption | null
 ): InternalSeries[] {
   const out: InternalSeries[] = [];
   const usedNames: Record<string, number> = {};
@@ -266,7 +272,7 @@ function buildSeries(
     }
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
-    const { points, hasExplicitX } = buildPoints(option, radar, sankey);
+    const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph);
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
       for (let p = 0; p < points.length; p++) {
@@ -283,11 +289,51 @@ function buildSeries(
 function buildPoints(
   option: SeriesOption,
   radar?: RadarOption | null,
-  sankey?: SankeyOption | null
+  sankey?: SankeyOption | null,
+  graph?: GraphOption | null
 ): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
   const points: DataPoint[] = [];
   let hasExplicitX = false;
+  // 关系图：点是「节点 + 连线」，索引 0..n-1 是节点，之后是连线
+  if (option.type === 'graph' && graph) {
+    const graphNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    const graphLinks = Array.isArray(graph.links) ? graph.links : [];
+    const indexOf = (ref: string | number): number => {
+      if (typeof ref === 'number') return ref;
+      return graphNodes.findIndex((node: any) => node.id === ref || node.name === ref);
+    };
+    for (let i = 0; i < graphNodes.length; i++) {
+      const node: any = graphNodes[i];
+      const value = toNumber(node.value);
+      points.push({
+        index: i,
+        xValue: node.name,
+        y: value,
+        raw: node,
+        base: 0,
+        top: value === null ? 0 : value,
+        name: node.name,
+      });
+    }
+    for (let i = 0; i < graphLinks.length; i++) {
+      const link: any = graphLinks[i];
+      const s = indexOf(link.source);
+      const t = indexOf(link.target);
+      const name = `${s >= 0 ? graphNodes[s].name : String(link.source)} → ${t >= 0 ? graphNodes[t].name : String(link.target)}`;
+      const value = toNumber(link.value);
+      points.push({
+        index: graphNodes.length + i,
+        xValue: name,
+        y: value === null ? 1 : value,
+        raw: { __graphLink: true, source: link.source, target: link.target, value: link.value },
+        base: 0,
+        top: value === null ? 1 : value,
+        name,
+      });
+    }
+    return { points, hasExplicitX: true };
+  }
   // 桑基图：点为「节点 + 连线」，索引 0..n-1 是节点，之后是连线
   if (option.type === 'sankey' && sankey) {
     const nodes = Array.isArray(sankey.nodes) ? sankey.nodes : [];

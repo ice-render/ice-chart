@@ -25,6 +25,7 @@ const pages = [
   'funnel-gauge',
   'boxplot-waterfall',
   'treemap',
+  'graph',
   'finance',
   'sankey',
   'serialize',

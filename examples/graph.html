@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 力导向关系图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>力导向关系图</h1>
+    <p class="lead">
+      没有底图，就是节点 + 连线 + 力学：斥力把节点推开、弹力把有关系的节点拉到理想距离、向心力防止子图飘走。
+      初始位置用<b>环形均匀铺开而不是随机</b>，所以同一份数据每次渲染的图完全一致（可复现、可写测试）。
+      <br />
+      <b>拖动任意节点</b>可以重新排布：拖的时候节点跟着指针走，松手后跑少量迭代让邻居跟随（被拖的节点保持固定）。
+      节点大小按权重、颜色按分类；点节点看权重与连接数，点连线看两端与流量。
+    </p>
+
+    <div class="card"><canvas id="graph" width="960" height="540"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      // ---- 一张微服务依赖图：节点权重 = 请求量，分类 = 层
+      const categories = [
+        { name: '接入层', color: '#0d6efd' },
+        { name: '服务层', color: '#198754' },
+        { name: '存储层', color: '#fd7e14' },
+        { name: '外部', color: '#6c757d' },
+      ];
+      const nodes = [
+        { id: 'gw', name: '网关', value: 100, category: '接入层' },
+        { id: 'web', name: 'Web BFF', value: 72, category: '接入层' },
+        { id: 'app', name: 'App BFF', value: 64, category: '接入层' },
+        { id: 'user', name: '用户服务', value: 58, category: '服务层' },
+        { id: 'order', name: '订单服务', value: 76, category: '服务层' },
+        { id: 'pay', name: '支付服务', value: 40, category: '服务层' },
+        { id: 'stock', name: '库存服务', value: 34, category: '服务层' },
+        { id: 'search', name: '搜索服务', value: 30, category: '服务层' },
+        { id: 'msg', name: '消息服务', value: 26, category: '服务层' },
+        { id: 'mysql', name: 'MySQL', value: 88, category: '存储层' },
+        { id: 'redis', name: 'Redis', value: 70, category: '存储层' },
+        { id: 'mq', name: 'Kafka', value: 46, category: '存储层' },
+        { id: 's3', name: '对象存储', value: 22, category: '存储层' },
+        { id: 'sms', name: '短信网关', value: 12, category: '外部' },
+        { id: 'wx', name: '微信支付', value: 18, category: '外部' },
+      ];
+      const links = [
+        { source: 'gw', target: 'web', value: 20 },
+        { source: 'gw', target: 'app', value: 18 },
+        { source: 'web', target: 'user', value: 12 },
+        { source: 'web', target: 'order', value: 14 },
+        { source: 'web', target: 'search', value: 8 },
+        { source: 'app', target: 'user', value: 10 },
+        { source: 'app', target: 'order', value: 16 },
+        { source: 'app', target: 'msg', value: 6 },
+        { source: 'order', target: 'pay', value: 12 },
+        { source: 'order', target: 'stock', value: 9 },
+        { source: 'order', target: 'mysql', value: 22 },
+        { source: 'user', target: 'mysql', value: 18 },
+        { source: 'user', target: 'redis', value: 16 },
+        { source: 'search', target: 'redis', value: 12 },
+        { source: 'pay', target: 'wx', value: 10 },
+        { source: 'msg', target: 'mq', value: 9 },
+        { source: 'order', target: 'mq', value: 11 },
+        { source: 'stock', target: 'mysql', value: 8 },
+        { source: 'user', target: 'sms', value: 4 },
+        { source: 'web', target: 's3', value: 5 },
+      ];
+
+      const graph = ICEChart.createChart('graph', {
+        title: { text: '微服务依赖关系（力导向）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        graph: {
+          nodes,
+          links,
+          categories,
+          layout: 'force',
+          repulsion: 9000,
+          edgeLength: 90,
+          gravity: 0.055,
+          damping: 0.86,
+          iterations: 320,
+          symbolSizeRange: [14, 46],
+          curve: true,
+          draggable: true,
+          settleOnDrop: true,
+        },
+        series: [{ id: 'net', type: 'graph', name: '依赖' }],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      graph.on('item:hover', (p) => write(`graph hover  ${p.xValue}（${p.value}）`));
+      graph.on('item:click', (p) => write(`graph click  ${p.xValue}`));
+
+      window.__chart = graph;
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

@@ -23,6 +23,7 @@ import { clamp } from './util/math';
 import { A11yMirror, buildDataNodes, buildDataTable, chartTitle, type A11yTreeOptions, type DataTable } from './a11y';
 import { layoutSankey } from './layout/sankey';
 import { layoutTreemap } from './layout/treemap';
+import { forceLayout } from './layout/force';
 
 const Z = {
   plotArea: 10,
@@ -946,6 +947,13 @@ export class ICEChart {
                       ),
                       options: norm.treemap || {},
                     }
+                  : series.type === 'graph' && norm.graph
+                    ? {
+                        plot,
+                        canvas: this.layout.canvas,
+                        layout: forceLayout(norm.graph.nodes || [], norm.graph.links || [], plot, norm.graph, norm.theme.colorPalette),
+                        options: norm.graph,
+                      }
             : series.type === 'sankey' && norm.sankey
               ? {
                   plot,
