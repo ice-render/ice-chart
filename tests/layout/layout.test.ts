@@ -52,6 +52,37 @@ describe('computeLayout', () => {
     expect(items[0].x).toBe(items[1].x);
   });
 
+  it('does not squeeze the plot when the legend sits on the right', () => {
+    const { layout } = layoutOf({
+      legend: { show: true, position: 'right' },
+      series: [
+        { type: 'line', name: 'A', data: [1, 2, 3] },
+        { type: 'line', name: 'B', data: [2, 1, 3] },
+      ],
+    });
+    // 右图例只应占几十像素；绘图区必须保留大部分宽度（曾因 Math.min 种子为 0 被挤成 20px）
+    expect(layout.plot.width).toBeGreaterThan(canvas.width * 0.5);
+    expect(layout.legendRect!.width).toBeLessThan(canvas.width * 0.3);
+  });
+
+  it('keeps a usable circle for polar scenes with a right legend', () => {
+    const { layout } = layoutOf({
+      legend: { show: true, position: 'right' },
+      series: [
+        {
+          type: 'pie',
+          name: '份额',
+          data: [
+            { name: 'A', value: 60 },
+            { name: 'B', value: 40 },
+          ],
+        },
+      ],
+    });
+    expect(layout.polar!.radius).toBeGreaterThan(canvas.height * 0.25);
+    expect(layout.polar!.cx).toBeGreaterThan(canvas.width * 0.3);
+  });
+
   it('reserves space for the title', () => {
     const without = layoutOf({ series: [{ type: 'line', data: [1, 2] }] }).layout;
     const withTitle = layoutOf({ title: { text: '销售趋势' }, series: [{ type: 'line', data: [1, 2] }] }).layout;

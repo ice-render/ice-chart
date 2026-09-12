@@ -11,7 +11,7 @@ export type DataItem = number | null | [any, number | null] | Record<string, any
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
-export type SeriesType = 'line' | 'bar' | 'area' | 'scatter';
+export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie';
 
 export interface AxisOption {
   type?: ScaleType;
@@ -82,6 +82,18 @@ export interface SeriesOption {
   opacity?: number;
   /** 命中判定的额外容差（设备像素）。 */
   hitRadius?: number;
+  /** 饼图半径：0~1 的小数视为「可用半径占比」，>1 视为像素。 */
+  radius?: number;
+  /** 饼图内半径（环形图）。 */
+  innerRadius?: number;
+  /** 扇形起始角度（度）：90 = 12 点方向。 */
+  startAngle?: number;
+  /** 是否顺时针排布扇形，默认 true。 */
+  clockwise?: boolean;
+  /** 玫瑰图：radius（半径随数值）| area（面积随数值）。 */
+  roseType?: 'radius' | 'area' | false;
+  /** 饼图标签。 */
+  label?: { show?: boolean; position?: 'outside' | 'inside'; formatter?: (params: PieLabelParams) => string };
 }
 
 export interface TitleOption {
@@ -258,6 +270,18 @@ export interface DataPointParams {
   screen: [number, number];
 }
 
+/** 饼图 / 玫瑰图标签回调参数。 */
+export interface PieLabelParams {
+  name: string;
+  value: number | null;
+  /** 占可见扇区之和的百分比（0~100）。 */
+  percent: number;
+  dataIndex: number;
+  seriesId: string;
+  seriesName: string;
+  color: string;
+}
+
 export interface TooltipParams {
   /** item 触发器时长度为 1；axis 触发器时是所有可见系列在该列上的点。 */
   items: DataPointParams[];
@@ -280,6 +304,8 @@ export interface LegendToggleParams {
   seriesName: string;
   seriesIndex: number;
   selected: boolean;
+  /** 饼图扇区被切换时带上数据下标。 */
+  dataIndex?: number;
 }
 
 export type ChartEventName =

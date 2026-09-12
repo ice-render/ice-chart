@@ -20,6 +20,8 @@ export interface InteractionHost extends HitHost {
   emit(event: string, payload?: any): void;
   setDomain(axis: 'x' | 'y', domain: any[], source?: string): void;
   toggleSeries(seriesId: string, forceSelected?: boolean): void;
+  /** 切换饼图扇区显隐（极坐标图例）。 */
+  toggleSlice(seriesId: string, dataIndex: number, forceSelected?: boolean): void;
   formatAxisValue(axis: 'x' | 'y', value: any): string;
   /** 未经缩放的完整数据域（缩放约束用）。 */
   fullDomain(axis: 'x' | 'y'): any[];
@@ -267,13 +269,18 @@ export class InteractionController {
     }
     const crosshair = this.host.crosshair;
     if (crosshair) {
-      const axisMode = (this.host.norm.option.crosshair && this.host.norm.option.crosshair.axis) || 'x';
-      crosshair.show(
-        axisMode === 'y' ? null : anchor.pixel[0],
-        axisMode === 'x' ? null : anchor.pixel[1],
-        this.host.formatAxisValue('x', anchor.point.xValue),
-        anchor.point.y === null ? '' : this.host.formatAxisValue('y', anchor.point.y)
-      );
+      if (this.host.norm.kind === 'polar') {
+        // 极坐标没有直角准星的概念，直接收起
+        crosshair.hide();
+      } else {
+        const axisMode = (this.host.norm.option.crosshair && this.host.norm.option.crosshair.axis) || 'x';
+        crosshair.show(
+          axisMode === 'y' ? null : anchor.pixel[0],
+          axisMode === 'x' ? null : anchor.pixel[1],
+          this.host.formatAxisValue('x', anchor.point.xValue),
+          anchor.point.y === null ? '' : this.host.formatAxisValue('y', anchor.point.y)
+        );
+      }
     }
     const tooltip = this.host.tooltip;
     if (tooltip) {
@@ -290,6 +297,29 @@ export class InteractionController {
 
   private buildTooltipContent(state: { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn }) {
     const items = state.kind === 'item' ? [state.item] : state.column.items;
+    const anchorItem = items[0];
+    // 饼图 / 玫瑰图：一张图一个系列，提示内容按扇区组织
+    if (anchorItem && anchorItem.series.type === 'pie') {
+      const series = anchorItem.series;
+      const point = anchorItem.point;
+      let total = 0;
+      for (const p of series.points) {
+        if (this.host.norm.hiddenSlices[`${series.id}#${p.index}`]) continue;
+        total += p.y || 0;
+      }
+      const value = point.y || 0;
+      const percent = total > 0 ? (value / total) * 100 : 0;
+      return {
+        title: series.name,
+        rows: [
+          {
+            name: point.name || `切片 ${point.index + 1}`,
+            value: `${percent.toFixed(1)}%`,
+            color: point.color || series.color,
+          },
+        ],
+      };
+    }
     const xValue = state.kind === 'item' ? state.item.point.xValue : state.column.xValue;
     const title = this.host.formatAxisValue('x', xValue);
     const rows = items.map((item) => ({
@@ -490,7 +520,8 @@ export class InteractionController {
       const legend = this.host.legend;
       if (legend && target.index >= 0) {
         const item = legend.items[target.index];
-        this.host.toggleSeries(item.seriesId);
+        if (item.dataIndex !== undefined) this.host.toggleSlice(item.seriesId, item.dataIndex);
+        else this.host.toggleSeries(item.seriesId);
       }
       return;
     }

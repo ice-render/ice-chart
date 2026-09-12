@@ -15,6 +15,7 @@ import { Highlight } from './components/Highlight';
 import { Brush } from './components/Brush';
 import { createSeriesComponent } from './components/series/createSeries';
 import type { SeriesBase } from './components/series/SeriesBase';
+import { PieSeries } from './components/series/PieSeries';
 import { InteractionController } from './interaction/InteractionController';
 import { Emitter } from './util/emitter';
 import { clamp } from './util/math';
@@ -95,6 +96,7 @@ export class ICEChart {
     yAxes: Array<[any, any] | null>;
   } = { x: null, y: null, yAxes: [] };
   private hiddenIds: Record<string, boolean> = {};
+  private hiddenSlices: Record<string, boolean> = {};
   private seriesSignature = '';
   private axisSignature = '';
   private resizeObserver: any = null;
@@ -225,6 +227,29 @@ export class ICEChart {
 
   public isSeriesSelected(seriesId: string): boolean {
     return !this.hiddenIds[seriesId];
+  }
+
+  /**
+   * 切换饼图扇区显隐（极坐标图例点击走这里）。
+   * 扇区键是 `seriesId#dataIndex`，与系列显隐彼此独立。
+   */
+  public toggleSlice(seriesId: string, dataIndex: number, forceSelected?: boolean): this {
+    const series = this.norm.series.find((s) => s.id === seriesId);
+    if (!series || series.type !== 'pie') return this;
+    const key = `${seriesId}#${dataIndex}`;
+    const currentlyHidden = !!this.hiddenSlices[key];
+    const nextHidden = forceSelected === undefined ? !currentlyHidden : !forceSelected;
+    this.hiddenSlices[key] = nextHidden;
+    const point = series.points[dataIndex];
+    this.applyOption(this.option, { animate: false, preserveView: true });
+    this.emit('legend:toggle', {
+      seriesId,
+      seriesName: (point && point.name) || `${series.name} ${dataIndex + 1}`,
+      seriesIndex: series.index,
+      selected: !nextHidden,
+      dataIndex,
+    } as LegendToggleParams);
+    return this;
   }
 
   /** 键盘 / 程序化焦点：把悬停定位到某个数据点。 */
@@ -399,11 +424,13 @@ export class ICEChart {
     option: ChartOption;
     view: { x: [any, any] | null; y: [any, any] | null; yAxes: Array<[any, any] | null> };
     hidden: Record<string, boolean>;
+    hiddenSlices: Record<string, boolean>;
   } {
     return {
       option: toSerializableOption(this.option),
       view: { x: this.viewState.x, y: this.viewState.y, yAxes: this.viewState.yAxes },
       hidden: { ...this.hiddenIds },
+      hiddenSlices: { ...this.hiddenSlices },
     };
   }
 
@@ -426,6 +453,7 @@ export class ICEChart {
     if (!snapshot) return;
     const option = snapshot.option || snapshot;
     this.hiddenIds = snapshot.hidden || {};
+    this.hiddenSlices = snapshot.hiddenSlices || {};
     const view = snapshot.view || {};
     this.viewState = { x: view.x || null, y: view.y || null, yAxes: view.yAxes || [] };
     this.option = option;
@@ -436,7 +464,7 @@ export class ICEChart {
 
   private applyOption(option: ChartOption, options: ApplyOptionOptions): void {
     this.option = option;
-    const normalized = normalizeOption(option, { hiddenIds: this.hiddenIds });
+    const normalized = normalizeOption(option, { hiddenIds: this.hiddenIds, hiddenSlices: this.hiddenSlices });
     this.fullXDomain = normalized.xAxis.domain.slice();
     this.fullYDomain = normalized.yAxis.domain.slice();
     this.fullYDomains = normalized.yAxes.map((axis) => axis.domain.slice());
@@ -449,6 +477,7 @@ export class ICEChart {
       }
     }
     this.hiddenIds = normalized.hiddenIds;
+    this.hiddenSlices = normalized.hiddenSlices;
     this.rebuild(options.animate !== false);
   }
 
@@ -483,6 +512,7 @@ export class ICEChart {
     });
     const norm = normalizeOption(this.option, {
       hiddenIds: this.hiddenIds,
+      hiddenSlices: this.hiddenSlices,
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
       yDomain:
         effectiveYs[0] && effectiveYs[0].length === 2
@@ -525,10 +555,13 @@ export class ICEChart {
       this.root.setState({ width: canvas.width, height: canvas.height });
     }
 
+    const polar = layout.polar;
+    const isPolar = norm.kind === 'polar';
     this.plotArea.setState({ left: plot.x, top: plot.y, width: plot.width, height: plot.height });
     this.plotArea.setBackground(theme.backgroundColor === 'transparent' ? null : theme.backgroundColor);
 
     this.grid.setState({ width: canvas.width, height: canvas.height });
+    this.grid.setState({ display: !isPolar });
     this.grid.xScale = norm.xAxis.scale;
     this.grid.yScale = norm.yAxis.scale;
     // 默认只有主轴画水平网格线；其它轴需要显式 showGrid: true
@@ -544,7 +577,7 @@ export class ICEChart {
     this.syncAxisComponents();
     for (let i = 0; i < this.axisYList.length; i++) {
       const axisComponent = this.axisYList[i];
-      axisComponent.setState({ width: canvas.width, height: canvas.height });
+      axisComponent.setState({ width: canvas.width, height: canvas.height, display: !isPolar });
       axisComponent.layout = layout;
       axisComponent.theme = theme;
       axisComponent.axis = norm.yAxes[i] || norm.yAxis;
@@ -554,7 +587,7 @@ export class ICEChart {
     }
     {
       const axis = this.axisX;
-      axis.setState({ width: canvas.width, height: canvas.height });
+      axis.setState({ width: canvas.width, height: canvas.height, display: !isPolar });
       axis.layout = layout;
       axis.theme = theme;
       axis.axis = norm.xAxis;
@@ -585,6 +618,7 @@ export class ICEChart {
       this.crosshair.layout = layout;
       this.crosshair.option = norm.option.crosshair || {};
     }
+    if (this.crosshair) this.crosshair.setState({ display: !isPolar });
     if (this.brushComponent) {
       const brushOption: any = norm.option.interaction && norm.option.interaction.brush;
       this.brushComponent.color =
@@ -654,14 +688,18 @@ export class ICEChart {
       const series = norm.series[i];
       const visible = !series.hidden;
       const axis = norm.yAxes[series.axisIndex] || norm.yAxis;
-      const coord = {
-        plot,
-        canvas: this.layout.canvas,
-        xScale: norm.xAxis.scale as Scale,
-        yScale: axis.scale as Scale,
-        yAxisIndex: series.axisIndex,
-        theme: norm.theme,
-      };
+      const polarLayout = this.layout.polar;
+      const coord =
+        series.type === 'pie'
+          ? { polar: polarLayout, plot, canvas: this.layout.canvas }
+          : {
+              plot,
+              canvas: this.layout.canvas,
+              xScale: norm.xAxis.scale as Scale,
+              yScale: axis.scale as Scale,
+              yAxisIndex: series.axisIndex,
+              theme: norm.theme,
+            };
       component.setState({
         left: plot.x,
         top: plot.y,
@@ -672,8 +710,12 @@ export class ICEChart {
         interactive: visible,
       });
       component.barSlot = slots[series.id] || { index: 0, count: 1 };
+      component.chartTheme = norm.theme;
       component.updateSeries(series, animate && !this.viewState.x);
-      component.setCoord(coord);
+      if (component instanceof PieSeries) {
+        component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));
+      }
+      component.setCoord(coord as any);
       component.markDirty();
       if (animate && visible) {
         const animation = norm.option.animation;
@@ -802,6 +844,17 @@ export function computeBarSlots(series: InternalSeries[]): Record<string, { inde
     }
   }
   return map;
+}
+
+/** 某个饼图系列里被隐藏的扇区下标。 */
+export function hiddenSliceIndexes(norm: NormalizedOption, seriesId: string): number[] {
+  const out: number[] = [];
+  const series = norm.series.find((s) => s.id === seriesId);
+  if (!series) return out;
+  for (const point of series.points) {
+    if (norm.hiddenSlices[`${seriesId}#${point.index}`]) out.push(point.index);
+  }
+  return out;
 }
 
 function toAlpha(color: string, alpha: number): string {

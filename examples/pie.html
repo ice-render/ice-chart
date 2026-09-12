@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 饼图 / 玫瑰图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>饼图 / 环形图 / 玫瑰图</h1>
+    <p class="lead">
+      扇形命中判定与绘制共用同一份几何：把指针移到扇区上，命中的就是「那个扇区」，
+      而不是整块画布。右侧图例的每一项都是扇区，点击可切换显隐并重算百分比；
+      圆环中心的空洞不参与命中。
+    </p>
+    <div class="row">
+      <div class="card"><canvas id="donut" width="560" height="420"></canvas></div>
+      <div class="card"><canvas id="rose" width="560" height="420"></canvas></div>
+    </div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const donut = ICEChart.createChart('donut', {
+        title: { text: '浏览器份额（环形图）' },
+        theme: 'light',
+        legend: { show: true, position: 'right' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: true, duration: 700, easing: 'easeOutCubic' },
+        series: [
+          {
+            id: 'share',
+            type: 'pie',
+            name: '浏览器份额',
+            radius: 0.82,
+            innerRadius: 0.55,
+            startAngle: 90,
+            label: { show: true },
+            data: [
+              { name: 'Chrome', value: 62 },
+              { name: 'Safari', value: 19 },
+              { name: 'Edge', value: 11 },
+              { name: 'Firefox', value: 8 },
+            ],
+          },
+        ],
+      });
+
+      const rose = ICEChart.createChart('rose', {
+        title: { text: '季度品类销售（玫瑰图）' },
+        theme: 'light',
+        legend: { show: true, position: 'right' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: true, duration: 700, easing: 'easeOutCubic' },
+        series: [
+          {
+            id: 'category',
+            type: 'pie',
+            name: '品类销售',
+            roseType: 'area',
+            radius: 0.85,
+            label: { show: true, position: 'inside' },
+            data: [
+              { name: '数码', value: 320 },
+              { name: '家电', value: 240 },
+              { name: '服饰', value: 180 },
+              { name: '食品', value: 150 },
+              { name: '图书', value: 96 },
+              { name: '运动', value: 72 },
+            ],
+          },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      for (const [name, chart] of [['环形图', donut], ['玫瑰图', rose]]) {
+        chart.on('item:hover', (p) => write(`${name} hover  扇区 ${p.dataIndex}（${p.value}）`));
+        chart.on('item:click', (p) => write(`${name} click  扇区 ${p.dataIndex} = ${p.value}`));
+        chart.on('legend:toggle', (p) => write(`${name} legend ${p.dataIndex} → ${p.selected ? '显示' : '隐藏'}`));
+      }
+      window.__charts = { donut, rose };
+    </script>
+  </body>
+</html>

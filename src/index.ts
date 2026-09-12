@@ -67,6 +67,8 @@ export { LineSeries } from './components/series/LineSeries';
 export { AreaSeries } from './components/series/AreaSeries';
 export { BarSeries } from './components/series/BarSeries';
 export { ScatterSeries } from './components/series/ScatterSeries';
+export { PieSeries } from './components/series/PieSeries';
+export type { PolarSeriesCoord } from './components/series/PieSeries';
 export { createSeriesComponent } from './components/series/createSeries';
 
 // 交互

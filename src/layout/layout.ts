@@ -85,12 +85,28 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     if (norm.xAxis.option.name) bottom -= xAxisLayout.nameHeight + AXIS_NAME_GAP;
   }
 
-  const plot: Rect = {
+  let plot: Rect = {
     x: Math.round(Math.max(0, left)),
     y: Math.round(Math.max(0, top)),
     width: Math.max(1, Math.round(right - left)),
     height: Math.max(1, Math.round(bottom - top)),
   };
+
+  // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
+  let polar: { cx: number; cy: number; radius: number } | null = null;
+  if (norm.kind === 'polar') {
+    const ratio = polarRadiusRatio(norm);
+    const radius = Math.max(10, (Math.min(plot.width, plot.height) * ratio) / 2);
+    const cx = plot.x + plot.width / 2;
+    const cy = plot.y + plot.height / 2;
+    polar = { cx, cy, radius };
+    plot = {
+      x: Math.round(cx - radius),
+      y: Math.round(cy - radius),
+      width: Math.round(radius * 2),
+      height: Math.round(radius * 2),
+    };
+  }
 
   if (title) {
     title.y = margin.top;
@@ -103,11 +119,22 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     legendRect: legend ? legendBoundingRect(legend) : null,
     legend,
     title,
+    polar,
     xAxisLayout,
     yAxes: yAxisLayouts,
     yAxisLayout,
     margin,
   };
+}
+
+/** 饼图半径占可用半径的比例（取第一个饼图系列的 radius 配置）。 */
+function polarRadiusRatio(norm: NormalizedOption): number {
+  for (const series of norm.series) {
+    if (series.type !== 'pie') continue;
+    const raw = Number(series.option.radius);
+    if (isFinite(raw) && raw > 0) return Math.max(0.1, Math.min(1, raw));
+  }
+  return 0.78;
 }
 
 /** 单个 y 轴占用的横向空间。 */
@@ -179,17 +206,41 @@ function buildTitleLayout(norm: NormalizedOption): TitleLayout | null {
 function layoutLegend(norm: NormalizedOption, ctx: any, canvas: Rect, topOffset: number): LegendLayout | null {
   const option = norm.option.legend;
   if (!option || option.show === false) return null;
-  const items: LegendItemLayout[] = norm.series.map((s) => ({
-    seriesId: s.id,
-    seriesIndex: s.index,
-    name: s.name,
-    color: s.color,
-    hidden: !!s.hidden,
-    x: 0,
-    y: 0,
-    width: 0,
-    height: 0,
-  }));
+  const items: LegendItemLayout[] = [];
+  if (norm.kind === 'polar') {
+    // 饼图的图例项是「扇区」而不是「系列」
+    for (const s of norm.series) {
+      if (s.type !== 'pie') continue;
+      for (const point of s.points) {
+        items.push({
+          seriesId: s.id,
+          seriesIndex: s.index,
+          dataIndex: point.index,
+          name: point.name || `${s.name} ${point.index + 1}`,
+          color: point.color || s.color,
+          hidden: !!norm.hiddenSlices[`${s.id}#${point.index}`],
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+        });
+      }
+    }
+  } else {
+    for (const s of norm.series) {
+      items.push({
+        seriesId: s.id,
+        seriesIndex: s.index,
+        name: s.name,
+        color: s.color,
+        hidden: !!s.hidden,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+      });
+    }
+  }
   if (!items.length) return null;
   const legend: LegendLayout = { position: option.position || 'top', items };
   const fontSize = norm.theme.fontSize;
@@ -256,8 +307,12 @@ function legendSizeOf(legend: LegendLayout, norm: NormalizedOption): { width: nu
   const itemHeight = Math.max(option.itemHeight || 12, fontSize * 1.4);
   const rowHeight = itemHeight + 4;
   if (legend.position === 'left' || legend.position === 'right') {
-    const maxRight = Math.max(...legend.items.map((it) => it.x + it.width), 0);
-    const minX = Math.min(...legend.items.map((it) => it.x), 0);
+    // 注意：不能用 0 作为 Math.min 的初始值 —— 图例项都在画布右侧（x > 0）时，
+    // 会把 minX 算成 0，宽度就等于「从画布左边到图例右边」，绘图区被挤成一条缝。
+    const lefts = legend.items.map((it) => it.x);
+    const rights = legend.items.map((it) => it.x + it.width);
+    const minX = lefts.length ? Math.min(...lefts) : 0;
+    const maxRight = rights.length ? Math.max(...rights) : 0;
     return { width: Math.max(itemWidth + 6, maxRight - minX), height: legend.items.length * rowHeight };
   }
   let rows = 1;

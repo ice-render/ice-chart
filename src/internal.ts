@@ -15,6 +15,17 @@ export interface DataPoint {
   base: number;
   /** 堆叠顶端（未堆叠时等于 y）。 */
   top: number;
+  /** 类目名 / 扇区名（饼图、类目轴对象数据的 name 字段）。 */
+  name?: string;
+  /** 该数据点自身的颜色（饼图的每个扇区各有一色）。 */
+  color?: string;
+}
+
+/** 极坐标布局：圆心与半径（图表坐标系）。 */
+export interface PolarLayout {
+  cx: number;
+  cy: number;
+  radius: number;
 }
 
 export interface InternalSeries {
@@ -45,6 +56,8 @@ export interface InternalAxis {
 }
 
 export interface NormalizedOption {
+  /** 场景类型：直角坐标 / 极坐标。 */
+  kind: 'cartesian' | 'polar';
   /** 合并默认值之后的原始 option（函数字段保留）。 */
   option: ChartOption & { legend: LegendOption; margin: { top: number; right: number; bottom: number; left: number } };
   theme: ChartTheme;
@@ -59,6 +72,8 @@ export interface NormalizedOption {
   /** 参与渲染的系列（未被图例隐藏）。 */
   visibleSeries: InternalSeries[];
   hiddenIds: Record<string, boolean>;
+  /** 被隐藏的扇区，key 为 `seriesId#dataIndex`。 */
+  hiddenSlices: Record<string, boolean>;
 }
 
 export interface Rect {
@@ -90,6 +105,8 @@ export interface ChartLayout {
   legendRect: Rect | null;
   legend: LegendLayout | null;
   title: TitleLayout | null;
+  /** 极坐标圆心与半径；直角坐标场景为 null。 */
+  polar: PolarLayout | null;
   xAxisLayout: AxisLayout;
   /** 每个 y 轴的刻度布局，与 norm.yAxes 一一对应。 */
   yAxes: AxisLayout[];
@@ -104,6 +121,8 @@ export interface LegendItemLayout {
   name: string;
   color: string;
   hidden: boolean;
+  /** 饼图图例项对应的数据下标（直角坐标场景为 undefined）。 */
+  dataIndex?: number;
   /** 可点击区域。 */
   x: number;
   y: number;

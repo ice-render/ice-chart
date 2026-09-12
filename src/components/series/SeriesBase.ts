@@ -36,6 +36,8 @@ export interface BarSlot {
 export abstract class SeriesBase extends ChartComponent {
   public abstract seriesType: SeriesType;
   public series: InternalSeries;
+  /** 图表主题（由 Chart 注入，供绘制标签 / 文本使用）。 */
+  public chartTheme: ChartTheme | null = null;
   public coord: SeriesCoord | null = null;
   /** 分组柱形的位置（由 Chart 计算）。 */
   public barSlot: BarSlot = { index: 0, count: 1 };

@@ -10,6 +10,8 @@ const DEFAULT_ANIMATION = { enabled: true, duration: 480, easing: 'cubicOut' };
 
 export interface NormalizeContext {
   hiddenIds?: Record<string, boolean>;
+  /** 被隐藏的扇区（饼图），key 为 `seriesId#dataIndex`。 */
+  hiddenSlices?: Record<string, boolean>;
   /** 当前 x 数据域（数据缩放后）。不传表示自动。 */
   xDomain?: [any, any] | null;
   /** 主 y 轴的数据域（缩放后），等价于 yDomains[0]。 */
@@ -90,6 +92,9 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
+  const kind: 'cartesian' | 'polar' = series.some((s) => s.type === 'pie') ? 'polar' : 'cartesian';
+  const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
+
   const xAxisOption: AxisOption = merged.xAxis;
   const xType = resolveXAxisType(xAxisOption, series);
   const { domain: rawXDomain, categories } = buildXDomain(xType, series, xAxisOption);
@@ -129,6 +134,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const yAxis = yAxes[0];
 
   return {
+    kind,
     option: merged,
     theme,
     series,
@@ -138,6 +144,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     categories,
     visibleSeries: series.filter((s) => !s.hidden),
     hiddenIds,
+    hiddenSlices,
   };
 }
 
@@ -162,6 +169,14 @@ function buildSeries(seriesOptions: SeriesOption[], theme: ChartTheme, _selected
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
     const { points, hasExplicitX } = buildPoints(option);
+    if (option.type === 'pie') {
+      // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
+      for (let p = 0; p < points.length; p++) {
+        const raw = points[p].raw;
+        const own = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw.color : undefined;
+        points[p].color = own || (p === 0 && option.color ? option.color : theme.colorPalette[p % theme.colorPalette.length]);
+      }
+    }
     out.push({ id, index: i, type: option.type, name, color, option, points, hasExplicitX, hidden: false, axisIndex: 0 });
   }
   return out;
@@ -200,7 +215,13 @@ function buildPoints(option: SeriesOption): { points: DataPoint[]; hasExplicitX:
       else if (item.value !== undefined) y = toNumber(item.value);
     }
     if (explicitX) hasExplicitX = true;
-    points.push({ index: i, xValue, y, raw: item, base: 0, top: y === null ? 0 : y });
+    let name: string | undefined;
+    if (item && typeof item === 'object' && !Array.isArray(item) && item.name !== undefined) {
+      name = String(item.name);
+    } else if (option.type === 'pie' && Array.isArray(item) && typeof item[0] === 'string') {
+      name = item[0];
+    }
+    points.push({ index: i, xValue, y, raw: item, base: 0, top: y === null ? 0 : y, name });
   }
   return { points, hasExplicitX };
 }

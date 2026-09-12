@@ -3,6 +3,7 @@ import { BarSeries } from './BarSeries';
 import { AreaSeries } from './AreaSeries';
 import { LineSeries } from './LineSeries';
 import { ScatterSeries } from './ScatterSeries';
+import { PieSeries } from './PieSeries';
 import { SeriesBase } from './SeriesBase';
 
 /** 按系列类型创建对应的渲染组件（工厂，便于后续扩展 candlestick / pie 等）。 */
@@ -17,6 +18,8 @@ export function createSeriesComponent(
       return new AreaSeries(series, props);
     case 'scatter':
       return new ScatterSeries(series, props);
+    case 'pie':
+      return new PieSeries(series, props);
     case 'line':
     default:
       return new LineSeries(series, props);
