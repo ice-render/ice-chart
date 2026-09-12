@@ -46,7 +46,10 @@ const browser = await chromium.launch();
 const report = [];
 
 for (const name of pages) {
-  const page = await browser.newPage({ viewport: { width: 1400, height: 1800 } });
+  // 视口要能放下大屏的完整设计宽（12 列 × 120 + 11 × 12 = 1572）：
+  // 之前用 1280 时，最右侧那几块面板在视口外，鼠标移到那里不产生任何事件，
+  // 探针会偶发报「hoverIndex: null」——不是图表的问题，是探针根本够不着。
+  const page = await browser.newPage({ viewport: { width: 1700, height: 1800 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e.message)));
   page.on('console', (msg) => {

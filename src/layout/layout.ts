@@ -109,15 +109,25 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
   let polar: { cx: number; cy: number; radius: number } | null = null;
   if (norm.kind === 'polar' || norm.kind === 'radar' || norm.kind === 'gauge' || norm.kind === 'liquid') {
-    const ratio = polarRadiusRatio(norm);
-    // 饼图默认带引导线标签，标签要画到圆外，因此预留一圈文字空间
     const halfMin = Math.min(plot.width, plot.height) / 2;
+    const halfW = plot.width / 2;
+    const halfH = plot.height / 2;
+    // 饼图默认带引导线标签，标签要画到圆外，因此预留一圈文字空间
     const hasLabels =
-      (norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false))) ||
-      norm.kind === 'gauge' ||
-      norm.kind === 'liquid';
+      norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false));
     const labelAllowance = hasLabels ? Math.min(46, halfMin * 0.26) : 6;
-    const radius = Math.max(10, halfMin * ratio - labelAllowance);
+    let radius: number;
+    if (norm.kind === 'gauge') {
+      // 仪表盘的文字全在弧内（刻度贴弧、数值在圆心），**不需要**外圈标签预留 ——
+      // 之前照抄饼图预留圈，实测半径只有可用空间的 ~50%（420×300 的画布里指针盘直径只有 92px）。
+      // 弧顶到圆心就是 r，所以纵向按半高留 4px；两侧刻度数字有宽度，横向留 14px。
+      radius = Math.max(10, Math.min(halfW - 14, halfH - 4) * 0.94);
+    } else if (norm.kind === 'liquid') {
+      // 水位球的名称与数值都画在球内，整圆贴满较短的半轴即可（留 3px 给描边）
+      radius = Math.max(10, Math.min(halfW, halfH) - 3);
+    } else {
+      radius = Math.max(10, halfMin * polarRadiusRatio(norm) - labelAllowance);
+    }
     const cx = plot.x + plot.width / 2;
     const cy = plot.y + plot.height / 2;
     polar = { cx, cy, radius };
@@ -166,16 +176,13 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   };
 }
 
-/** 饼图半径占可用半径的比例（取第一个饼图系列的 radius 配置）。 */
+/**
+ * 圆半径占可用半径的比例（饼图取系列上的 `radius`，雷达取 `radar.radius`）。
+ *
+ * 注意：`gauge` / `liquid` 不在这里 —— 它们的半径由可用空间的形状直接算（见上面），
+ * 因为它们的文字都在图形内部，不需要按比例留外圈。
+ */
 function polarRadiusRatio(norm: NormalizedOption): number {
-  if (norm.kind === 'gauge') {
-    // 仪表盘是 270° 的弧，半径可以比整圆更饱满一些
-    return 0.62;
-  }
-  if (norm.kind === 'liquid') {
-    // 水位球是整圆，而且数值文字在球心 —— 半径给足才好看
-    return 0.8;
-  }
   if (norm.kind === 'radar') {
     const raw = Number(norm.radar && norm.radar.radius);
     return isFinite(raw) && raw > 0 ? Math.max(0.1, Math.min(1, raw)) : 0.72;

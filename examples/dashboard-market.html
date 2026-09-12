@@ -100,8 +100,10 @@
         DashKit.panel({ id: 'sector', title: '板块热力', meta: '矩形 morph', span: 4, height: 170 }) +
         DashKit.panel({ id: 'dist', title: '涨跌分布', meta: '涨跌家数', span: 4, height: 170 }) +
         DashKit.panel({ id: 'rating', title: '板块评分', meta: '实时抖动', span: 4, height: 170 }) +
-        DashKit.panel({ id: 'orders', title: '大单成交', meta: '按金额着色', span: 6, height: 170 }) +
-        DashKit.panel({ id: 'industry', title: '行业占比', meta: '玫瑰图', span: 6, height: 170 }) +
+        // 玫瑰图是「方」的图形：放在 762px 宽的卡片里，圆只占 14% 宽、两边全是死区。
+        // 窄卡片（366）里圆占 40% 且纵向吃满 —— 形状匹配比"面板更宽"重要。
+        DashKit.panel({ id: 'orders', title: '大单成交', meta: '按金额着色', span: 9, height: 170 }) +
+        DashKit.panel({ id: 'industry', title: '行业占比', meta: '玫瑰图', span: 3, height: 170 }) +
         '<div class="dk-footer"><span>ice-chart · 交互全部由引擎内建</span>' +
         '<span>同一套 12 列栅格与组件：换配色即另一个大屏</span></div>' +
         '<div id="snapshot-panel"></div>';

@@ -10,6 +10,22 @@
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         gap: 0.6rem 1rem;
       }
+      /* 等比坐标的图（参数曲线 / 极坐标）绘图区是正方形，卡片太宽两侧就是死区。
+         并排放两张，正方形才能吃满卡片宽度。 */
+      .fx-pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 1.25rem;
+        align-items: start;
+      }
+      .fx-pair canvas {
+        margin: 0 auto;
+      }
+      @media (max-width: 1000px) {
+        .fx-pair {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
       .fx-field {
         display: flex;
         align-items: center;
@@ -178,9 +194,10 @@
       <div class="fx-error" id="messages"></div>
     </div>
 
+    <div class="fx-pair">
     <div class="card">
       <div class="snapshot-head">
-        <span class="snapshot-title">极坐标 r(θ)（polarplot）</span>
+        <span class="snapshot-title">极坐标 r(θ)</span>
         <span class="snapshot-actions">
           <button type="button" id="btn-polar-1">玫瑰线 cos(3θ)</button>
           <button type="button" id="btn-polar-2">心形 1−cosθ</button>
@@ -190,7 +207,7 @@
         <span class="spacer"></span>
         <span class="snapshot-meta">同心圆 + 辐条底图，r 的取值直接决定形状</span>
       </div>
-      <canvas id="polar" width="960" height="520"></canvas>
+      <canvas id="polar" width="470" height="470"></canvas>
     </div>
 
     <div class="card">
@@ -208,7 +225,8 @@
         <span class="spacer"></span>
         <span class="snapshot-meta">x(t)、y(t) 两条表达式合成一条曲线；等比坐标下圆才是圆</span>
       </div>
-      <canvas id="parametric" width="960" height="420"></canvas>
+      <canvas id="parametric" width="470" height="470"></canvas>
+    </div>
     </div>
 
     <div class="card" id="snapshot-panel"></div>

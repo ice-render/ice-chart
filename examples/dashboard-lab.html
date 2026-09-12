@@ -144,12 +144,15 @@
         ]) +
         DashKit.panel({ id: 'overlay', title: '函数曲线叠加', meta: '五种形态同屏 · 可缩放平移', span: 6, height: 220 }) +
         DashKit.panel({ id: 'sweep', title: '参数扫动', meta: 'a · b · c 随时间变化', span: 6, height: 220 }) +
-        DashKit.panel({ id: 'lissajous', title: '李萨如曲线', meta: '参数曲线 · 频率比漂移', span: 4, height: 200 }) +
-        DashKit.panel({ id: 'rose', title: '极坐标玫瑰线', meta: 'r(θ) · 花瓣数连续变化', span: 4, height: 200 }) +
-        DashKit.panel({ id: 'taylor', title: '泰勒逼近', meta: 'sin(x) 的 1 / 3 / 5 / 7 阶', span: 4, height: 200 }) +
+        // 等比坐标的图（李萨如 / 玫瑰线 / 参数曲线族）绘图区是「正方形」：
+        // 卡片越宽，正方形两侧的死区越大（实测 4 列宽时图形只占 35% 宽度）。
+        // 这三张收窄到 3 列，省下的列给「横向铺得开」的函数曲线。
+        DashKit.panel({ id: 'lissajous', title: '李萨如曲线', meta: '参数曲线 · 频率比漂移', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'rose', title: '极坐标玫瑰线', meta: 'r(θ) · 花瓣数连续变化', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'taylor', title: '泰勒逼近', meta: 'sin(x) 的 1 / 3 / 5 / 7 阶', span: 6, height: 200 }) +
         DashKit.panel({ id: 'packet', title: '高斯波包', meta: '中心与宽度扫动', span: 4, height: 200 }) +
-        DashKit.panel({ id: 'family', title: '参数曲线族', meta: '螺线 / 心形线 / 三叶玫瑰', span: 4, height: 200 }) +
-        DashKit.panel({ id: 'density', title: '采样密度', meta: '均匀采样 vs 自适应细分', span: 4, height: 200 }) +
+        DashKit.panel({ id: 'family', title: '参数曲线族', meta: '螺线 / 心形线 / 李萨如 3:4', span: 3, height: 200 }) +
+        DashKit.panel({ id: 'density', title: '采样密度', meta: '均匀采样 vs 自适应细分', span: 5, height: 200 }) +
         '<section class="dk-panel dk-span12" id="panel-formula">' +
         '<header class="dk-panel-title">表达式输入与诊断<span class="dk-meta">f(x) = …</span></header>' +
         '<div class="fx-row">' +

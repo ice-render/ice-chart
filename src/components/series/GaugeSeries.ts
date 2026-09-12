@@ -213,13 +213,17 @@ export class GaugeSeries extends SeriesBase {
     const detailText = detail.formatter
       ? String(detail.formatter(value))
       : `${Math.round(value * 100) / 100}`;
+    // 270° 表盘的底部是缺口 —— 读数本来就该摆在那里：摆到圆心下方 0.42r 会正好压住
+    // 弧两端的刻度数字（它们在 ±0.707·labelRadius 处）。整圆表盘没有缺口，维持原样。
+    const gapDeg = Math.max(0, 360 - (this.angles().sweep / DEG));
+    const openBottom = gapDeg > 20;
     if (detail.show !== false) {
       const fontSize = Number(detail.fontSize) || Math.max(16, Math.round(radius * 0.26));
       this.setFont(fontSize, theme.fontFamily, 'bold');
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = theme.textColor;
-      ctx.fillText(detailText, cx, cy + radius * 0.42);
+      ctx.fillText(detailText, cx, cy + radius * (openBottom ? 0.78 : 0.42));
     }
     const title = options.title || {};
     const point = this.series.points[0];
@@ -232,7 +236,7 @@ export class GaugeSeries extends SeriesBase {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = theme.subTextColor;
-      ctx.fillText(name, cx, cy + radius * 0.68);
+      ctx.fillText(name, cx, cy + radius * (openBottom ? 0.6 : 0.68));
     }
     this.endDraw();
   }

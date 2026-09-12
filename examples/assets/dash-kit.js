@@ -197,9 +197,12 @@
     '  background-repeat: no-repeat;',
     '  background-size: 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px;',
     '  background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom; }',
-    '.dk-span3 { grid-column: span 3; } .dk-span4 { grid-column: span 4; } .dk-span5 { grid-column: span 5; }',
-    '.dk-span6 { grid-column: span 6; } .dk-span7 { grid-column: span 7; } .dk-span8 { grid-column: span 8; }',
-    '.dk-span12 { grid-column: span 12; }',
+    // 1~12 列全给出来：只定义常用几档时，写一个没定义的 span 会退化成「自动占 1 列」，
+    // 结果是两个面板叠在同一个格子里（实测：span 9 撞上隔壁 span 3，两张画布正好压在一起）。
+    '.dk-span1 { grid-column: span 1; } .dk-span2 { grid-column: span 2; } .dk-span3 { grid-column: span 3; }',
+    '.dk-span4 { grid-column: span 4; } .dk-span5 { grid-column: span 5; } .dk-span6 { grid-column: span 6; }',
+    '.dk-span7 { grid-column: span 7; } .dk-span8 { grid-column: span 8; } .dk-span9 { grid-column: span 9; }',
+    '.dk-span10 { grid-column: span 10; } .dk-span11 { grid-column: span 11; } .dk-span12 { grid-column: span 12; }',
     '.dk-panel.dk-alert { border-color: rgba(255, 91, 106, 0.6); box-shadow: inset 0 0 26px rgba(255, 91, 106, 0.12); }',
     '.dk-panel.dk-alert::before { --dk-corner: var(--dk-danger); }',
     '.dk-panel-title { display: flex; align-items: center; gap: 8px; height: 26px; margin-bottom: 6px;',
