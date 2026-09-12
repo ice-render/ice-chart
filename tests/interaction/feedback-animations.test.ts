@@ -205,9 +205,10 @@ describe('交互反馈动画', () => {
     expect(tooltip.lastRect).not.toBeNull();
   });
 
-  it('准星平滑跟随：绘制位置逐帧逼近目标列，pixelX 始终是目标值', async () => {
+  it('准星跟随：大跨度有滑动，小位移当帧就到（不会追不上指针）', async () => {
     const c = await mount({
       ...BAR_OPTION,
+      // 更新时间动画给到 600ms：准星**不该**被它拖慢（这正是用户看到「准星飘」的根因）
       animation: { enter: { duration: 60 }, update: { duration: 600, easing: 'linear' } },
       tooltip: { trigger: 'axis' },
       crosshair: { show: true, axis: 'x', showAxisLabel: true },
@@ -222,16 +223,27 @@ describe('交互反馈动画', () => {
     await c.render();
     const target = c.seriesComponents[0].pixelAt(4)![0] + c.layout.plot.x;
     expect(crosshair.pixelX).toBeCloseTo(target, 3);
-    // 跟随中：等在中间某个位置采样（时长接到 animation.update.duration = 600ms，采样点稳定）
-    await wait(150);
+    // 大跨度（跨了 4 列）：补间在飞行中，绘制位置严格落在起点与目标之间
+    await wait(20);
     await c.render();
     const drawn = crosshair.state.axisX as number;
     expect(drawn).toBeGreaterThan(first);
     expect(drawn).toBeLessThan(target);
 
-    await wait(600);
+    // 收敛有上界：跟随时长按距离缩放、上限 90ms，300ms 足够
+    await wait(300);
     await c.render();
     expect(crosshair.state.axisX as number).toBeCloseTo(target, 1);
+
+    // 相邻列的小位移：一个采样周期内就落位（旧实现每次 mousemove 重启 420ms 补间，永远追不上）
+    const from = crosshair.state.axisX as number;
+    hoverBar(c, 3);
+    await c.render();
+    const next = c.seriesComponents[0].pixelAt(3)![0] + c.layout.plot.x;
+    expect(Math.abs(next - from)).toBeGreaterThan(10); // 确实是另一个列
+    await wait(40);
+    await c.render();
+    expect(crosshair.state.axisX as number).toBeCloseTo(next, 1);
   });
 
   it('桑基图 flow:true 会持续重绘，flow 关闭时不占帧循环', async () => {

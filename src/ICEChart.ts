@@ -989,10 +989,12 @@ export class ICEChart {
     if (this.crosshair) {
       this.crosshair.layout = layout;
       this.crosshair.option = norm.option.crosshair || {};
-      // 准星跟随的时长跟「更新动画」走：同一张图里所有过渡的手感应该一致
-      const stages: any = norm.option.animation;
-      const update = stages && stages.enabled !== false ? stages.update : null;
-      this.crosshair.followDuration = Math.max(60, Number(update && update.duration) || 140);
+      // 准星跟随的时长是它自己的事，**不能**跟着 animation.update.duration 走 ——
+      // 那是「数据变化时图形怎么变」，默认 420ms。准星要跟指针，420ms 的补间就是「线追不上鼠标」，
+      // 数据流页面每帧 refreshHover 还会把补间反复重置，实测永不收敛。
+      // 默认 90ms 上限 + 按距离缩放（见 Crosshair.crosshairGlideDuration）。
+      const followRaw = Number((this.crosshair.option as any).followDuration);
+      this.crosshair.followDuration = isFinite(followRaw) && followRaw >= 0 ? Math.min(400, followRaw) : 90;
     }
     if (this.crosshair) this.crosshair.setState({ display: !isPolar });
     if (this.brushComponent) {

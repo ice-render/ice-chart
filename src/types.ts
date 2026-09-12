@@ -414,6 +414,11 @@ export interface CrosshairOption {
   lineColor?: string;
   /** 在坐标轴上同步显示当前值。 */
   showAxisLabel?: boolean;
+  /**
+   * 准星从当前列滑到目标列的**最大**时长（毫秒），0 = 立即跟随（默认 90）。
+   * 实际时长按距离缩放：相邻列这种小位移当帧就到，只有大跨度跳转才有一段可见的滑动。
+   */
+  followDuration?: number;
 }
 
 export interface GridOption {

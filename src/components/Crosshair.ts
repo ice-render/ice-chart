@@ -3,6 +3,22 @@ import type { ChartTheme, CrosshairOption } from '../types';
 import type { ChartLayout } from '../internal';
 import { shouldAnimate } from '../animation/motion';
 
+/**
+ * 准星跟随时长：**距离越大走得越快**，上限 `maxDuration`（0 = 立即跟随）。
+ *
+ * 为什么不是固定时长：指针是连续移动的，每次 mousemove 都会重新设定目标。
+ * 如果每次都从当前位置开一段固定时长（比如 420ms）的补间，指针一动就重新计时，
+ * 实际位置永远追不上目标 —— 实测快速拖动时滞后 50~300px，看起来就是「准星飘来飘去」。
+ * 改成按距离给时长（5px/ms）之后：相邻数据点之间的小位移当帧就到，
+ * 只有跨越大段距离（比如从绘图区左端跳到右端）才有一段看得见的滑动。
+ */
+export function crosshairGlideDuration(distance: number, maxDuration: number, speed = 5): number {
+  if (!isFinite(maxDuration) || maxDuration <= 0) return 0;
+  const span = Math.abs(distance);
+  if (!isFinite(span) || span <= 0) return 0;
+  return Math.max(16, Math.min(maxDuration, span / speed));
+}
+
 /** 十字准星：跟随活动数据列的辅助线 + 坐标轴数值标签。 */
 export class Crosshair extends ChartComponent {
   public layout: ChartLayout | null = null;
@@ -14,18 +30,29 @@ export class Crosshair extends ChartComponent {
   public yLabel = '';
   /** 最近一次绘制的轴数值标签矩形（图表坐标系），供外观审计 / 测试断言使用。 */
   public lastChipRects: Array<{ x: number; y: number; width: number; height: number }> = [];
-  /** 换列时的跟随时长（毫秒）：由图表按 `animation.update.duration` 下发。 */
-  public followDuration = 110;
+  /**
+   * 换列时的**最大**跟随时长（毫秒），由 `crosshair.followDuration` 下发；0 = 立即跟随。
+   * 实际时长按距离缩放（见 `crosshairGlideDuration`）。
+   */
+  public followDuration = 90;
 
   constructor(props: { width: number; height: number; zIndex?: number }) {
     super({ interactive: false, ...props });
   }
 
   public show(pixelX: number | null, pixelY: number | null, xLabel: string, yLabel: string): this {
+    // 数据流页面每帧都会 refreshHover；目标没变时不要重启补间（否则补间永远到不了头）
+    const sameTarget =
+      this.pixelX !== null &&
+      pixelX !== null &&
+      Math.abs(this.pixelX - pixelX) < 0.5 &&
+      (this.pixelY === pixelY ||
+        (this.pixelY !== null && pixelY !== null && Math.abs(this.pixelY - pixelY) < 0.5));
     this.pixelX = pixelX;
     this.pixelY = pixelY;
     this.xLabel = xLabel;
     this.yLabel = yLabel;
+    if (sameTarget) return this.markDirty();
     this.animateAxis(pixelX, pixelY);
     return this.markDirty();
   }
@@ -48,7 +75,7 @@ export class Crosshair extends ChartComponent {
    * 快速划过时会有轻微跟随感，这正是十字准星该有的手感。
    */
   private animateAxis(x: number | null, y: number | null): void {
-    if (!shouldAnimate() || x === null) {
+    if (!shouldAnimate() || x === null || this.followDuration <= 0) {
       this.setState({ axisX: x, axisY: y });
       return;
     }
@@ -59,11 +86,17 @@ export class Crosshair extends ChartComponent {
       this.setState({ axisX: x, axisY: y });
       return;
     }
+    const distance = Math.abs(x - currentX);
+    const duration = crosshairGlideDuration(distance, this.followDuration);
+    if (duration <= 0) {
+      // 已经在目标上（或用户把跟随时长设成 0）：直接对齐，不排补间
+      this.setState({ axisX: x, axisY: y });
+      return;
+    }
     // 注意：props.animations 的默认值是引擎共享的**冻结**对象，
     // 直接往上面挂字段会抛 "Cannot add property ... object is not extensible"。
     // 必须先复制成新对象，再整体替换（这条在 jsdom 的 instant 模式下测不出来，只有真动画才暴露）。
     const animations: any = { ...((this.props as any).animations || {}) };
-    const duration = Math.max(40, Number(this.followDuration) || 110);
     animations.axisX = { from: currentX, to: x, duration, easing: 'easeOutCubic', startTime: undefined, finished: false };
     if (currentY !== null && y !== null) {
       animations.axisY = { from: currentY, to: y, duration, easing: 'easeOutCubic', startTime: undefined, finished: false };

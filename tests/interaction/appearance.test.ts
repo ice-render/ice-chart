@@ -1,6 +1,7 @@
 import { createChart } from '../../src/index';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
+import { crosshairGlideDuration } from '../../src/components/Crosshair';
 
 const OPTION: ChartOption = {
   title: { text: '交互外观审计' },
@@ -42,6 +43,23 @@ function inside(inner: Rect, outer: Rect, tolerance = 0.5): boolean {
     inner.y + inner.height <= outer.y + outer.height + tolerance
   );
 }
+
+describe('准星跟随时长（按距离缩放，不吃更新时间动画）', () => {
+  it('小位移当帧就到（不会因为固定时长而追不上指针）', () => {
+    expect(crosshairGlideDuration(2, 90)).toBe(16);
+    expect(crosshairGlideDuration(10, 90)).toBe(16);
+  });
+
+  it('大跨度跳转有一段可见的滑动，但不超过上限', () => {
+    expect(crosshairGlideDuration(150, 90)).toBe(30);
+    expect(crosshairGlideDuration(1000, 90)).toBe(90);
+  });
+
+  it('followDuration = 0 时立即跟随', () => {
+    expect(crosshairGlideDuration(500, 0)).toBe(0);
+  });
+
+});
 
 describe('交互外观审计', () => {
   let canvas: any;
@@ -218,5 +236,15 @@ describe('交互外观审计', () => {
     await c.render();
     expect(c.tooltip!.content).toBeNull();
     expect(c.legend!.hoverIndex).toBe(0);
+  });
+
+  it('准星跟随时长与 animation.update.duration 无关（默认 90ms）', async () => {
+    const c = await mount({ ...OPTION, animation: { update: { duration: 420 } } });
+    expect(c.crosshair!.followDuration).toBe(90);
+  });
+
+  it('crosshair.followDuration 可覆盖（0 = 立即跟随）', async () => {
+    const c = await mount({ ...OPTION, crosshair: { show: true, axis: 'x', followDuration: 0 } });
+    expect(c.crosshair!.followDuration).toBe(0);
   });
 });

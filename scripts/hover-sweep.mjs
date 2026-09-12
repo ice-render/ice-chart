@@ -79,6 +79,16 @@ for (const name of pages) {
         paused.push(state);
       }
     }
+    // 光暂停数据流还不够：一轮「更新动画」可能正在飞行中（大屏里树图 / 漏斗的 morph 是 520ms），
+    // 补间推进会让两次像素比对出现合法差异（实测被误报成树图缓存陈旧）。
+    // 先收尾所有一次性补间，再等两帧，比对才是确定性的。
+    const charts = [];
+    if (window.__chart) charts.push(window.__chart);
+    if (window.__charts) for (const k of Object.keys(window.__charts)) charts.push(window.__charts[k]);
+    if (window.__link && window.__link.charts) charts.push(...window.__link.charts);
+    for (const chart of charts) {
+      if (chart && typeof chart.finishAnimations === 'function') chart.finishAnimations();
+    }
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const list = [];
     const push = (c) => {
@@ -107,9 +117,56 @@ for (const name of pages) {
         if (diff) out.push({ type: comp.seriesType, diff });
       }
     }
-    for (const state of paused) state.running = true;
+  for (const state of paused) state.running = true;
     return out;
   });
+
+  // 准星跟随：指针停下后，准星必须在 ~200ms 内落到目标列上。
+  //
+  // 这条守的是真实踩过的坑：跟随时长原本跟着 `animation.update.duration`（默认 420ms）走，
+  // 每次 mousemove 又重新计时 —— 指针连续移动时准星永远追不上（实测滞后 50~300px），
+  // 数据流页面每帧 refreshHover 更是让它「永不收敛」，看起来就是准星在飘。
+  const crosshairTargets = await page.evaluate(() => {
+    const list = [];
+    const push = (c, key) => {
+      if (c && c.norm && c.layout && c.crosshair) list.push({ key, c });
+    };
+    push(window.__chart, 'chart');
+    if (window.__charts) for (const k of Object.keys(window.__charts)) push(window.__charts[k], k);
+    return list
+      .filter(({ c }) => c.norm.kind === 'cartesian' && c.norm.orientation !== 'horizontal')
+      .filter(({ c }) => (c.crosshair.option || {}).show !== false)
+      .filter(({ c }) => !(c.norm.option.crosshair && c.norm.option.crosshair.show === false))
+      .map(({ key, c }) => {
+        const rect = c.canvasElement.getBoundingClientRect();
+        const canvas = c.layout.canvas;
+        const plot = c.layout.plot;
+        const scaleX = rect.width / (canvas.width || 1);
+        const scaleY = rect.height / (canvas.height || 1);
+        const y = rect.y + (plot.y + plot.height / 2) * scaleY;
+        return {
+          key,
+          from: [rect.x + (plot.x + plot.width * 0.25) * scaleX, y],
+          to: [rect.x + (plot.x + plot.width * 0.75) * scaleX, y],
+        };
+      });
+  });
+  const crosshairLags = [];
+  for (const target of crosshairTargets) {
+    await page.mouse.move(target.from[0], target.from[1]);
+    await page.waitForTimeout(120);
+    await page.mouse.move(target.to[0], target.to[1]);
+    await page.waitForTimeout(220);
+    const gap = await page.evaluate((key) => {
+      const chart = key === 'chart' ? window.__chart : window.__charts && window.__charts[key];
+      const c = chart && chart.crosshair;
+      if (!c || c.pixelX === null) return null;
+      const drawn = Number(c.state.axisX);
+      return isFinite(drawn) ? Math.abs(drawn - c.pixelX) : null;
+    }, target.key);
+    if (gap !== null && gap > 3) crosshairLags.push({ chart: target.key, lag: Number(gap.toFixed(1)) });
+  }
+  if (crosshairLags.length) report.push({ page: name, crosshairLags });
 
   for (const meta of charts) {
     const seriesCount = await page.evaluate((i) => {
@@ -271,6 +328,7 @@ await browser.close();
 const failures = report.filter((r) => r.pass === false);
 const errorRows = report.filter((r) => r.errors && r.errors.length);
 const staleRows = report.filter((r) => r.stalePixels);
+const lagRows = report.filter((r) => r.crosshairLags);
 const checks = report.filter((r) => r.pass !== undefined);
 console.log(
   JSON.stringify(
@@ -279,10 +337,11 @@ console.log(
       failures,
       pageErrors: errorRows,
       stalePixels: staleRows,
+      crosshairLags: lagRows,
       types: [...new Set(checks.map((c) => c.seriesType))].sort(),
     },
     null,
     1
   )
 );
-process.exit(failures.length || errorRows.length || staleRows.length ? 1 : 0);
+process.exit(failures.length || errorRows.length || staleRows.length || lagRows.length ? 1 : 0);
