@@ -127,19 +127,8 @@ export class HitResolver {
   }
 
   public nearestIndexByX(component: SeriesBase, localX: number): number {
-    const points = component.series.points;
-    let best = -1;
-    let bestDist = Infinity;
-    for (let i = 0; i < points.length; i++) {
-      const pixel = component.pixelAt(i);
-      if (!pixel) continue;
-      const dist = Math.abs(pixel[0] - localX);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = i;
-      }
-    }
-    return best;
+    // 系列内部会按 x 单调性选择二分或线性扫描（大点数下每次 mousemove 都是 O(n) 会掉帧）
+    return component.nearestIndexAtX(localX);
   }
 
   /** 按数据值找最近的点（跨图联动用）。 */

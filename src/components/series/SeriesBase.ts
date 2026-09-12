@@ -48,7 +48,13 @@ export abstract class SeriesBase extends ChartComponent {
   protected effective: Float64Array = new Float64Array(0);
   /** 上一帧的有效值，作为动画起点。 */
   protected fromEffective: Float64Array | null = null;
+  /** 实际参与绘制的点下标（降采样后可能少于总点数）；null 表示全部点。 */
+  protected renderIndices: number[] | null = null;
+  /** 像素 x 是否单调递增（降采样与二分查找的前提）。 */
+  protected xMonotonic = true;
   private cacheKey = '';
+  /** 散点等「每个点都必须画」的系列不参与降采样。 */
+  protected supportsSampling = true;
   private localBoxScratch: number[] = [0, 0, 0, 0];
 
   constructor(series: InternalSeries, props: { left: number; top: number; width: number; height: number; zIndex?: number }) {
@@ -163,6 +169,8 @@ export abstract class SeriesBase extends ChartComponent {
     const n = points.length;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
     const { xScale, yScale } = coord;
+    let monotonic = true;
+    let prevX = -Infinity;
     for (let i = 0; i < n; i++) {
       const p = points[i];
       const px = xScale.map(p.xValue);
@@ -170,8 +178,87 @@ export abstract class SeriesBase extends ChartComponent {
       const py = isFinite(value) ? yScale.map(value) : NaN;
       this.pixels[i * 2] = px;
       this.pixels[i * 2 + 1] = py;
+      if (isFinite(px)) {
+        if (px < prevX) monotonic = false;
+        prevX = px;
+      }
     }
+    this.xMonotonic = monotonic;
+    this.renderIndices = this.buildRenderIndices(n, coord.plot.width);
     this.cacheKey = key;
+  }
+
+  /**
+   * 计算实际绘制的点下标。
+   *
+   * 默认策略：点数超过「绘图区宽度 × 3」时用 LTTB 抽稀 —— 一个像素宽度画 3 个点已经过剩，
+   * 继续画只是白白光栅化。首尾点与极值点一定保留，所以看起来仍然「像原曲线」。
+   * 命中判定不受影响，它始终读全量像素缓存。
+   */
+  protected buildRenderIndices(n: number, plotWidth: number): number[] | null {
+    if (!this.supportsSampling || !this.xMonotonic) return null;
+    const option = this.series.option;
+    if (option.sampling === 'none') return null;
+    if (!option.sampling && n <= Math.max(2000, plotWidth * 3)) return null;
+    const threshold = Math.max(64, Math.min(n, Math.floor(plotWidth * 2)));
+    if (n <= threshold + 2) return null;
+    return lttbIndices(this.pixels, n, threshold);
+  }
+
+  /** 实际参与绘制的点数。 */
+  protected renderCount(): number {
+    return this.renderIndices ? this.renderIndices.length : this.pixels.length / 2;
+  }
+
+  /** 第 k 个参与绘制的点对应的原始下标。 */
+  protected renderIndexAt(k: number): number {
+    return this.renderIndices ? this.renderIndices[k] : k;
+  }
+
+  /**
+   * 按 x 像素找最近的数据下标。
+   *
+   * 单调数据用二分查找（大点数下每次 mousemove 都是 O(n) 会直接掉帧），
+   * 非单调数据退化为线性扫描。
+   */
+  public nearestIndexAtX(localX: number): number {
+    this.rebuildPixels();
+    const n = this.pixels.length / 2;
+    if (!n) return -1;
+    if (!this.xMonotonic) {
+      let best = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < n; i++) {
+        const x = this.pixels[i * 2];
+        if (!isFinite(x)) continue;
+        const dist = Math.abs(x - localX);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      return best;
+    }
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const x = this.pixels[mid * 2];
+      if (!isFinite(x) || x < localX) lo = mid + 1;
+      else hi = mid;
+    }
+    // lo 是第一个 >= localX 的点，与邻居比一次即可
+    const candidates = [lo, lo - 1].filter((i) => i >= 0 && i < n && isFinite(this.pixels[i * 2]));
+    let best = -1;
+    let bestDist = Infinity;
+    for (const i of candidates) {
+      const dist = Math.abs(this.pixels[i * 2] - localX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
   }
 
   private buildCacheKey(coord: SeriesCoord): string {
@@ -257,4 +344,69 @@ export abstract class SeriesBase extends ChartComponent {
   protected pointByIndex(index: number): DataPoint | null {
     return this.series.points[index] || null;
   }
+}
+
+/**
+ * LTTB（Largest Triangle Three Buckets）抽稀。
+ *
+ * 输入是渲染用的像素点集（x/y 交错，含 NaN 断点），返回保留下来的下标数组。
+ * 首点与末点一定保留；每个桶内取「与前后桶均值构成三角形面积最大」的点，
+ * 因此尖峰不会被抹平 —— 这正是它比等间隔抽样更适合行情/监控曲线的原因。
+ */
+export function lttbIndices(pixels: Float64Array, n: number, threshold: number): number[] {
+  if (threshold >= n || threshold <= 2) {
+    const all: number[] = [];
+    for (let i = 0; i < n; i++) all.push(i);
+    return all;
+  }
+  const sampled: number[] = [0];
+  const every = (n - 2) / (threshold - 2);
+  let a = 0;
+  for (let i = 0; i < threshold - 2; i++) {
+    // 下一个桶的均值（作为三角形的第三个顶点）
+    let avgStart = Math.floor((i + 1) * every) + 1;
+    let avgEnd = Math.floor((i + 2) * every) + 1;
+    if (avgEnd > n) avgEnd = n;
+    let avgX = 0;
+    let avgY = 0;
+    let avgCount = 0;
+    for (; avgStart < avgEnd; avgStart++) {
+      const y = pixels[avgStart * 2 + 1];
+      if (!isFinite(y)) continue;
+      avgX += pixels[avgStart * 2];
+      avgY += y;
+      avgCount++;
+    }
+    if (!avgCount) {
+      avgX = pixels[(n - 1) * 2];
+      avgY = pixels[(n - 1) * 2 + 1];
+      if (!isFinite(avgY)) {
+        avgY = pixels[a * 2 + 1];
+        avgX = pixels[a * 2];
+      }
+    } else {
+      avgX /= avgCount;
+      avgY /= avgCount;
+    }
+    const rangeStart = Math.floor(i * every) + 1;
+    const rangeEnd = Math.min(Math.floor((i + 1) * every) + 1, n - 1);
+    const ax = pixels[a * 2];
+    const ay = pixels[a * 2 + 1];
+    let maxArea = -1;
+    let maxIndex = rangeStart;
+    for (let j = rangeStart; j < rangeEnd; j++) {
+      const y = pixels[j * 2 + 1];
+      if (!isFinite(y)) continue;
+      const x = pixels[j * 2];
+      const area = Math.abs((ax - avgX) * (y - ay) - (ax - x) * (avgY - ay));
+      if (area > maxArea) {
+        maxArea = area;
+        maxIndex = j;
+      }
+    }
+    sampled.push(maxIndex);
+    a = maxIndex;
+  }
+  sampled.push(n - 1);
+  return sampled;
 }

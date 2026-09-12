@@ -101,6 +101,12 @@ export interface SeriesOption {
   opacity?: number;
   /** 命中判定的额外容差（设备像素）。 */
   hitRadius?: number;
+  /**
+   * 大数据降采样策略。
+   * 'lttb'（默认）：点数超过「绘图区宽度 × 3」时用 LTTB 抽稀，保留极值与首尾点；
+   * 'none'：始终画全部点。
+   */
+  sampling?: 'lttb' | 'none';
   /** 饼图半径：0~1 的小数视为「可用半径占比」，>1 视为像素。 */
   radius?: number;
   /** 饼图内半径（环形图）。 */

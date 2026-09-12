@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 大数据量</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>大数据量：LTTB 降采样 + 二分命中</h1>
+    <p class="lead">
+      三条各 50,000 个点的曲线。绘制时按「绘图区宽度 × 2」做 LTTB 抽稀（保留首尾与尖峰），
+      命中判定仍走全量像素缓存并用二分查找 —— 所以鼠标悬停依旧精确、也不掉帧。
+      把 <code>sampling: 'none'</code> 打开可以看到不抽稀时的差别。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="420"></canvas></div>
+    <div class="card">
+      <div class="tips" id="stats">等待渲染…</div>
+      <div class="log" id="log">事件日志：</div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const COUNT = 50000;
+      const make = (fn) => Array.from({ length: COUNT }, (_, i) => [i, fn(i)]);
+      const cpu = make((i) => 40 + Math.sin(i / 900) * 12 + Math.sin(i / 37) * 4 + (i % 5000 === 0 ? 26 : 0));
+      const mem = make((i) => 60 + Math.sin(i / 1500 + 1) * 9 + Math.cos(i / 211) * 3);
+      const qps = make((i) => 30 + Math.sin(i / 400 + 2) * 15 + Math.sin(i / 23) * 2);
+
+      const t0 = performance.now();
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '服务指标（50,000 点 × 3 系列）' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        grid: { show: true, y: true, x: false },
+        dataZoom: { start: 60, end: 100 },
+        interaction: {
+          hover: { enabled: true },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+        },
+        animation: { enabled: false },
+        xAxis: { type: 'linear', name: '时间轴（秒）' },
+        yAxis: { name: '%' },
+        series: [
+          { id: 'cpu', type: 'line', name: 'CPU', data: cpu, smooth: true, sampling: 'lttb' },
+          { id: 'mem', type: 'line', name: '内存', data: mem, smooth: true, sampling: 'lttb' },
+          { id: 'qps', type: 'line', name: 'QPS', data: qps, sampling: 'lttb' },
+        ],
+      });
+      const buildMs = performance.now() - t0;
+
+      const stats = document.getElementById('stats');
+      const updateStats = () => {
+        const rows = chart.seriesComponents.map((c, i) => {
+          const total = c.series.points.length;
+          const drawn = c.renderIndices ? c.renderIndices.length : total;
+          return `${c.series.name}: ${total.toLocaleString()} → 绘制 ${drawn.toLocaleString()}`;
+        });
+        stats.textContent = `构建耗时 ${buildMs.toFixed(0)}ms ｜ ${rows.join(' ｜ ')}`;
+      };
+      setTimeout(updateStats, 300);
+
+      const log = document.getElementById('log');
+      let last = 0;
+      chart.on('item:hover', (p) => {
+        const now = performance.now();
+        if (now - last < 120) return; // 日志本身别成为瓶颈
+        last = now;
+        log.textContent = `${new Date().toLocaleTimeString()}  ${p.seriesName} @ ${p.xValue} = ${Number(p.value).toFixed(1)}\n` + log.textContent;
+      });
+      window.__chart = chart;
+    </script>
+  </body>
+</html>
