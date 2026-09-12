@@ -67,11 +67,12 @@ chart.on('item:click', (params) => {
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar / scatter | 折线支持平滑曲线与断点（null 断开） |
+| 系列类型 | line / area / bar / scatter / pie / radar / candlestick / heatmap / sankey | 折线支持平滑曲线与断点（null 断开） |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
-| 坐标轴 | x / y 双轴 | 刻度、网格、轴名、标签旋转、自定义 formatter |
-| 图例 | top / bottom / left / right | **可点击切换系列显隐**并重算数据域 |
-| 提示框 | axis / item 触发器 | 画在画布内（小程序同样可用），支持 formatter |
+| 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
+| 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter |
+| 图例 | top / bottom / left / right | **可点击切换系列 / 扇区显隐**并重算数据域 |
+| 提示框 | axis / item 触发器 | 画在画布内（小程序同样可用）；K 线给 OHLC、桑基给流量 |
 | 十字准星 | x / y / xy | 带坐标轴数值标签 |
 | 悬停高亮 | 圆环 / 柱形描边 | 可配置 `dimOthers` 压暗其他系列 |
 | 选中 | single / multiple | 点击或键盘 Enter，抛出 `select:change` |
@@ -82,6 +83,8 @@ chart.on('item:click', (params) => {
 | 跨图联动 | hover / zoom / brush | `linkCharts([a, b])`，按 x 数据值对齐 |
 | 动画 | 进入与数据更新 | 走引擎的 `AnimationManager`（`state.progress` 驱动） |
 | 主题 | light / dark / 自定义片段 | 默认色板取自 ice-render 的设计 token |
+| 大数据 | LTTB 降采样 + 二分命中 | 5 万点 × 3 系列构建 35ms，每条曲线只绘制约 2 点/像素 |
+| 无障碍 | 数据表镜像 + aria-live 播报 | `attachA11yMirror()` / `getDataTable()` / `getA11yTree()` |
 | 序列化 | `toJSON` / `fromJSONString` | 配置 + 缩放窗口 + 图例显隐状态 |
 
 ## 安装
@@ -159,10 +162,12 @@ chart.destroy();
   │ ICEGroup(root)                                       │
   │  ├ PlotArea      绘图区背景 + 空白处交互面            │
   │  ├ GridLines     网格线                              │
-  │  ├ LineSeries / BarSeries / ...  ← containsLocalPoint 即数据命中判定
-  │  ├ Axis × 2      坐标轴                              │
+  │  ├ LineSeries / BarSeries / PieSeries / RadarSeries / CandlestickSeries / ...  ← containsLocalPoint 即数据命中判定
+  │  ├ Axis × N      坐标轴（多 y 轴）                   │
+  │  ├ RadarGrid     雷达网格（仅雷达场景）              │
   │  ├ Title / Legend                                    │
-  │  ├ Crosshair / Highlight / Brush / Tooltip  覆盖层    │
+  │  ├ Crosshair / Highlight / Brush / Tooltip  覆盖层     │
+  │  └ DataZoomSlider  缩放滑块                          │
   └──────────────────────────────────────────────────────┘
                     │  ice.hitTest() → 组件 → 数据下标
                     ▼
@@ -176,8 +181,9 @@ npm run build && npm run examples:prepare
 npm run examples:serve      # http://localhost:5177
 ```
 
-示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、交互总览（框选 + 多选 + 键盘 + 事件日志）、
-时间轴 + dataZoom 初始视窗、跨图联动。
+示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、多 y 轴叠加、饼图 / 环形图 / 玫瑰图、雷达图、
+K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
+大数据量（5 万点降采样）、无障碍、跨图联动。
 
 ## 开发
 
@@ -193,12 +199,15 @@ npm run verify        # lint → types:check → build → test
 
 ## 路线图
 
-- 极坐标：饼图 / 玫瑰图 / 雷达图
-- 双 y 轴与多轴叠加
-- dataZoom 滑块组件、时间轴缩放条
-- 大数据量：点集降采样与增量绘制
-- 无障碍：把数据表挂到 `ice.getAccessibilityTree()`，补齐屏幕阅读器支持
-- 更丰富的系列：candlestick / heatmap / sankey
+已落地：极坐标（饼图 / 玫瑰图）、雷达图、多 y 轴、dataZoom 滑块、LTTB 降采样与二分命中、
+无障碍（数据表镜像 + 播报）、K 线、热力图、桑基图。
+
+后续候选：
+
+- 桑基节点拖拽重排与折叠（布局已与渲染解耦，扩展成本低）
+- 数据 append 的增量绘制（当前是全量重建像素缓存）
+- y 轴方向的 dataZoom 滑块（`setAxisDomain` 已可用，缺 UI）
+- 地图 / 力导向关系图（属于另一类布局族）
 
 ## License
 

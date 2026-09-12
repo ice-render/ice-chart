@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 桑基图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>桑基图</h1>
+    <p class="lead">
+      桑基图是 ice-chart 里唯一「不是坐标系、而是图布局」的图形：节点按最长路径分层，
+      再做纵向松弛避免连线交叉；连线厚度按流量分配。布局是一个纯函数
+      （<code>layoutSankey</code>），渲染与命中判定消费同一份结果 ——
+      命中节点显示节点总量，命中连线显示「来源 → 去向」的流量。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="480"></canvas></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '用户转化路径（桑基图）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        sankey: {
+          nodeWidth: 18,
+          nodePadding: 14,
+          nodes: [
+            { name: '自然搜索', color: '#3B82F6' },
+            { name: '信息流', color: '#60A5FA' },
+            { name: '社交媒体', color: '#93C5FD' },
+            { name: '首页', color: '#10B981' },
+            { name: '列表页', color: '#34D399' },
+            { name: '详情页', color: '#F59E0B' },
+            { name: '加购', color: '#FBBF24' },
+            { name: '下单', color: '#EF4444' },
+            { name: '流失', color: '#9CA3AF' },
+          ],
+          links: [
+            { source: '自然搜索', target: '首页', value: 420 },
+            { source: '自然搜索', target: '列表页', value: 260 },
+            { source: '信息流', target: '首页', value: 210 },
+            { source: '信息流', target: '详情页', value: 180 },
+            { source: '社交媒体', target: '首页', value: 120 },
+            { source: '社交媒体', target: '流失', value: 90 },
+            { source: '首页', target: '列表页', value: 380 },
+            { source: '首页', target: '详情页', value: 240 },
+            { source: '首页', target: '流失', value: 130 },
+            { source: '列表页', target: '详情页', value: 420 },
+            { source: '列表页', target: '流失', value: 220 },
+            { source: '详情页', target: '加购', value: 500 },
+            { source: '详情页', target: '流失', value: 340 },
+            { source: '加购', target: '下单', value: 380 },
+            { source: '加购', target: '流失', value: 120 },
+          ],
+        },
+        series: [{ id: 'funnel', type: 'sankey', name: '转化路径' }],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      chart.on('item:hover', (p) => write(`hover  ${p.xValue} = ${p.value}`));
+      chart.on('item:click', (p) => write(`click  ${p.xValue} = ${p.value}`));
+      window.__chart = chart;
+    </script>
+  </body>
+</html>

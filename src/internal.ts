@@ -1,4 +1,4 @@
-import type { AxisOption, ChartOption, LegendOption, RadarOption, SeriesOption, SeriesType, ChartTheme } from './types';
+import type { AxisOption, ChartOption, LegendOption, RadarOption, SankeyOption, SeriesOption, SeriesType, ChartTheme } from './types';
 import type { Scale } from './scale';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
@@ -58,10 +58,12 @@ export interface InternalAxis {
 }
 
 export interface NormalizedOption {
-  /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图。 */
-  kind: 'cartesian' | 'polar' | 'radar';
+  /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图 / 桑基图。 */
+  kind: 'cartesian' | 'polar' | 'radar' | 'sankey';
   /** 雷达图配置（存在雷达系列时非空）。 */
   radar: RadarOption | null;
+  /** 桑基图配置（存在桑基系列时非空）。 */
+  sankey: SankeyOption | null;
   /** 每个雷达指标轴的数据域。 */
   radarDomains: Array<[number, number]>;
   /** 合并默认值之后的原始 option（函数字段保留）。 */

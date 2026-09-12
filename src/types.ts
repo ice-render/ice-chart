@@ -11,7 +11,35 @@ export type DataItem = number | null | [any, number | null] | Record<string, any
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
-export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie' | 'radar' | 'candlestick' | 'heatmap';
+export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie' | 'radar' | 'candlestick' | 'heatmap' | 'sankey';
+
+/** 桑基图节点。 */
+export interface SankeyNodeOption {
+  name: string;
+  color?: string;
+  /** 强制指定层级（不传则按最长路径自动分层）。 */
+  depth?: number;
+}
+
+/** 桑基图连线。source/target 可以是节点下标或节点名。 */
+export interface SankeyLinkOption {
+  source: string | number;
+  target: string | number;
+  value: number;
+  color?: string;
+}
+
+export interface SankeyOption {
+  nodes: SankeyNodeOption[];
+  links: SankeyLinkOption[];
+  /** 节点宽度（像素），默认 16。 */
+  nodeWidth?: number;
+  /** 同列节点间距（像素），默认 10。 */
+  nodePadding?: number;
+  /** 纵向松弛迭代次数，默认 6。 */
+  iterations?: number;
+  label?: { show?: boolean };
+}
 
 /** 雷达图的指标轴。 */
 export interface RadarIndicator {
@@ -254,6 +282,8 @@ export interface ChartOption {
   dataZoom?: DataZoomOption;
   /** 雷达图配置（存在雷达系列时必填）。 */
   radar?: RadarOption;
+  /** 桑基图配置（存在桑基系列时必填）。 */
+  sankey?: SankeyOption;
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;

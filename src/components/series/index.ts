@@ -9,4 +9,6 @@ export { RadarSeries } from './RadarSeries';
 export type { RadarSeriesCoord } from './RadarSeries';
 export { CandlestickSeries } from './CandlestickSeries';
 export { HeatmapSeries, mixColors } from './HeatmapSeries';
+export { SankeySeries } from './SankeySeries';
+export type { SankeySeriesCoord } from './SankeySeries';
 export { BarSeries } from './BarSeries';

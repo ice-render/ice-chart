@@ -22,6 +22,7 @@ import { InteractionController } from './interaction/InteractionController';
 import { Emitter } from './util/emitter';
 import { clamp } from './util/math';
 import { A11yMirror, buildDataNodes, buildDataTable, chartTitle, type A11yTreeOptions, type DataTable } from './a11y';
+import { layoutSankey } from './layout/sankey';
 
 const Z = {
   plotArea: 10,
@@ -828,7 +829,20 @@ export class ICEChart {
           ? { polar: polarLayout, plot, canvas: this.layout.canvas }
           : series.type === 'radar'
             ? { polar: polarLayout, plot, canvas: this.layout.canvas, domains: norm.radarDomains }
-          : {
+            : series.type === 'sankey' && norm.sankey
+              ? {
+                  plot,
+                  canvas: this.layout.canvas,
+                  layout: layoutSankey(
+                    norm.sankey.nodes || [],
+                    norm.sankey.links || [],
+                    plot,
+                    norm.sankey,
+                    norm.theme.colorPalette
+                  ),
+                  options: norm.sankey,
+                }
+            : {
               plot,
               canvas: this.layout.canvas,
               xScale: norm.xAxis.scale as Scale,

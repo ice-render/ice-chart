@@ -1,5 +1,5 @@
 import type { AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
-import type { RadarOption } from '../types';
+import type { RadarOption, SankeyNodeOption, SankeyOption } from '../types';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
@@ -85,7 +85,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };
 
   const radar = option.radar || null;
-  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar);
+  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null);
   const hiddenIds: Record<string, boolean> = { ...(context.hiddenIds || {}) };
   for (const s of series) {
     if (merged.legend?.selected && merged.legend.selected[s.name] === false) {
@@ -94,11 +94,14 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' | 'radar' = series.some((s) => s.type === 'pie')
+  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' = series.some((s) => s.type === 'pie')
     ? 'polar'
     : series.some((s) => s.type === 'radar')
       ? 'radar'
-      : 'cartesian';
+      : series.some((s) => s.type === 'sankey')
+        ? 'sankey'
+        : 'cartesian';
+  const sankey = kind === 'sankey' ? option.sankey || null : null;
   const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
   const radarDomains: Array<[number, number]> = radar ? buildRadarDomains(radar, series) : [];
   if (kind !== 'cartesian' && (!option.tooltip || option.tooltip.trigger === undefined)) {
@@ -164,6 +167,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   return {
     kind,
     radar,
+    sankey,
     radarDomains,
     option: merged,
     theme,
@@ -182,7 +186,8 @@ function buildSeries(
   seriesOptions: SeriesOption[],
   theme: ChartTheme,
   _selected: Record<string, boolean>,
-  radar?: RadarOption | null
+  radar?: RadarOption | null,
+  sankey?: SankeyOption | null
 ): InternalSeries[] {
   const out: InternalSeries[] = [];
   const usedNames: Record<string, number> = {};
@@ -203,7 +208,7 @@ function buildSeries(
     }
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
-    const { points, hasExplicitX } = buildPoints(option, radar);
+    const { points, hasExplicitX } = buildPoints(option, radar, sankey);
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
       for (let p = 0; p < points.length; p++) {
@@ -217,10 +222,60 @@ function buildSeries(
   return out;
 }
 
-function buildPoints(option: SeriesOption, radar?: RadarOption | null): { points: DataPoint[]; hasExplicitX: boolean } {
+function buildPoints(
+  option: SeriesOption,
+  radar?: RadarOption | null,
+  sankey?: SankeyOption | null
+): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
   const points: DataPoint[] = [];
   let hasExplicitX = false;
+  // 桑基图：点为「节点 + 连线」，索引 0..n-1 是节点，之后是连线
+  if (option.type === 'sankey' && sankey) {
+    const nodes = Array.isArray(sankey.nodes) ? sankey.nodes : [];
+    const links = Array.isArray(sankey.links) ? sankey.links : [];
+    const inTotals = new Array(nodes.length).fill(0);
+    const outTotals = new Array(nodes.length).fill(0);
+    const indexOf = (ref: string | number): number =>
+      typeof ref === 'number' ? ref : nodes.findIndex((node: SankeyNodeOption) => node.name === ref);
+    for (const link of links) {
+      const s = indexOf(link.source);
+      const t = indexOf(link.target);
+      const value = Number(link.value) || 0;
+      if (s >= 0) outTotals[s] += value;
+      if (t >= 0) inTotals[t] += value;
+    }
+    // 节点流量取入/出较大者（中间节点相加会翻倍）
+    const totals = inTotals.map((value: number, i: number) => Math.max(value, outTotals[i]));
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      points.push({
+        index: i,
+        xValue: node.name,
+        y: totals[i],
+        raw: node,
+        base: 0,
+        top: totals[i],
+        name: node.name,
+      });
+    }
+    for (let i = 0; i < links.length; i++) {
+      const link = links[i];
+      const s = indexOf(link.source);
+      const t = indexOf(link.target);
+      const name = `${s >= 0 ? nodes[s].name : String(link.source)} → ${t >= 0 ? nodes[t].name : String(link.target)}`;
+      points.push({
+        index: nodes.length + i,
+        xValue: name,
+        y: Number(link.value) || 0,
+        raw: { __sankeyLink: true, source: link.source, target: link.target, value: link.value },
+        base: 0,
+        top: Number(link.value) || 0,
+        name,
+      });
+    }
+    return { points, hasExplicitX: true };
+  }
   // 雷达图：数据按指标顺序排列，每个指标一个顶点
   if (option.type === 'radar' && radar && Array.isArray(radar.indicators)) {
     for (let i = 0; i < radar.indicators.length; i++) {

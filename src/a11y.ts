@@ -301,4 +301,5 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   radar: '雷达多边形',
   candlestick: 'K 线',
   heatmap: '热力图单元',
+  sankey: '桑基连线',
 };

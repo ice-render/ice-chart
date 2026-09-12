@@ -372,6 +372,20 @@ export class InteractionController {
         ],
       };
     }
+    if (anchorItem && anchorItem.series.type === 'sankey') {
+      const point: any = anchorItem.point;
+      const isLink = !!(point.raw && point.raw.__sankeyLink);
+      return {
+        title: isLink ? point.name : '节点',
+        rows: [
+          {
+            name: isLink ? '流量' : point.name,
+            value: point.y === null ? '-' : String(point.y),
+            color: anchorItem.series.color,
+          },
+        ],
+      };
+    }
     const xValue = state.kind === 'item' ? state.item.point.xValue : state.column.xValue;
     const title = this.host.formatAxisValue('x', xValue);
     const rows = items.map((item) => ({

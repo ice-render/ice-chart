@@ -44,7 +44,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   for (let i = 0; i < norm.yAxes.length; i++) {
     const axis = norm.yAxes[i];
     const layout = yAxisLayouts[i];
-    if (axis.option.show === false) {
+    if (axis.option.show === false || norm.kind !== 'cartesian') {
       layout.offset = 0;
       continue;
     }
@@ -78,7 +78,8 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     else right -= legendSize.width + LEGEND_GAP;
   }
 
-  const showX = norm.xAxis.option.show !== false;
+  // 非直角坐标场景（饼图 / 雷达 / 桑基）不画坐标轴，也不为它预留空间
+  const showX = norm.kind === 'cartesian' && norm.xAxis.option.show !== false;
   left += leftOffset;
   right -= rightOffset;
   if (showX) {
@@ -107,7 +108,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
   let polar: { cx: number; cy: number; radius: number } | null = null;
-  if (norm.kind !== 'cartesian') {
+  if (norm.kind === 'polar' || norm.kind === 'radar') {
     const ratio = polarRadiusRatio(norm);
     const radius = Math.max(10, (Math.min(plot.width, plot.height) * ratio) / 2);
     const cx = plot.x + plot.width / 2;
