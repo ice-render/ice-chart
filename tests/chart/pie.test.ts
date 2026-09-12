@@ -44,7 +44,7 @@ describe('饼图（纯函数层）', () => {
     const norm = normalizeOption(PIE_OPTION);
     const layout = computeLayout(norm, null, { x: 0, y: 0, width: 800, height: 400 });
     expect(layout.polar).not.toBeNull();
-    const { cx, cy, radius } = layout.polar!;
+    const { cx, radius } = layout.polar!;
     expect(cx - radius).toBeGreaterThanOrEqual(-1);
     expect(cx + radius).toBeLessThanOrEqual(801);
     expect(layout.plot.width).toBeCloseTo(radius * 2, 0);

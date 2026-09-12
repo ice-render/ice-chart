@@ -84,3 +84,7 @@ export type { ChartLinkHandle } from './interaction/ChartLink';
 
 // 工具
 export { Emitter } from './util/emitter';
+
+// 无障碍
+export { A11yMirror, buildDataTable, buildDataNodes, chartTitle, VISUALLY_HIDDEN_STYLE, SERIES_ROLE_HINT } from './a11y';
+export type { DataTable, A11yDataNode, A11yTreeOptions, A11yChartLike } from './a11y';

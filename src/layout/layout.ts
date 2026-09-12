@@ -25,7 +25,6 @@ const SLIDER_HEIGHT = 26;
  * 真正的比例尺由 Chart 拿到 plot rect 之后创建，保证刻度与布局严格一致。
  */
 export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): ChartLayout {
-  const theme = norm.theme;
   const margin = norm.option.margin;
 
   const xScale = createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, canvas.width)], {

@@ -21,6 +21,7 @@ import { PieSeries } from './components/series/PieSeries';
 import { InteractionController } from './interaction/InteractionController';
 import { Emitter } from './util/emitter';
 import { clamp } from './util/math';
+import { A11yMirror, buildDataNodes, buildDataTable, chartTitle, type A11yTreeOptions, type DataTable } from './a11y';
 
 const Z = {
   plotArea: 10,
@@ -107,6 +108,7 @@ export class ICEChart {
   private destroyed = false;
   /** 抑制对外事件的重入深度（跨图联动时避免 A→B→A 的回环）。 */
   private silenceDepth = 0;
+  private a11yMirror = new A11yMirror(this);
 
   constructor(target: any, option: ChartOption, chartOptions: ICEChartOptions = {}) {
     if (!target) throw new Error('[ice-chart] 初始化失败：缺少 canvas 元素或其 id。');
@@ -319,6 +321,48 @@ export class ICEChart {
 
   // ------------------------------------------------------------- 事件
 
+  /** canvas 元素（无障碍镜像等 DOM 相关能力需要）。 */
+  public get canvasElement(): any {
+    return this.canvasEl;
+  }
+
+  // ------------------------------------------------------------- 无障碍
+
+  /** 数据表：屏幕阅读器可直接读取的「图表等价文本」。 */
+  public getDataTable(): DataTable {
+    return buildDataTable(this as any);
+  }
+
+  /**
+   * 无障碍节点树：引擎的组件树 + 逐数据点的虚拟节点。
+   * 应用层可据此构建自己的 DOM 镜像（焦点环、行内提示等）。
+   */
+  public getA11yTree(options: A11yTreeOptions = {}): any[] {
+    const componentNodes = typeof this.ice.getAccessibilityTree === 'function' ? this.ice.getAccessibilityTree() : [];
+    return [...componentNodes, ...buildDataNodes(this as any, options)];
+  }
+
+  /**
+   * 在 canvas 旁挂载视觉隐藏的数据表 + aria-live 播报区，
+   * 让屏幕阅读器既能读到整张数据表，也能听到当前悬停/键盘导航到的数据点。
+   */
+  public attachA11yMirror(): boolean {
+    return this.a11yMirror.attach();
+  }
+
+  public detachA11yMirror(): void {
+    this.a11yMirror.detach();
+  }
+
+  public get a11yMirrorAttached(): boolean {
+    return this.a11yMirror.attached;
+  }
+
+  /** 手动播报一段无障碍文本（自定义交互时用）。 */
+  public announceA11y(text: string): void {
+    this.a11yMirror.announce(text);
+  }
+
   public on(event: string, fn: (payload: any) => void, scope?: any): this {
     this.emitter.on(event, fn, scope);
     return this;
@@ -385,6 +429,8 @@ export class ICEChart {
   public destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    // 无障碍镜像是挂在 canvas 旁边的 DOM，必须在销毁时一并摘掉（否则页面会残留隐藏表格）
+    this.a11yMirror.detach();
     this.controller.destroy();
     if (this.resizeObserver && typeof this.resizeObserver.disconnect === 'function') {
       this.resizeObserver.disconnect();
@@ -534,8 +580,10 @@ export class ICEChart {
     this.norm = norm;
     this.layout = computeLayout(norm, this.ice.ctx, canvas);
     this.buildScales(norm);
+    this.root.state.ariaLabel = chartTitle(norm);
     this.syncComponents(animate);
     this.ice.dirty = true;
+    if (this.a11yMirror.attached) this.a11yMirror.refresh();
   }
 
   private buildScales(norm: NormalizedOption): void {
@@ -799,6 +847,7 @@ export class ICEChart {
       });
       component.barSlot = slots[series.id] || { index: 0, count: 1 };
       component.chartTheme = norm.theme;
+      component.state.ariaLabel = `${series.name} 系列，共 ${series.points.length} 个数据点`;
       component.updateSeries(series, animate && !this.viewState.x);
       if (component instanceof PieSeries) {
         component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 无障碍</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>无障碍：数据表镜像 + 实时播报</h1>
+    <p class="lead">
+      canvas 对屏幕阅读器是不可见的，所以 <code>attachA11yMirror()</code> 会在 canvas 旁挂一张
+      <b>视觉隐藏但可读</b>的数据表（含 caption、表头与逐行数据），并把 canvas 的
+      <code>aria-describedby</code> 指向它；同时挂一个 <code>aria-live</code> 区域，
+      你悬停或用键盘 <kbd>←</kbd> <kbd>→</kbd> 移动数据点时，它会播报当前数据。
+      <br />
+      下方「镜像内容」是本页把同一张数据表渲染出来的样子，方便肉眼确认读屏看到的是什么。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="380"></canvas></div>
+    <div class="row">
+      <div class="card">
+        <div class="tips">
+          <b>无障碍 API</b><br />
+          · <code>chart.getDataTable()</code>：结构化数据表<br />
+          · <code>chart.getA11yTree()</code>：引擎组件树 + 逐数据点虚拟节点<br />
+          · <code>chart.attachA11yMirror()</code> / <code>detachA11yMirror()</code><br />
+          · <code>chart.announceA11y(text)</code>：手动播报<br />
+          · 键盘导航：<kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd>、<kbd>Enter</kbd> 选中
+        </div>
+      </div>
+      <div class="card"><div class="log" id="table">（镜像表格内容）</div></div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const days = ['6-01', '6-02', '6-03', '6-04', '6-05', '6-06', '6-07'];
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '本周访问与订单' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', name: '日期' },
+        yAxis: { name: '数量' },
+        interaction: { keyboard: true, select: { enabled: true, mode: 'single' } },
+        series: [
+          { id: 'pv', type: 'line', name: '访问量', data: [820, 932, 901, 1290, 1330, 1320, 1450] },
+          { id: 'orders', type: 'bar', name: '订单量', data: [220, 262, 291, 340, 361, 380, 410] },
+        ],
+      });
+
+      // 挂载无障碍镜像（数据表 + aria-live 播报）
+      chart.attachA11yMirror();
+
+      // 把镜像表格内容可视化，方便对照
+      const table = chart.getDataTable();
+      const renderTable = () => {
+        const t = chart.getDataTable();
+        const head = `<tr>${t.columns.map((c) => `<th>${c}</th>`).join('')}</tr>`;
+        const body = t.rows.map((r) => `<tr>${r.map((c, i) => (i === 0 ? `<th>${c}</th>` : `<td>${c}</td>`)).join('')}</tr>`).join('');
+        document.getElementById('table').innerHTML = `<b>caption: ${t.caption}</b><br /><table style="border-collapse:collapse">${head}${body}</table>`;
+      };
+      renderTable();
+      chart.on('legend:toggle', renderTable);
+      void table;
+
+      window.__chart = chart;
+    </script>
+  </body>
+</html>
