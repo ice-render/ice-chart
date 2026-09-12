@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # ice-chart 通过 file: 链接本地 ice-render 仓库；CI 上先克隆同级目录。
+      - name: 准备 ice-render（peer 依赖）
+        run: |
+          git clone --depth 1 https://gitee.com/ice-render/ice-render.git ../ice-render || \
+          git clone --depth 1 https://github.com/ice-render/ice-render.git ../ice-render
+          cd ../ice-render && npm install --no-audit --no-fund && npm run build
+      - name: 安装依赖
+        run: npm install --no-audit --no-fund
+      - name: 全量门禁
+        run: npm run verify

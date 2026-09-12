@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 跨图联动</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>跨图联动</h1>
+    <p class="lead">
+      两张图分别展示不同量纲的数据，但共享同一条时间轴。<code>linkCharts</code> 让它们三路联动：
+      悬停（按 x 数据值对齐，而不是像素）、缩放、框选。联动的实现只用公开语义事件，并且用 <code>silent()</code> 打断回环。
+    </p>
+    <div class="card"><canvas id="chart-a" width="960" height="300"></canvas></div>
+    <div class="card"><canvas id="chart-b" width="960" height="300"></canvas></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const points = 240;
+      const start = Date.UTC(2026, 3, 1);
+      const build = (base, amp, noise) =>
+        Array.from({ length: points }, (_, i) => [
+          start + i * 3600 * 1000,
+          Math.round(base + Math.sin(i / 18) * amp + (Math.random() - 0.5) * noise),
+        ]);
+
+      const common = {
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        interaction: {
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+          brush: { enabled: true, axes: 'x', mode: 'zoom' },
+        },
+        xAxis: { type: 'time' },
+        animation: { enabled: false },
+      };
+
+      const chartA = ICEChart.createChart('chart-a', {
+        ...common,
+        title: { text: '入口流量（requests/min）' },
+        series: [{ id: 'requests', type: 'line', name: '请求量', data: build(1500, 420, 160), smooth: true }],
+      });
+
+      const chartB = ICEChart.createChart('chart-b', {
+        ...common,
+        title: { text: '平均延迟（ms）' },
+        series: [{ id: 'latency', type: 'area', name: '延迟', data: build(180, 60, 40), smooth: true, areaOpacity: 0.2 }],
+      });
+
+      const link = ICEChart.linkCharts([chartA, chartB], { axis: 'x', hover: true, zoom: true, brush: true });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      chartA.on('item:hover', (p) => write(`A hover  ${new Date(p.xValue).toISOString()} = ${p.value}`));
+      chartA.on('zoom:change', (r) => write(`A zoom   ${new Date(r.x[0]).toISOString()} → ${new Date(r.x[1]).toISOString()}`));
+      chartB.on('item:hover', (p) => write(`B hover  ${new Date(p.xValue).toISOString()} = ${p.value}`));
+      window.__link = link;
+    </script>
+  </body>
+</html>

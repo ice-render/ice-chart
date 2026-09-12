@@ -1,0 +1,205 @@
+# ICEChart · 交互式图表库
+
+构建在 [ice-render](https://gitee.com/ice-render/ice-render) Canvas 引擎之上的**交互式图表库**。
+
+它不是「把数据画成图」的又一个图表库 —— 命中测试、事件派发、嵌套坐标系、脏矩形局部重绘
+全部交给 ice-render 引擎，图表层只负责把「数据 ↔ 像素 ↔ 语义事件」这三件事打通。
+于是悬停、点击下钻、框选、缩放平移、图例联动、跨图联动、键盘导航都是**内建能力**，
+而不是事后打补丁的插件。
+
+```ts
+import { createChart } from 'ice-chart';
+
+const chart = createChart('canvas-id', {
+  title: { text: '近 30 天流量' },
+  tooltip: { trigger: 'axis' },
+  interaction: {
+    hover: { enabled: true, dimOthers: true },
+    select: { enabled: true, mode: 'multiple' },
+    brush: { enabled: true, axes: 'x', mode: 'zoom' },
+    zoom: { enabled: true, axes: 'x', wheel: true },
+    pan: { enabled: true, axes: 'x' },
+    keyboard: true,
+  },
+  xAxis: { type: 'category' },
+  yAxis: { name: '访问量' },
+  series: [
+    { id: 'pv', type: 'line', name: '访问量', data: [820, 932, 901, 1290] },
+    { id: 'uv', type: 'area', name: '独立访客', data: [320, 402, 391, 520] },
+  ],
+});
+
+chart.on('item:click', (params) => {
+  console.log(params.seriesName, params.xValue, params.value, params.data);
+});
+```
+
+## 设计原则
+
+**1. 交互是一等公民，命中判定写进组件**
+
+每个系列组件都实现 `containsLocalPoint`：把组件本地坐标翻译成数据语义（离折线多近、落在哪根柱子里），
+于是引擎的 `ice.hitTest()` / 事件派发**天然就认识数据点**，不需要在图表外面再写一套坐标反查。
+代价是 0 —— 这套判定本来就写在同一个类里，还顺带复用了「画出来是什么样」的像素缓存。
+
+**2. 像素缓存是渲染与命中的唯一事实来源**
+
+`rebuildPixels()` 在数据 / 比例尺 / 尺寸变化时重算一次点集，`render()` 与 `hitTestIndex()` 消费同一份缓存。
+「看得见的点」与「点得到的点」因此不可能漂移。
+
+**3. 交互的视觉反馈是独立小组件**
+
+鼠标在数据点上移动时，只有 `Highlight` / `Crosshair` / `Tooltip` 这三个覆盖层变脏，
+脏矩形就是标记环那一小块像素 —— 折线与柱形完全不动。压暗其他系列只在「悬停系列变了」时
+写一次 state，不会每帧把所有系列置脏。
+
+**4. 声明式 spec 可序列化**
+
+`ChartOption` 是纯 JSON（函数字段仅限 formatter），`chart.toJSON()` / `fromJSONString()` 可存盘、可进 DSL。
+归一化（`normalizeOption`）与布局（`computeLayout`）都是**纯函数**，不依赖 DOM / ctx，可被完整单测。
+
+**5. 跨图联动按数据值而不是像素**
+
+`linkCharts()` 只用公开语义事件，并通过 `fractionOf / valueAtFraction` 这类**数据域比例**对齐，
+不同尺寸、不同数据范围的图表也能联动。
+
+## 能力清单
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| 系列类型 | line / area / bar / scatter | 折线支持平滑曲线与断点（null 断开） |
+| 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
+| 坐标轴 | x / y 双轴 | 刻度、网格、轴名、标签旋转、自定义 formatter |
+| 图例 | top / bottom / left / right | **可点击切换系列显隐**并重算数据域 |
+| 提示框 | axis / item 触发器 | 画在画布内（小程序同样可用），支持 formatter |
+| 十字准星 | x / y / xy | 带坐标轴数值标签 |
+| 悬停高亮 | 圆环 / 柱形描边 | 可配置 `dimOthers` 压暗其他系列 |
+| 选中 | single / multiple | 点击或键盘 Enter，抛出 `select:change` |
+| 框选 | x / y / xy，select / zoom 两种模式 | 拖拽出选区，实时抛 `brush:change` |
+| 缩放 | 滚轮（data / viewport 两种模式） | 以指针位置为锚点，可配置 `minSpan / maxSpan` |
+| 平移 | 拖拽 | 自动约束在完整数据域内 |
+| 键盘导航 | ←/→ 移动数据点，↑/↓ 切换系列 | Enter 选中，Esc 清空；只由最后激活的图表响应 |
+| 跨图联动 | hover / zoom / brush | `linkCharts([a, b])`，按 x 数据值对齐 |
+| 动画 | 进入与数据更新 | 走引擎的 `AnimationManager`（`state.progress` 驱动） |
+| 主题 | light / dark / 自定义片段 | 默认色板取自 ice-render 的设计 token |
+| 序列化 | `toJSON` / `fromJSONString` | 配置 + 缩放窗口 + 图例显隐状态 |
+
+## 安装
+
+```bash
+npm install ice-chart ice-render
+```
+
+`ice-render` 是 peer 依赖：一个页面上多张图共用同一个引擎实例池，跨图联动才有统一的事件语义。
+
+浏览器直接引入（UMD）：
+
+```html
+<canvas id="chart" width="960" height="420"></canvas>
+<script src="./ice-render.umd.js"></script>
+<script src="./ice-chart.umd.js"></script>
+<script>
+  const chart = ICEChart.createChart('chart', { series: [{ type: 'line', data: [1, 3, 2] }] });
+</script>
+```
+
+## 事件
+
+所有事件都通过 `chart.on(name, handler)` 订阅：
+
+| 事件 | 载荷 | 触发时机 |
+| --- | --- | --- |
+| `item:hover` | `DataPointParams` | 悬停数据点 / 数据列（axis 触发器取该列第一个点） |
+| `item:leave` | — | 离开数据 |
+| `item:click` | `DataPointParams` | 点击数据点（下钻的入口） |
+| `item:dblclick` | `DataPointParams` | 双击数据点 |
+| `plot:click` | `{ screen, xValue, yValue }` | 点击绘图区空白处 |
+| `chart:click` | `{ screen }` | 点击画布（绘图区之外） |
+| `select:change` | `DataPointParams[]` | 选中集合变化 |
+| `brush:change` | `BrushRange \| null` | 框选拖动中（实时） |
+| `brush:end` | `BrushRange \| null` | 框选结束 |
+| `zoom:change` | `ZoomRange` | 缩放 / 框选缩放的窗口变化 |
+| `pan:change` | `ZoomRange` | 拖拽平移 |
+| `legend:toggle` | `LegendToggleParams` | 图例切换系列 |
+
+`DataPointParams` 同时携带 `dataIndex / xValue / value / data`（原始数据项）与 `screen` 像素坐标，
+业务层做下钻、联动、埋点都不需要再碰比例尺。
+
+## 主要 API
+
+```ts
+const chart = createChart(canvasOrId, option, { renderMode: 'dirty-rect', dpr: 2, autoResize: true });
+
+chart.setOption(nextOption);              // 保留当前缩放窗口
+chart.setData('series-id', nextData);     // 只更新一个系列的数据（原地更新，不重建组件）
+chart.setDomain('x', [100, 300]);         // 设置数据域（缩放 / 联动）
+chart.resetZoom();                        // 恢复完整数据域
+chart.toggleSeries('series-id', true);    // 显隐系列
+chart.showHoverAt('series-id', 12);       // 程序化高亮某个数据点
+chart.showHoverAtValue(xValue);           // 按 x 数据值高亮（跨图联动入口）
+chart.resize(960, 420);                   // 手动重排
+chart.toJSON() / fromJSONString(json);    // 序列化
+await chart.render();                     // 等待下一帧渲染完成（截图 / 测试用）
+chart.destroy();
+```
+
+## 架构
+
+```
+            ChartOption（纯 JSON）
+                    │  normalizeOption()   纯函数：数据点 / 数据域 / 堆叠
+                    ▼
+            NormalizedOption
+                    │  computeLayout()     纯函数：标题 / 图例 / 坐标轴 / 绘图区
+                    ▼
+              ChartLayout
+                    │  ICEChart 编译成 ice-render 组件树
+                    ▼
+  ┌──────────────────────────────────────────────────────┐
+  │ ICEGroup(root)                                       │
+  │  ├ PlotArea      绘图区背景 + 空白处交互面            │
+  │  ├ GridLines     网格线                              │
+  │  ├ LineSeries / BarSeries / ...  ← containsLocalPoint 即数据命中判定
+  │  ├ Axis × 2      坐标轴                              │
+  │  ├ Title / Legend                                    │
+  │  ├ Crosshair / Highlight / Brush / Tooltip  覆盖层    │
+  └──────────────────────────────────────────────────────┘
+                    │  ice.hitTest() → 组件 → 数据下标
+                    ▼
+            InteractionController  → 语义事件（item:hover / brush:end / ...）
+```
+
+## 示例
+
+```bash
+npm run build && npm run examples:prepare
+npm run examples:serve      # http://localhost:5177
+```
+
+示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、交互总览（框选 + 多选 + 键盘 + 事件日志）、
+时间轴 + dataZoom 初始视窗、跨图联动。
+
+## 开发
+
+```bash
+npm test              # jest（纯函数单测 + 真实引擎集成的 jsdom 测试）
+npm run types:check   # tsc --noEmit
+npm run build         # ESM + CJS + UMD + .d.ts/.d.mts
+npm run verify        # lint → types:check → build → test
+```
+
+测试用例覆盖的关键路径：比例尺换算、数据归一化与堆叠、布局量测、系列命中判定，
+以及「引擎命中测试 → 数据下标 → 语义事件」这条端到端链路（含多图隔离与联动回归）。
+
+## 路线图
+
+- 极坐标：饼图 / 玫瑰图 / 雷达图
+- 双 y 轴与多轴叠加
+- dataZoom 滑块组件、时间轴缩放条
+- 大数据量：点集降采样与增量绘制
+- 无障碍：把数据表挂到 `ice.getAccessibilityTree()`，补齐屏幕阅读器支持
+- 更丰富的系列：candlestick / heatmap / sankey
+
+## License
+
+MIT

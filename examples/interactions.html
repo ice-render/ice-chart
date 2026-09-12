@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 交互总览</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>交互总览</h1>
+    <p class="lead">
+      这个例子里同时打开了：悬停高亮（其他系列自动压暗）、框选（<code>brush</code>，按住左键在绘图区拖出选区）、多选（点击数据点，或按 <kbd>Enter</kbd>）、
+      键盘导航（<kbd>←</kbd> <kbd>→</kbd> 移动数据点，<kbd>↑</kbd> <kbd>↓</kbd> 切换系列，<kbd>Esc</kbd> 清空）、滚轮缩放与拖拽平移。
+      <br />
+      所有交互最终都抛出语义事件，业务代码不需要接触任何像素或比例尺。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="440"></canvas></div>
+    <div class="row">
+      <div class="card">
+        <div class="tips">
+          <b>交互清单</b><br />
+          · 悬停：高亮 + 十字准星 + 提示框，其他系列压暗到 28%<br />
+          · 框选：绘图区内拖拽，松手抛出 <code>brush:end</code> 带数据范围<br />
+          · 多选：点击数据点累积选择，再点一次取消<br />
+          · 键盘：←/→ 移动活动点，↑/↓ 切换系列，Enter 选中<br />
+          · 缩放：滚轮以指针位置为锚点缩放 x 轴<br />
+          · 平移：本例框选优先（<code>brush.enabled=true</code> 时拖拽用于框选），
+          平移的用法见「基础折线」与「时间轴」示例
+        </div>
+      </div>
+      <div class="card">
+        <div class="log" id="log">事件日志：</div>
+      </div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const hours = [];
+      for (let i = 0; i < 48; i++) hours.push(`${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
+      const wave = (base, amp, phase) => hours.map((_, i) => Math.round(base + amp * Math.sin(i / 6 + phase) + (Math.random() - 0.5) * amp * 0.4));
+      const pv = wave(1200, 460, 0);
+      const uv = wave(620, 240, 1.2);
+      const api = wave(320, 130, 2.4);
+
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '48 小时服务指标（交互总览）' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        grid: { show: true, y: true, x: false },
+        interaction: {
+          hover: { enabled: true, dimOthers: true },
+          select: { enabled: true, mode: 'multiple' },
+          brush: { enabled: true, axes: 'x', mode: 'select' },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          keyboard: true,
+        },
+        dataZoom: { start: 0, end: 100 },
+        yAxis: { name: 'QPS' },
+        xAxis: { type: 'category', name: '时间' },
+        series: [
+          { id: 'pv', type: 'line', name: '页面 PV', data: pv, smooth: true },
+          { id: 'uv', type: 'line', name: '独立访客', data: uv, smooth: true },
+          { id: 'api', type: 'line', name: 'API 调用', data: api, smooth: true },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      chart.on('item:hover', (p) => write(`hover   ${p.seriesName} @ ${p.xValue} = ${p.value}`));
+      chart.on('item:leave', () => write('leave'));
+      chart.on('item:click', (p) => write(`click   ${p.seriesName} @ ${p.xValue}`));
+      chart.on('select:change', (items) =>
+        write(`select  → ${items.map((it) => `${it.seriesName}@${it.xValue}`).join(' , ') || '空'}`)
+      );
+      chart.on('brush:change', (r) => write(`brush  拖动中 x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
+      chart.on('brush:end', (r) => write(`brush  完成 x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
+      chart.on('zoom:change', (r) => write(`zoom   x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
+      chart.on('plot:click', () => write('plot   click 空白处'));
+    </script>
+  </body>
+</html>

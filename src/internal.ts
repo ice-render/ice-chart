@@ -1,0 +1,135 @@
+import type { AxisOption, ChartOption, LegendOption, SeriesOption, SeriesType, ChartTheme } from './types';
+import type { Scale } from './scale';
+
+/** 归一化后的数据点（数据域，不含像素）。 */
+export interface DataPoint {
+  /** 系列内下标。 */
+  index: number;
+  /** x 原始值：类目轴为类目，数值轴为数字，时间轴为时间戳。 */
+  xValue: any;
+  /** y 数值；null 表示断点。 */
+  y: number | null;
+  /** 原始数据项。 */
+  raw: any;
+  /** 堆叠基线（未堆叠时为 0）。 */
+  base: number;
+  /** 堆叠顶端（未堆叠时等于 y）。 */
+  top: number;
+}
+
+export interface InternalSeries {
+  id: string;
+  index: number;
+  type: SeriesType;
+  name: string;
+  color: string;
+  option: SeriesOption;
+  points: DataPoint[];
+  /** 数据里是否显式提供了 x（决定类目轴的类目来源）。 */
+  hasExplicitX: boolean;
+  /** 该系列是否被图例隐藏。 */
+  hidden: boolean;
+}
+
+export interface InternalAxis {
+  option: AxisOption;
+  type: 'linear' | 'category' | 'time' | 'log';
+  domain: any[];
+  scale: Scale | null;
+}
+
+export interface NormalizedOption {
+  /** 合并默认值之后的原始 option（函数字段保留）。 */
+  option: ChartOption & { legend: LegendOption; margin: { top: number; right: number; bottom: number; left: number } };
+  theme: ChartTheme;
+  series: InternalSeries[];
+  xAxis: InternalAxis;
+  yAxis: InternalAxis;
+  /** 类目轴的类目列表（数值轴为空数组）。 */
+  categories: any[];
+  /** 参与渲染的系列（未被图例隐藏）。 */
+  visibleSeries: InternalSeries[];
+  hiddenIds: Record<string, boolean>;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface AxisLayout {
+  /** 刻度值。 */
+  ticks: any[];
+  /** 刻度标签文本。 */
+  labels: string[];
+  /** 刻度标签的最大宽度 / 高度（像素）。 */
+  labelWidth: number;
+  labelHeight: number;
+  /** 轴名称文本宽度 / 高度。 */
+  nameWidth: number;
+  nameHeight: number;
+}
+
+export interface ChartLayout {
+  canvas: Rect;
+  plot: Rect;
+  titleRect: Rect | null;
+  legendRect: Rect | null;
+  legend: LegendLayout | null;
+  title: TitleLayout | null;
+  xAxisLayout: AxisLayout;
+  yAxisLayout: AxisLayout;
+  margin: { top: number; right: number; bottom: number; left: number };
+}
+
+export interface LegendItemLayout {
+  seriesId: string;
+  seriesIndex: number;
+  name: string;
+  color: string;
+  hidden: boolean;
+  /** 可点击区域。 */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface LegendLayout {
+  position: 'top' | 'bottom' | 'left' | 'right';
+  items: LegendItemLayout[];
+}
+
+export interface TitleLayout {
+  text: string;
+  subtext: string;
+  /** 文本锚点。 */
+  x: number;
+  y: number;
+  align: 'left' | 'center' | 'right';
+  textStyle: { color: string; fontSize: number; fontWeight: string | number };
+  subtextStyle: { color: string; fontSize: number };
+}
+
+/** 活动数据项（悬停 / 选中 / 键盘导航的共用描述）。 */
+export interface ActiveItem {
+  series: InternalSeries;
+  point: DataPoint;
+  /** 画布坐标（CSS 像素）。 */
+  screen: [number, number];
+  /** 图表坐标系内的像素位置（相对画布左上角）。 */
+  pixel: [number, number];
+}
+
+/** axis 触发器的悬停列：同一 x 上的所有系列数据点。 */
+export interface ActiveColumn {
+  dataIndex: number;
+  xValue: any;
+  /** 图表坐标系内的 x 像素。 */
+  pixelX: number;
+  items: ActiveItem[];
+}
+
+export type HoverState = { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn } | null;

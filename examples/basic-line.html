@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 基础折线</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>基础折线 / 面积</h1>
+    <p class="lead">
+      鼠标移入绘图区出现十字准星与提示框（axis 触发器）；滚轮缩放、按住拖拽平移；点击数据点选中并触发下钻事件。
+      <br />
+      提示：把指针移到折线上任意位置也能命中数据点 —— 命中判定发生在组件的 <code>containsLocalPoint</code> 里，由引擎的命中测试直接调用。
+    </p>
+    <div class="card">
+      <canvas id="chart" width="960" height="420"></canvas>
+    </div>
+    <div class="card">
+      <div class="log" id="log">事件日志：</div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const days = [];
+      for (let i = 1; i <= 30; i++) days.push(`6-${String(i).padStart(2, '0')}`);
+
+      const visits = [820, 932, 901, 1290, 1330, 1320, 1450, 1560, 1420, 1380, 1290, 1480, 1720, 1890, 2010, 1980, 2150, 2320, 2210, 2080, 2350, 2480, 2610, 2540, 2700, 2880, 2750, 2910, 3120, 3280];
+      const orders = [220, 262, 291, 340, 361, 380, 410, 452, 430, 398, 372, 420, 486, 520, 578, 552, 610, 668, 640, 598, 682, 720, 762, 748, 790, 840, 812, 858, 902, 948];
+
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '近 30 天流量与订单', subtext: '滚轮缩放 · 拖拽平移 · 点击下钻' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, type: 'line', axis: 'x', showAxisLabel: true },
+        grid: { show: true, y: true, x: false },
+        interaction: {
+          hover: { enabled: true, mode: 'nearest-x' },
+          select: { enabled: true, mode: 'single' },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+          keyboard: true,
+        },
+        animation: { enabled: true, duration: 620, easing: 'easeOutCubic' },
+        xAxis: { type: 'category', name: '日期' },
+        yAxis: { name: '数量' },
+        series: [
+          { id: 'visits', type: 'line', name: '访问量', data: visits, smooth: true, lineWidth: 2 },
+          { id: 'orders', type: 'area', name: '订单量', data: orders, smooth: true, areaOpacity: 0.22 },
+          { id: 'orders2', type: 'line', name: '退款量', data: orders.map((v) => Math.round(v * 0.08)), symbol: 'rect', symbolSize: 5, lineDash: [4, 3] },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      chart.on('item:hover', (p) => write(`hover  ${p.seriesName} @ ${p.xValue} = ${p.value}`));
+      chart.on('item:click', (p) => write(`click  ${p.seriesName} @ ${p.xValue} = ${p.value}（screen ${p.screen.map((n) => Math.round(n)).join(',')}）`));
+      chart.on('select:change', (items) => write(`select  ${items.length} 项`));
+      chart.on('zoom:change', (r) => write(`zoom    x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
+      chart.on('legend:toggle', (p) => write(`legend  ${p.seriesName} → ${p.selected ? '显示' : '隐藏'}`));
+      window.__chart = chart;
+    </script>
+  </body>
+</html>

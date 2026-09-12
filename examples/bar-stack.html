@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 分组与堆叠柱形</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>分组与堆叠柱形</h1>
+    <p class="lead">
+      左侧是分组柱形（每个类目三根柱子），右侧是堆叠（同 <code>stack</code> 名的系列共享一根柱子）。
+      点击图例可切换系列显隐 —— 隐藏后 y 轴数据域会重新计算，这就是「图例联动」。
+    </p>
+    <div class="row">
+      <div class="card"><canvas id="grouped" width="620" height="400"></canvas></div>
+      <div class="card"><canvas id="stacked" width="620" height="400"></canvas></div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const regions = ['华东', '华北', '华南', '西南', '西北', '东北'];
+      const base = {
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        xAxis: { type: 'category' },
+        interaction: { zoom: false, pan: false, select: { enabled: false } },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+      };
+
+      ICEChart.createChart('grouped', {
+        ...base,
+        title: { text: '各区域季度营收（分组）' },
+        yAxis: { name: '万元' },
+        series: [
+          { id: 'q1', type: 'bar', name: 'Q1', data: regions.map((r, i) => ({ name: r, y: [320, 302, 301, 334, 390, 330][i] })) },
+          { id: 'q2', type: 'bar', name: 'Q2', data: regions.map((r, i) => ({ name: r, y: [120, 132, 101, 134, 90, 230][i] })) },
+          { id: 'q3', type: 'bar', name: 'Q3', data: regions.map((r, i) => ({ name: r, y: [220, 182, 191, 234, 290, 330][i] })) },
+        ],
+      });
+
+      ICEChart.createChart('stacked', {
+        ...base,
+        title: { text: '各区域季度营收（堆叠）' },
+        yAxis: { name: '万元' },
+        series: [
+          { id: 'q1', type: 'bar', name: 'Q1', stack: 'year', barRadius: 0, data: regions.map((r, i) => ({ name: r, y: [320, 302, 301, 334, 390, 330][i] })) },
+          { id: 'q2', type: 'bar', name: 'Q2', stack: 'year', data: regions.map((r, i) => ({ name: r, y: [120, 132, 101, 134, 90, 230][i] })) },
+          { id: 'q3', type: 'bar', name: 'Q3', stack: 'year', barRadius: 3, data: regions.map((r, i) => ({ name: r, y: [220, 182, 191, 234, 290, 330][i] })) },
+        ],
+      });
+    </script>
+  </body>
+</html>

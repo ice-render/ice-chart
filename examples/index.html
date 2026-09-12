@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart 示例</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>ice-chart 示例</h1>
+    <p class="lead">
+      ice-chart 是构建在 ice-render Canvas 引擎之上的交互式图表库：命中测试、事件派发、坐标系与脏矩形局部重绘都由引擎承担，
+      图表层专注在「数据 ↔ 像素 ↔ 语义事件」的映射上。
+    </p>
+    <div class="card">
+      <nav>
+        <ul>
+          <li><a href="./basic-line.html">基础折线 / 面积（悬停、十字准星、提示框、缩放、平移）</a></li>
+          <li><a href="./bar-stack.html">分组与堆叠柱形（图例切换、柱形命中）</a></li>
+          <li><a href="./interactions.html">交互总览（框选、多选、高亮联动、键盘导航、事件日志）</a></li>
+          <li><a href="./time-series.html">时间轴 + dataZoom 初始视窗</a></li>
+          <li><a href="./linked-charts.html">跨图联动（悬停 / 缩放 / 框选三路联动）</a></li>
+        </ul>
+      </nav>
+      <p class="tips">
+        运行前先执行 <code>npm run build &amp;&amp; npm run examples:prepare</code>，然后 <code>npm run examples:serve</code>。
+      </p>
+    </div>
+  </body>
+</html>

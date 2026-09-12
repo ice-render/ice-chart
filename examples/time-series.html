@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 时间轴</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>时间轴 + dataZoom 初始视窗</h1>
+    <p class="lead">
+      x 轴显式声明 <code>type: 'time'</code>，刻度会按数据跨度自动在毫秒 / 秒 / 分 / 时 / 天 / 月 / 年之间切换粒度。
+      <code>dataZoom.start/end</code> 只决定**初始**视窗，之后的滚轮缩放、拖拽平移不会重置它。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="420"></canvas></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const start = Date.UTC(2026, 0, 1);
+      const pointCount = 720; // 30 天，每小时一个点
+      const series = (base, amp) =>
+        Array.from({ length: pointCount }, (_, i) => {
+          const t = start + i * 3600 * 1000;
+          const daily = Math.sin(((i % 24) / 24) * Math.PI * 2);
+          const trend = Math.sin(i / 90) * amp;
+          return [t, Math.round(base + daily * amp * 0.6 + trend)];
+        });
+
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '机房温度与负载（时间轴）' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        dataZoom: { start: 40, end: 100 },
+        interaction: {
+          hover: { enabled: true },
+          zoom: { enabled: true, axes: 'x', wheel: true, minSpan: 0.02 },
+          pan: { enabled: true, axes: 'x' },
+          brush: { enabled: true, axes: 'x', mode: 'zoom' },
+        },
+        xAxis: { type: 'time', name: '时间' },
+        yAxis: { name: '数值' },
+        series: [
+          { id: 'temp', type: 'line', name: '温度(℃)', data: series(24, 3), smooth: true },
+          { id: 'load', type: 'area', name: '负载(%)', data: series(62, 18), smooth: true, areaOpacity: 0.18 },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      chart.on('item:hover', (p) => write(`hover  ${p.seriesName} @ ${new Date(p.xValue).toISOString()} = ${p.value}`));
+      chart.on('zoom:change', (r) => write(`zoom   ${new Date(r.x[0]).toISOString()} → ${new Date(r.x[1]).toISOString()}`));
+      chart.on('brush:end', (r) => write(`brush  完成（mode=zoom，自动应用为数据域）`));
+    </script>
+  </body>
+</html>
