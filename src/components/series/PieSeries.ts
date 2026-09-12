@@ -25,8 +25,6 @@ function normalizeAngle(value: number): number {
 export class PieSeries extends SeriesBase {
   public seriesType: SeriesType = 'pie';
   public polar: PolarSeriesCoord | null = null;
-  /** 被隐藏的扇区下标（由图表层写入）。 */
-  public hiddenSlices: number[] = [];
   /** 每个扇区 [a0, a1, r0, r1]，本地坐标空间。 */
   private slices = new Float64Array(0);
   private pieCacheKey = '';
@@ -38,9 +36,9 @@ export class PieSeries extends SeriesBase {
   }
 
   public setHiddenSlices(indexes: number[]): this {
-    this.hiddenSlices = indexes || [];
+    super.setHiddenSlices(indexes);
     this.pieCacheKey = '';
-    return this.markDirty();
+    return this;
   }
 
   /** 标签可能画到圆外，脏矩形要留出余量。 */

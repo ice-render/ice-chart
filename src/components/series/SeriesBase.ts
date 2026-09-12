@@ -38,6 +38,8 @@ export abstract class SeriesBase extends ChartComponent {
   public series: InternalSeries;
   /** 图表主题（由 Chart 注入，供绘制标签 / 文本使用）。 */
   public chartTheme: ChartTheme | null = null;
+  /** 被隐藏的数据项下标（饼图扇区 / 漏斗阶段）。 */
+  public hiddenSlices: number[] = [];
   public coord: SeriesCoord | null = null;
   /** 分组柱形的位置（由 Chart 计算）。 */
   public barSlot: BarSlot = { index: 0, count: 1 };
@@ -133,6 +135,12 @@ export abstract class SeriesBase extends ChartComponent {
   public setCoord(coord: SeriesCoord): this {
     this.coord = coord;
     this.cacheKey = '';
+    return this.markDirty();
+  }
+
+  /** 设置被隐藏的数据项（图表层在每次同步时写入）。 */
+  public setHiddenSlices(indexes: number[]): this {
+    this.hiddenSlices = indexes || [];
     return this.markDirty();
   }
 

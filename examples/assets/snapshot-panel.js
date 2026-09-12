@@ -254,7 +254,7 @@
 
     // 快照会随「数据域 / 显隐」变化：在这些语义事件之后刷新
     entries.forEach(function (entry) {
-      ['zoom:change', 'pan:change', 'legend:toggle'].forEach(function (eventName) {
+      ['zoom:change', 'pan:change', 'legend:toggle', 'data:change'].forEach(function (eventName) {
         entry.chart.on(eventName, scheduleRefresh);
       });
     });

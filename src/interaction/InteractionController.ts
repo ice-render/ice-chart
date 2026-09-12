@@ -201,7 +201,7 @@ export class InteractionController {
     if (current.kind === 'item') {
       const series = current.item.series;
       const index = current.item.point.index;
-      const sliceHidden = series.type === 'pie' && norm.hiddenSlices[`${series.id}#${index}`];
+      const sliceHidden = (series.type === 'pie' || series.type === 'funnel') && norm.hiddenSlices[`${series.id}#${index}`];
       // 系列/扇区被隐藏，或数据被替换导致下标越界 → 直接清理，不要悄悄跳到别的系列
       if (series.hidden || sliceHidden || !series.points[index]) {
         this.setHover(null);
@@ -388,6 +388,36 @@ export class InteractionController {
             color: point.color || series.color,
           },
         ],
+      };
+    }
+    // 漏斗图：标题是阶段名，数值带上占可见总量的百分比
+    if (anchorItem && anchorItem.series.type === 'funnel') {
+      const series = anchorItem.series;
+      const point = anchorItem.point;
+      let total = 0;
+      for (const p of series.points) {
+        if (this.host.norm.hiddenSlices[`${series.id}#${p.index}`]) continue;
+        total += p.y || 0;
+      }
+      const percent = total > 0 ? ((point.y || 0) / total) * 100 : 0;
+      return {
+        title: point.name || this.host.formatAxisValue('x', point.xValue),
+        rows: [
+          {
+            name: series.name,
+            value: `${point.y === null ? '-' : point.y}（${percent.toFixed(1)}%）`,
+            color: point.color || series.color,
+          },
+        ],
+      };
+    }
+    // 仪表盘：只有一个数值
+    if (anchorItem && anchorItem.series.type === 'gauge') {
+      const series = anchorItem.series;
+      const point = anchorItem.point;
+      return {
+        title: point.name || series.name,
+        rows: [{ name: series.name, value: point.y === null ? '-' : String(point.y), color: series.color }],
       };
     }
     if (anchorItem && anchorItem.series.type === 'radar') {

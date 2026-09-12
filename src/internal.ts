@@ -1,4 +1,15 @@
-import type { AxisOption, ChartOption, LegendOption, RadarOption, SankeyOption, SeriesOption, SeriesType, ChartTheme } from './types';
+import type {
+  AxisOption,
+  ChartOption,
+  FunnelOption,
+  GaugeOption,
+  LegendOption,
+  RadarOption,
+  SankeyOption,
+  SeriesOption,
+  SeriesType,
+  ChartTheme,
+} from './types';
 import type { Scale } from './scale';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
@@ -61,7 +72,7 @@ export interface InternalAxis {
 
 export interface NormalizedOption {
   /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图 / 桑基图。 */
-  kind: 'cartesian' | 'polar' | 'radar' | 'sankey';
+  kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge';
   /**
    * 直角坐标的排布方向。
    * vertical：类目在 x 轴（普通柱状/折线）；horizontal：类目在 y 轴（横向柱状，排行榜场景）。
@@ -71,6 +82,10 @@ export interface NormalizedOption {
   radar: RadarOption | null;
   /** 桑基图配置（存在桑基系列时非空）。 */
   sankey: SankeyOption | null;
+  /** 漏斗图配置。 */
+  funnel: FunnelOption | null;
+  /** 仪表盘配置。 */
+  gauge: GaugeOption | null;
   /** 每个雷达指标轴的数据域。 */
   radarDomains: Array<[number, number]>;
   /** 合并默认值之后的原始 option（函数字段保留）。 */

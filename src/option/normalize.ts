@@ -94,14 +94,20 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' = series.some((s) => s.type === 'pie')
+  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' = series.some((s) => s.type === 'pie')
     ? 'polar'
     : series.some((s) => s.type === 'radar')
       ? 'radar'
       : series.some((s) => s.type === 'sankey')
         ? 'sankey'
-        : 'cartesian';
+        : series.some((s) => s.type === 'funnel')
+          ? 'funnel'
+          : series.some((s) => s.type === 'gauge')
+            ? 'gauge'
+            : 'cartesian';
   const sankey = kind === 'sankey' ? option.sankey || null : null;
+  const funnel = kind === 'funnel' ? option.funnel || {} : null;
+  const gauge = kind === 'gauge' ? option.gauge || {} : null;
   const hiddenSlices: Record<string, boolean> = { ...(context.hiddenSlices || {}) };
   const radarDomains: Array<[number, number]> = radar ? buildRadarDomains(radar, series) : [];
   if (kind !== 'cartesian' && (!option.tooltip || option.tooltip.trigger === undefined)) {
@@ -213,6 +219,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     orientation: horizontal ? 'horizontal' : 'vertical',
     radar,
     sankey,
+    funnel,
+    gauge,
     radarDomains,
     option: merged,
     theme,

@@ -241,6 +241,7 @@ export class ICEChart {
     if (!target) throw new Error(`[ice-chart] 找不到系列：${seriesIdOrIndex}`);
     target.item.data = data;
     this.applyOption(this.option, { animate: true, preserveView: true });
+    this.emit('data:change', { seriesId: target.item.id, seriesIndex: target.index });
     return this;
   }
 
@@ -292,7 +293,8 @@ export class ICEChart {
    */
   public toggleSlice(seriesId: string, dataIndex: number, forceSelected?: boolean): this {
     const series = this.norm.series.find((s) => s.id === seriesId);
-    if (!series || series.type !== 'pie') return this;
+    // 饼图的「扇区」与漏斗图的「阶段」共用这套显隐机制
+    if (!series || (series.type !== 'pie' && series.type !== 'funnel')) return this;
     const key = `${seriesId}#${dataIndex}`;
     const currentlyHidden = !!this.hiddenSlices[key];
     const nextHidden = forceSelected === undefined ? !currentlyHidden : !forceSelected;
@@ -928,6 +930,10 @@ export class ICEChart {
           ? { polar: polarLayout, plot, canvas: this.layout.canvas }
           : series.type === 'radar'
             ? { polar: polarLayout, plot, canvas: this.layout.canvas, domains: norm.radarDomains }
+            : series.type === 'funnel'
+              ? { plot, canvas: this.layout.canvas, options: norm.funnel || {} }
+              : series.type === 'gauge'
+                ? { polar: polarLayout, plot, canvas: this.layout.canvas, options: norm.gauge || {} }
             : series.type === 'sankey' && norm.sankey
               ? {
                   plot,
@@ -962,7 +968,7 @@ export class ICEChart {
       component.chartTheme = norm.theme;
       component.state.ariaLabel = `${series.name} 系列，共 ${series.points.length} 个数据点`;
       component.updateSeries(series, animate && !this.viewState.x);
-      if (component instanceof PieSeries) {
+      if (series.type === 'pie' || series.type === 'funnel') {
         component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));
       }
       component.setCoord(coord as any);

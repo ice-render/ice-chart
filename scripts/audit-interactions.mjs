@@ -22,6 +22,7 @@ const pages = [
   'multi-axis',
   'pie',
   'radar',
+  'funnel-gauge',
   'finance',
   'sankey',
   'serialize',

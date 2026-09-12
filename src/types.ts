@@ -11,7 +11,53 @@ export type DataItem = number | null | [any, number | null] | [any, number | nul
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
-export type SeriesType = 'line' | 'bar' | 'area' | 'scatter' | 'pie' | 'radar' | 'candlestick' | 'heatmap' | 'sankey';
+export type SeriesType =
+  | 'line'
+  | 'bar'
+  | 'area'
+  | 'scatter'
+  | 'pie'
+  | 'radar'
+  | 'candlestick'
+  | 'heatmap'
+  | 'sankey'
+  | 'funnel'
+  | 'gauge';
+
+/** 漏斗图配置。 */
+export interface FunnelOption {
+  /** 阶段之间的间距（像素），默认 2。 */
+  gap?: number;
+  /** 排序：descending（默认，上大下小）| ascending | none。 */
+  sort?: 'descending' | 'ascending' | 'none';
+  /** 最小阶段宽度占最大值的比例（0~1），默认 0.12 —— 保证最小的阶段仍然可见可点。 */
+  minSize?: number;
+  /** 标签位置：inside（默认，居中）| right（右侧外置）。 */
+  labelPosition?: 'inside' | 'right';
+  /** 顶部扇形是否收窄成三角形（默认 true，ECharts 的 funnel 形态）。 */
+  trapezoid?: boolean;
+}
+
+/** 仪表盘配置。 */
+export interface GaugeOption {
+  min?: number;
+  max?: number;
+  /** 起始 / 结束角度（度）：90 = 12 点方向，默认 225 → -45（顺时针扫 270°）。 */
+  startAngle?: number;
+  endAngle?: number;
+  /** 刻度分段数，默认 5。 */
+  splitNumber?: number;
+  /** 轴线宽度（像素），默认 14。 */
+  lineWidth?: number;
+  /** 阈值配色：`[[0.4, '#198754'], [0.8, '#ffc107'], [1, '#dc3545']]`。 */
+  axisLineColor?: Array<[number, string]> | null;
+  /** 指针。 */
+  pointer?: { show?: boolean; width?: number; length?: number };
+  /** 数值文本。 */
+  detail?: { show?: boolean; formatter?: (value: number) => string; fontSize?: number };
+  /** 名称（取数据项的 name）。 */
+  title?: { show?: boolean; fontSize?: number };
+}
 
 /** 桑基图节点。 */
 export interface SankeyNodeOption {
@@ -291,6 +337,10 @@ export interface ChartOption {
   radar?: RadarOption;
   /** 桑基图配置（存在桑基系列时必填）。 */
   sankey?: SankeyOption;
+  /** 漏斗图配置。 */
+  funnel?: FunnelOption;
+  /** 仪表盘配置。 */
+  gauge?: GaugeOption;
   interaction?: InteractionOption;
   animation?: AnimationOption;
   margin?: Partial<Margin>;
@@ -399,6 +449,7 @@ export type ChartEventName =
   | 'zoom:change'
   | 'pan:change'
   | 'legend:toggle'
+  | 'data:change'
   | 'render';
 
 export interface ChartEventPayloads {
@@ -414,6 +465,8 @@ export interface ChartEventPayloads {
   'zoom:change': ZoomRange;
   'pan:change': ZoomRange;
   'legend:toggle': LegendToggleParams;
+  /** 通过 setData / setOption 更新数据后触发。 */
+  'data:change': { seriesId?: string; seriesIndex?: number };
   render: undefined;
 }
 

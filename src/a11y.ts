@@ -302,4 +302,6 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   candlestick: 'K 线',
   heatmap: '热力图单元',
   sankey: '桑基连线',
+  funnel: '漏斗阶段',
+  gauge: '仪表盘',
 };

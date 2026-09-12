@@ -11,4 +11,8 @@ export { CandlestickSeries } from './CandlestickSeries';
 export { HeatmapSeries, mixColors } from './HeatmapSeries';
 export { SankeySeries } from './SankeySeries';
 export type { SankeySeriesCoord } from './SankeySeries';
+export { FunnelSeries } from './FunnelSeries';
+export type { FunnelSeriesCoord } from './FunnelSeries';
+export { GaugeSeries } from './GaugeSeries';
+export type { GaugeSeriesCoord } from './GaugeSeries';
 export { BarSeries } from './BarSeries';

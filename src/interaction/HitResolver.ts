@@ -138,7 +138,7 @@ export class HitResolver {
     let best: { series: InternalSeries; index: number; dist: number } | null = null;
     for (const series of visible) {
       for (let i = 0; i < series.points.length; i++) {
-        if (series.type === 'pie' && hiddenSlices[`${series.id}#${i}`]) continue;
+        if ((series.type === 'pie' || series.type === 'funnel') && hiddenSlices[`${series.id}#${i}`]) continue;
         const dist = valueDistance(xValue, series.points[i].xValue);
         if (dist === null) continue;
         if (!best || dist < best.dist) best = { series, index: i, dist };

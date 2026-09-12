@@ -1,0 +1,199 @@
+import { SeriesBase } from './SeriesBase';
+import type { FunnelOption, SeriesType } from '../../types';
+import type { Rect } from '../../internal';
+import { measureTextWidth } from '../../util/text';
+import { hexToRgba } from './LineSeries';
+
+export interface FunnelSeriesCoord {
+  plot: Rect;
+  canvas: Rect;
+  options: FunnelOption;
+}
+
+interface StageGeom {
+  y0: number;
+  y1: number;
+  topWidth: number;
+  bottomWidth: number;
+  cx: number;
+}
+
+/**
+ * 漏斗图：从上到下逐级收窄，每级宽度按数值映射。
+ *
+ * 相邻两级之间画梯形（本级宽度 → 下一级宽度），这是转化漏斗最常见的形态；
+ * `trapezoid: false` 时退化成每一级独立的矩形。
+ */
+export class FunnelSeries extends SeriesBase {
+  public seriesType: SeriesType = 'funnel';
+  public funnel: FunnelSeriesCoord | null = null;
+  protected clipToBox = true;
+  /** 每个数据下标对应的梯形几何（本地坐标）。 */
+  private stageGeom: Array<StageGeom | null> = [];
+  private stageRects: Array<Rect | null> = [];
+  private funnelKey = '';
+
+  public setCoord(coord: any): this {
+    this.funnel = (coord || null) as FunnelSeriesCoord | null;
+    this.funnelKey = '';
+    return this.markDirty();
+  }
+
+  protected paintPad(): number {
+    return 12;
+  }
+
+  public highlightRectAt(index: number): Rect | null {
+    this.rebuildPixels();
+    return this.stageRects[index] || null;
+  }
+
+  private widthAt(geom: StageGeom, y: number): number {
+    const span = geom.y1 - geom.y0 || 1;
+    const t = Math.max(0, Math.min(1, (y - geom.y0) / span));
+    return geom.topWidth + (geom.bottomWidth - geom.topWidth) * t;
+  }
+
+  protected rebuildPixels(): void {
+    const coord = this.funnel;
+    const points = this.series.points;
+    const n = points.length;
+    if (!coord || !n) {
+      this.pixels = new Float64Array(0);
+      this.stageGeom = [];
+      this.stageRects = [];
+      return;
+    }
+    const options = coord.options || {};
+    const key = [n, coord.plot.width, coord.plot.height, options.sort, options.minSize, options.trapezoid, this.hiddenSlices.join(',')].join('|');
+    if (key === this.funnelKey && this.pixels.length === n * 2) return;
+    this.funnelKey = key;
+    if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
+    this.stageGeom = new Array(n).fill(null);
+    this.stageRects = new Array(n).fill(null);
+
+    const visible: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (this.hiddenSlices.indexOf(i) >= 0) continue;
+      if (points[i].y === null) continue;
+      visible.push(i);
+    }
+    const sort = options.sort || 'descending';
+    if (sort !== 'none') {
+      visible.sort((a, b) => (sort === 'ascending' ? (points[a].y || 0) - (points[b].y || 0) : (points[b].y || 0) - (points[a].y || 0)));
+    }
+    if (!visible.length) return;
+
+    const gap = Math.max(0, Number(options.gap) || 2);
+    const stageHeight = Math.max(4, (coord.plot.height - gap * (visible.length - 1)) / visible.length);
+    const maxValue = Math.max(...visible.map((i) => points[i].y || 0), 0);
+    const minSize = Math.max(0, Math.min(1, options.minSize === undefined ? 0.12 : Number(options.minSize)));
+    const maxWidth = coord.plot.width;
+    const cx = coord.plot.width / 2;
+    const widths = visible.map((i) => {
+      const value = points[i].y || 0;
+      const ratio = maxValue > 0 ? value / maxValue : 1;
+      return Math.max(maxWidth * minSize, maxWidth * Math.max(0, Math.min(1, ratio)));
+    });
+    const trapezoid = options.trapezoid !== false;
+
+    for (let k = 0; k < visible.length; k++) {
+      const index = visible[k];
+      const y0 = k * (stageHeight + gap);
+      const y1 = y0 + stageHeight;
+      const topWidth = widths[k];
+      const bottomWidth = trapezoid ? (k + 1 < widths.length ? widths[k + 1] : widths[k]) : widths[k];
+      const geom: StageGeom = { y0, y1, topWidth, bottomWidth, cx };
+      this.stageGeom[index] = geom;
+      const halfMax = Math.max(topWidth, bottomWidth) / 2;
+      this.stageRects[index] = { x: cx - halfMax, y: y0, width: halfMax * 2, height: y1 - y0 };
+      this.pixels[index * 2] = cx;
+      this.pixels[index * 2 + 1] = (y0 + y1) / 2;
+    }
+    this.xMonotonic = false;
+    this.renderIndices = null;
+  }
+
+  public hitTestIndex(localX: number, localY: number): number {
+    this.rebuildPixels();
+    for (let i = 0; i < this.stageGeom.length; i++) {
+      const geom = this.stageGeom[i];
+      if (!geom) continue;
+      if (localY < geom.y0 - 1 || localY > geom.y1 + 1) continue;
+      if (Math.abs(localX - geom.cx) <= this.widthAt(geom, localY) / 2 + 1) return i;
+    }
+    return -1;
+  }
+
+  protected doRender(): void {
+    const coord = this.funnel;
+    if (!coord || !this.chartTheme) return;
+    this.rebuildPixels();
+    const ctx = this.ctx;
+    const unit = this.unit();
+    const theme = this.chartTheme;
+    const options = coord.options || {};
+    const labelPosition = options.labelPosition || 'inside';
+    let visibleCount = 0;
+    for (let i = 0; i < this.stageGeom.length; i++) if (this.stageGeom[i]) visibleCount++;
+    let total = 0;
+    for (let i = 0; i < this.series.points.length; i++) {
+      if (!this.stageGeom[i]) continue;
+      total += this.series.points[i].y || 0;
+    }
+
+    this.beginDraw();
+    for (let i = 0; i < this.stageGeom.length; i++) {
+      const geom = this.stageGeom[i];
+      if (!geom) continue;
+      const point = this.series.points[i];
+      const color = point.color || this.series.color;
+      ctx.beginPath();
+      ctx.moveTo(geom.cx - geom.topWidth / 2, geom.y0);
+      ctx.lineTo(geom.cx + geom.topWidth / 2, geom.y0);
+      ctx.lineTo(geom.cx + geom.bottomWidth / 2, geom.y1);
+      ctx.lineTo(geom.cx - geom.bottomWidth / 2, geom.y1);
+      ctx.closePath();
+      const gradient = ctx.createLinearGradient(0, geom.y0, 0, geom.y1);
+      gradient.addColorStop(0, hexToRgba(color, 0.95));
+      gradient.addColorStop(1, hexToRgba(color, 0.75));
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = unit;
+      ctx.stroke();
+    }
+
+    // 标签
+    this.setFont(theme.fontSize, theme.fontFamily);
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < this.stageGeom.length; i++) {
+      const geom = this.stageGeom[i];
+      if (!geom) continue;
+      const point = this.series.points[i];
+      const value = point.y || 0;
+      const percent = total > 0 ? (value / total) * 100 : 0;
+      const text = `${point.name || point.xValue}  ${value}${visibleCount > 1 ? `  ${percent.toFixed(1)}%` : ''}`;
+      const midY = (geom.y0 + geom.y1) / 2;
+      const widthAtMid = this.widthAt(geom, midY);
+      if (labelPosition === 'right') {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = theme.textColor;
+        ctx.fillText(text, geom.cx + Math.max(geom.topWidth, geom.bottomWidth) / 2 + 8 * unit, midY);
+        continue;
+      }
+      // 内部标签：放不下就挪到右侧，避免压出漏斗外
+      const textWidth = measureTextWidth(ctx, text, theme.fontSize, theme.fontFamily);
+      if (textWidth + 12 > widthAtMid) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = theme.textColor;
+        ctx.fillText(text, geom.cx + Math.max(geom.topWidth, geom.bottomWidth) / 2 + 8 * unit, midY);
+      } else {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(text, geom.cx, midY);
+      }
+    }
+    this.endDraw();
+  }
+}

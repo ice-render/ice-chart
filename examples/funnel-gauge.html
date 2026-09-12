@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 漏斗图 / 仪表盘</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>漏斗图 / 仪表盘</h1>
+    <p class="lead">
+      左图漏斗：阶段按数值排序（<code>funnel.sort</code>，默认上大下小），相邻阶段之间画梯形，
+      宽度按数值映射并受 <code>minSize</code> 保护（最小阶段仍然可见可点）；图例的每一项是**阶段**，
+      点击可隐藏并让其余阶段重新铺满。右图仪表盘：角度沿用 ECharts 习惯（90° = 12 点方向），
+      默认 225° → -45° 扫 270°，轴线可按阈值分段配色，指针随数值转动。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="funnel" width="600" height="440"></canvas></div>
+      <div class="card"><canvas id="gauge" width="600" height="440"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const funnel = ICEChart.createChart('funnel', {
+        title: { text: '下单转化漏斗' },
+        theme: 'light',
+        legend: { show: true, position: 'right' },
+        tooltip: { trigger: 'item' },
+        funnel: { gap: 3, sort: 'descending', minSize: 0.14, labelPosition: 'inside' },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+        series: [
+          {
+            id: 'funnel',
+            type: 'funnel',
+            name: '转化',
+            data: [
+              { name: '曝光', value: 12000 },
+              { name: '详情页', value: 7400 },
+              { name: '加购', value: 3600 },
+              { name: '下单', value: 1480 },
+              { name: '支付', value: 1120 },
+            ],
+          },
+        ],
+      });
+
+      const gauge = ICEChart.createChart('gauge', {
+        title: { text: '本季度目标完成率' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        gauge: {
+          min: 0,
+          max: 100,
+          splitNumber: 5,
+          lineWidth: 16,
+          axisLineColor: [
+            [0.6, '#198754'],
+            [0.85, '#ffc107'],
+            [1, '#dc3545'],
+          ],
+          pointer: { show: true, width: 6, length: 0.72 },
+          detail: { formatter: (v) => `${v.toFixed(1)}%`, fontSize: 34 },
+          title: { show: true },
+        },
+        series: [{ id: 'g', type: 'gauge', name: '完成率', data: [{ name: '季度目标', value: 72.5 }] }],
+      });
+
+      // 让仪表盘的指针动起来，直观看到「数值 → 角度」的映射
+      let value = 72.5;
+      let direction = -1;
+      setInterval(() => {
+        value += direction * 4.5;
+        if (value <= 8) direction = 1;
+        if (value >= 96) direction = -1;
+        gauge.setData('g', [{ name: '季度目标', value: Number(value.toFixed(1)) }]);
+      }, 1600);
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      funnel.on('item:hover', (p) => write(`漏斗 hover  ${p.xValue} = ${p.value}`));
+      funnel.on('item:click', (p) => write(`漏斗 click  ${p.xValue} = ${p.value}`));
+      funnel.on('legend:toggle', (p) => write(`漏斗 legend ${p.seriesName} → ${p.selected ? '显示' : '隐藏'}`));
+      gauge.on('item:hover', (p) => write(`仪表盘 hover  ${p.value}`));
+
+      window.__charts = { funnel, gauge };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

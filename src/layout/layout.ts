@@ -108,11 +108,13 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
   let polar: { cx: number; cy: number; radius: number } | null = null;
-  if (norm.kind === 'polar' || norm.kind === 'radar') {
+  if (norm.kind === 'polar' || norm.kind === 'radar' || norm.kind === 'gauge') {
     const ratio = polarRadiusRatio(norm);
     // 饼图默认带引导线标签，标签要画到圆外，因此预留一圈文字空间
     const halfMin = Math.min(plot.width, plot.height) / 2;
-    const hasLabels = norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false));
+    const hasLabels =
+      (norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false))) ||
+      norm.kind === 'gauge';
     const labelAllowance = hasLabels ? Math.min(46, halfMin * 0.26) : 6;
     const radius = Math.max(10, halfMin * ratio - labelAllowance);
     const cx = plot.x + plot.width / 2;
@@ -153,6 +155,10 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
 /** 饼图半径占可用半径的比例（取第一个饼图系列的 radius 配置）。 */
 function polarRadiusRatio(norm: NormalizedOption): number {
+  if (norm.kind === 'gauge') {
+    // 仪表盘是 270° 的弧，半径可以比整圆更饱满一些
+    return 0.62;
+  }
   if (norm.kind === 'radar') {
     const raw = Number(norm.radar && norm.radar.radius);
     return isFinite(raw) && raw > 0 ? Math.max(0.1, Math.min(1, raw)) : 0.72;
@@ -235,10 +241,10 @@ function layoutLegend(norm: NormalizedOption, ctx: any, canvas: Rect, topOffset:
   const option = norm.option.legend;
   if (!option || option.show === false) return null;
   const items: LegendItemLayout[] = [];
-  if (norm.kind === 'polar') {
-    // 饼图的图例项是「扇区」而不是「系列」
+  if (norm.kind === 'polar' || norm.kind === 'funnel') {
+    // 饼图 / 漏斗图的图例项是「数据项（扇区 / 阶段）」而不是「系列」
     for (const s of norm.series) {
-      if (s.type !== 'pie') continue;
+      if (s.type !== 'pie' && s.type !== 'funnel') continue;
       for (const point of s.points) {
         items.push({
           seriesId: s.id,
