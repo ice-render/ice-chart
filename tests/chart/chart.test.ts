@@ -124,7 +124,8 @@ describe('ICEChart（引擎集成）', () => {
     const plot = c.layout.plot;
     const events: any[] = [];
     c.on('zoom:change', (payload: any) => events.push(payload));
-    const handled = c.controller.handleWheel(plot.x + plot.width / 2, plot.y + plot.height / 2, 120);
+    // deltaY < 0 = 滚轮向上 = 放大（与引擎 zoomAt 的约定一致：factor > 1 是放大）
+    const handled = c.controller.handleWheel(plot.x + plot.width / 2, plot.y + plot.height / 2, -120);
     expect(handled).toBe(true);
     const after = c.getDomain('x');
     expect(Number(after[1]) - Number(after[0])).toBeLessThan(Number(before[1]) - Number(before[0]));

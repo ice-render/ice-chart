@@ -26,7 +26,9 @@ export type SeriesType =
   | 'boxplot'
   | 'waterfall'
   | 'treemap'
-  | 'graph';
+  | 'graph'
+  | 'function'
+  | 'parametric';
 
 /** 力导向关系图的节点。 */
 export interface GraphNodeOption {
@@ -216,6 +218,18 @@ export interface AxisOption {
   logBase?: number;
 }
 
+/** 参数扫动：让某个参数在 [from, to] 之间来回，曲线连续变形（迷你 MATLAB 的「跑起来」）。 */
+export interface SweepOption {
+  /** 参数名（表达式里出现的自由变量）。 */
+  name: string;
+  from: number;
+  to: number;
+  /** 一个来回的时长（毫秒），默认 3000。 */
+  duration?: number;
+  /** loop：锯齿波（到头重置）；pingpong（默认）：来回。 */
+  mode?: 'loop' | 'pingpong';
+}
+
 export interface SeriesOption {
   id?: string;
   type: SeriesType;
@@ -284,6 +298,26 @@ export interface SeriesOption {
   waterfall?: WaterfallOption;
   /** 饼图标签。 */
   label?: { show?: boolean; position?: 'outside' | 'inside'; formatter?: (params: PieLabelParams) => string };
+  /**
+   * 函数绘图（`type: 'function'`）：`y = expression`。
+   * 支持 `+ - * / % ^`、`sin/cos/exp/log/sqrt/...`、常量 `pi/e`、隐式乘法（`2x`、`3sin(x)`）。
+   */
+  expression?: string;
+  /** 参数曲线（`type: 'parametric'`）：`x = xExpression, y = yExpression`（自变量是 `t`）。 */
+  xExpression?: string;
+  yExpression?: string;
+  /** 参数范围：function 是 x 的取值范围（默认 [-10,10]），parametric 是 t 的范围（默认 [0, 2π]）。 */
+  domain?: [number, number];
+  /** 基础采样点数（默认 240 / 360），自适应细分在此之上加点。 */
+  samples?: number;
+  /** 是否自适应细分，默认 true。关掉后按 `samples` 均匀采样（快，但峰顶/极点会失真）。 */
+  adaptive?: boolean;
+  /** 自适应阈值（相对可视跨度），越小越精细。默认 function 0.0025 / parametric 0.0015。 */
+  samplingTolerance?: number;
+  /** 表达式里的自定义参数（纯数字，会进 JSON 快照）。 */
+  params?: Record<string, number>;
+  /** 参数扫动动画：曲线随时间连续变形（动效偏好为 instant 时停在 from）。 */
+  sweep?: SweepOption;
 }
 
 export interface TitleOption {

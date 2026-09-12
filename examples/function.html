@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 函数绘图（迷你 MATLAB）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      .fx-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 0.6rem 1rem;
+      }
+      .fx-field {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .fx-field label {
+        flex: 0 0 auto;
+        font-size: 0.8125rem;
+        color: var(--bs-secondary-color);
+      }
+      .fx-field input[type='text'] {
+        flex: 1 1 auto;
+        min-width: 8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8125rem;
+        padding: 0.2rem 0.45rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.25rem;
+        color: var(--bs-body-color);
+      }
+      .fx-field input[type='text'].invalid {
+        border-color: #dc3545;
+        background: rgba(220, 53, 69, 0.06);
+      }
+      .fx-field input[type='range'] {
+        flex: 1 1 auto;
+      }
+      .fx-value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8125rem;
+        min-width: 3.5rem;
+        text-align: right;
+      }
+      .fx-swatches {
+        display: inline-flex;
+        gap: 0.35rem;
+        align-items: center;
+      }
+      .fx-swatch {
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: 50%;
+      }
+      .fx-error {
+        margin-top: 0.5rem;
+        color: #dc3545;
+        font-size: 0.75rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>函数绘图（迷你 MATLAB）</h1>
+    <p class="lead">
+      直接写表达式就能画曲线：<code>sin(x)/x</code>、<code>x^2*exp(-x)</code>、<code>2x+1</code>、
+      <code>sin(a*x)</code> —— 表达式引擎自己解析（不用 eval），支持隐式乘法与
+      <code>sin/cos/exp/log/sqrt/...</code>。曲线按<b>可视区间</b>采样并在曲率大的地方自适应加点，
+      所以放大看局部会越来越细；<code>tan(x)</code>、<code>1/x</code> 的极点是真正的断点，不会连成竖线。
+      <br />
+      拖动参数 <code>a</code> 或打开「参数扫动」，曲线会连续变形 —— 那是引擎每帧重绘出来的。
+    </p>
+
+    <div class="card">
+      <div class="fx-grid">
+        <div class="fx-field">
+          <span class="fx-swatches"><i class="fx-swatch" style="background: #0d6efd"></i></span>
+          <label for="expr1">y₁ =</label>
+          <input type="text" id="expr1" value="sin(x)/x" spellcheck="false" />
+        </div>
+        <div class="fx-field">
+          <span class="fx-swatches"><i class="fx-swatch" style="background: #dc3545"></i></span>
+          <label for="expr2">y₂ =</label>
+          <input type="text" id="expr2" value="a*sin(x)*exp(-abs(x)/6)" spellcheck="false" />
+        </div>
+        <div class="fx-field">
+          <span class="fx-swatches"><i class="fx-swatch" style="background: #198754"></i></span>
+          <label for="expr3">y₃ =</label>
+          <input type="text" id="expr3" value="x^2/20 - 2" spellcheck="false" />
+        </div>
+        <div class="fx-field">
+          <label for="param-a">a =</label>
+          <input type="range" id="param-a" min="-3" max="3" step="0.05" value="1.5" />
+          <span class="fx-value" id="param-a-value">1.50</span>
+        </div>
+        <div class="fx-field">
+          <label for="domain">x 范围</label>
+          <select id="domain" style="font-size: 0.8125rem; padding: 0.2rem 0.4rem">
+            <option value="-10,10">[-10, 10]</option>
+            <option value="-6.283,6.283">[-2π, 2π]</option>
+            <option value="-1,1">[-1, 1]</option>
+            <option value="-100,100">[-100, 100]</option>
+          </select>
+        </div>
+        <div class="fx-field">
+          <label for="samples">采样</label>
+          <select id="samples" style="font-size: 0.8125rem; padding: 0.2rem 0.4rem">
+            <option value="120">120（快）</option>
+            <option value="240" selected>240</option>
+            <option value="800">800（细）</option>
+          </select>
+        </div>
+        <div class="fx-field">
+          <label for="sweep">参数扫动</label>
+          <input type="checkbox" id="sweep" />
+          <span class="snapshot-meta">让 a 在 [-3, 3] 之间来回，曲线连续变形</span>
+        </div>
+        <div class="fx-field">
+          <label for="adaptive">自适应细分</label>
+          <input type="checkbox" id="adaptive" checked />
+        </div>
+      </div>
+      <div class="fx-error" id="error"></div>
+    </div>
+
+    <div class="card"><canvas id="functions" width="960" height="460"></canvas></div>
+
+    <div class="card">
+      <div class="snapshot-head">
+        <span class="snapshot-title">参数曲线（李萨如）</span>
+        <span class="snapshot-actions">
+          <button type="button" id="btn-shape-1">(sin3t, cos2t)</button>
+          <button type="button" id="btn-shape-2">螺线</button>
+          <button type="button" id="btn-shape-3">心形线</button>
+        </span>
+        <span class="spacer"></span>
+        <span class="snapshot-meta">x(t)、y(t) 两条表达式合成一条曲线</span>
+      </div>
+      <canvas id="parametric" width="960" height="420"></canvas>
+    </div>
+
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+
+      const readDomain = () =>
+        document
+          .getElementById('domain')
+          .value.split(',')
+          .map((v) => Number(v));
+      const readSamples = () => Number(document.getElementById('samples').value);
+
+      const chart = ICEChart.createChart('functions', {
+        title: { text: '函数曲线叠加', subtext: '滚轮缩放 · 拖拽平移 · 悬停读数' },
+        legend: { show: true },
+        tooltip: { trigger: 'item' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        grid: { x: true },
+        xAxis: { type: 'value', name: 'x' },
+        yAxis: { name: 'y' },
+        animation: { enter: { duration: 700, easing: 'easeOutCubic' }, update: { duration: 380 } },
+        series: [
+          { id: 'f1', type: 'function', name: 'sin(x)/x', expression: 'sin(x)/x', domain: [-10, 10], lineWidth: 2 },
+          {
+            id: 'f2',
+            type: 'function',
+            name: 'a*sin(x)*exp(-|x|/6)',
+            expression: 'a*sin(x)*exp(-abs(x)/6)',
+            params: { a: 1.5 },
+            color: '#dc3545',
+            lineWidth: 2,
+          },
+          { id: 'f3', type: 'function', name: 'x^2/20 - 2', expression: 'x^2/20 - 2', color: '#198754', lineWidth: 2 },
+        ],
+      });
+
+      const parametric = ICEChart.createChart('parametric', {
+        title: { text: '参数曲线', subtext: 'x = sin(3t)、y = cos(2t)' },
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'value', name: 'x(t)' },
+        yAxis: { name: 'y(t)' },
+        animation: { enter: { duration: 900, easing: 'easeOutCubic' } },
+        series: [
+          {
+            id: 'curve',
+            type: 'parametric',
+            name: 'sin(3t), cos(2t)',
+            xExpression: 'sin(3*t)',
+            yExpression: 'cos(2*t)',
+            domain: [0, Math.PI * 2],
+            lineWidth: 2,
+            color: '#0d6efd',
+          },
+        ],
+      });
+
+      const shapes = [
+        { x: 'sin(3*t)', y: 'cos(2*t)', domain: [0, Math.PI * 2], name: 'sin(3t), cos(2t)' },
+        { x: 't*cos(t)/3', y: 't*sin(t)/3', domain: [0, Math.PI * 6], name: '螺线' },
+        { x: '16*sin(t)^3/16', y: '(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/16', domain: [0, Math.PI * 2], name: '心形线' },
+      ];
+      document.getElementById('btn-shape-1').addEventListener('click', () => applyShape(0));
+      document.getElementById('btn-shape-2').addEventListener('click', () => applyShape(1));
+      document.getElementById('btn-shape-3').addEventListener('click', () => applyShape(2));
+      function applyShape(index) {
+        const shape = shapes[index];
+        parametric.setOption(
+          {
+            ...parametric.getOption(),
+            title: { text: '参数曲线', subtext: `x = ${shape.x}，y = ${shape.y}` },
+            series: [
+              {
+                id: 'curve',
+                type: 'parametric',
+                name: shape.name,
+                xExpression: shape.x,
+                yExpression: shape.y,
+                domain: shape.domain,
+                lineWidth: 2,
+                color: '#0d6efd',
+              },
+            ],
+          },
+          { animate: true, preserveView: false }
+        );
+        write(`切换参数曲线：${shape.name}`);
+      }
+
+      /** 把表单内容同步到图上（表达式 / 参数 / 范围 / 采样密度）。 */
+      function syncFunctions(animate) {
+        const [d0, d1] = readDomain();
+        const sweepOn = document.getElementById('sweep').checked;
+        const a = Number(document.getElementById('param-a').value);
+        const expressions = ['expr1', 'expr2', 'expr3'].map((id) => document.getElementById(id).value.trim());
+        const adaptive = document.getElementById('adaptive').checked;
+        const samples = readSamples();
+        const colors = ['#0d6efd', '#dc3545', '#198754'];
+        const option = {
+          ...chart.getOption(),
+          series: expressions.map((expression, i) => ({
+            id: `f${i + 1}`,
+            type: 'function',
+            name: expression || `y${i + 1}`,
+            expression,
+            domain: [d0, d1],
+            samples,
+            adaptive,
+            params: { a },
+            color: colors[i],
+            lineWidth: 2,
+            ...(i === 1 && sweepOn ? { sweep: { name: 'a', from: -3, to: 3, duration: 2600, mode: 'pingpong' } } : {}),
+          })),
+        };
+        chart.setOption(option, { animate, preserveView: true });
+        showErrors();
+      }
+
+      function showErrors() {
+        const errors = chart.expressionErrors();
+        const box = document.getElementById('error');
+        box.textContent = errors.length ? errors.map((e) => e.message).join('\n') : '';
+        const ids = ['expr1', 'expr2', 'expr3'];
+        ids.forEach((id) => document.getElementById(id).classList.remove('invalid'));
+        for (const error of errors) {
+          const index = Number(String(error.seriesId).replace('f', '')) - 1;
+          if (ids[index]) document.getElementById(ids[index]).classList.add('invalid');
+        }
+      }
+
+      ['expr1', 'expr2', 'expr3'].forEach((id) => {
+        document.getElementById(id).addEventListener('input', () => syncFunctions(true));
+      });
+      document.getElementById('param-a').addEventListener('input', (event) => {
+        document.getElementById('param-a-value').textContent = Number(event.target.value).toFixed(2);
+        syncFunctions(false);
+      });
+      document.getElementById('sweep').addEventListener('change', () => syncFunctions(false));
+      document.getElementById('domain').addEventListener('change', () => {
+        syncFunctions(false);
+        chart.resetZoom();
+      });
+      document.getElementById('samples').addEventListener('change', () => syncFunctions(false));
+      document.getElementById('adaptive').addEventListener('change', () => syncFunctions(false));
+
+      chart.on('item:hover', (p) => write(`函数 hover  x = ${Number(p.xValue).toFixed(3)}  y = ${Number(p.value).toFixed(3)}`));
+      chart.on('zoom:change', () => write('缩放 / 平移：曲线按新的可视区间重新采样'));
+      parametric.on('item:hover', (p) => write(`参数曲线 hover  ${p.name}`));
+
+      window.__chart = chart;
+      window.__charts = { functions: chart, parametric };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

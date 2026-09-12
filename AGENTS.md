@@ -44,6 +44,8 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
    不要进 state/props（序列化与内存都受影响）。
 10. **纯函数层不许引入引擎依赖**：`normalizeOption` / `computeLayout` / `scale` 必须能在没有 DOM、
     没有 canvas 的环境下运行与测试。
+11. **用户输入的表达式一律走 `src/expr`**：禁止 `eval` / `new Function`（CSP 与安全），
+    编译失败要能给出位置，且**不能让图表崩**（错误经 `chart.expressionErrors()` 暴露）。
 
 ## 坐标与原点约定
 
@@ -128,6 +130,11 @@ npm run audit:interactions -- ./.audit
 8. 测试三类：纯函数（归一化 / 几何）、组件命中、引擎集成（真实 hitTest + 事件）；
    再加一个示例页并把页面名加进 `scripts/audit-interactions.mjs` 的 pages 列表。
 
+> 坐标系两种风格的取舍：`function` / `parametric` 走**直角坐标**（`kind: 'cartesian'`），
+> 因此不需要新场景；但它们的「数据点」是表达式现算的，归一化里的
+> `buildCurvePoints` / `applyCurveDomain` 要负责给 x / y 数据域提供取值
+> （参数曲线的 x 域来自 `domainXValues`，y 域来自 `domainValues`）。
+
 ## 动画（改动画相关代码前必读）
 
 - **三段式配置**：`option.animation.enter / update / highlight`，归一化在 `normalizeAnimation()`；
@@ -178,6 +185,20 @@ npm run audit:interactions -- ./.audit
   像素缓存新鲜、无 console 报错，并按「图 × 系列」截图供人工复核。
   示例页里的 `setInterval` 实时数据（仪表盘示例）要留意：探针必须等一次刷新窗口，
   否则会把「数据更新」误判成「悬停丢失」。
+
+## 函数绘图（`function` / `parametric`，改动前必读）
+
+- **几何来自表达式，不是数据点**：`CurveSeriesBase.rebuildPixels` 现场求值；
+  `series.points` 仍然存在（提示框 / 高亮 / 键盘导航的锚点），但锚点的像素位置也由表达式算出，
+  所以「画出来的曲线」与「点得到的点」不会分叉。
+- **采样必须按可视区间做**：缩放后要重新采样（否则放大会看到折线被拉大）；
+  自适应细分要有上限，极点附近会无限细分。断点写成 NaN，渲染按 NaN 分段（`tan(x)` 的竖直假线就是这么来的）。
+- **y 轴自动贴合只在 `function` 上开**（`ICEChart.autoYCurve`）：参数曲线的几何固定，
+  按可视窗口改 y 域只会让图乱跳。自动贴合时记得同步 `fullYDomains`（范围查询与 y 缩放夹取都读它）。
+- **参数扫动的每帧重算走 `keepAnimating()`**：曲线是每帧重新求值的，缓存键必须带上参数值
+  （`paramKey()`），否则曲线会冻在第一帧 —— 与「缓存键要带动画进度」是同一类坑。
+- **表达式编译结果要缓存**：参数扫动时每帧上万次求值，`compileExpression` / `compileSampler`
+  都带缓存并复用 scope；不要在采样循环里新建对象。
 
 ## 已实现 / 未实现
 

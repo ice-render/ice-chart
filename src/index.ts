@@ -52,6 +52,7 @@ export type {
   ZoomRange,
   LegendToggleParams,
   DataItem,
+  SweepOption,
 } from './types';
 
 // 主题
@@ -111,6 +112,14 @@ export { layoutTreemap } from './layout/treemap';
 export type { TreemapNodeLayout, TreemapInputNode } from './layout/treemap';
 export { GraphSeries } from './components/series/GraphSeries';
 export type { GraphSeriesCoord } from './components/series/GraphSeries';
+export { CurveSeriesBase } from './components/series/CurveSeriesBase';
+export { FunctionSeries } from './components/series/FunctionSeries';
+export { ParametricSeries } from './components/series/ParametricSeries';
+// 表达式引擎（纯函数，可单独使用：表单校验、DSL 编译、参数扫描都靠它）
+export { compileExpression, compileSampler, evaluateExpression, ExpressionError } from './expr/expr';
+export type { CompiledExpression, CompiledSampler } from './expr/expr';
+export { sampleFunctionCurve, sampleParametricCurve, robustRange } from './expr/sample';
+export type { CurvePoint, SampleOptions } from './expr/sample';
 export { forceLayout, sampleGraphLink } from './layout/force';
 export type { ForceNodeLayout, ForceLinkLayout, ForceLayoutResult } from './layout/force';
 export { computeBoxplotSummary } from './option/normalize';

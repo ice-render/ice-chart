@@ -61,6 +61,22 @@ export interface InternalSeries {
   hidden: boolean;
   /** 绑定的 y 轴下标。 */
   axisIndex: number;
+  /**
+   * 数据域采样值（函数绘图用）。
+   *
+   * 函数图的 y 轴不该被 1/x 的尖峰拉到 ±2500，这里直接给出**稳健范围**，
+   * 由 buildYDomain 采纳；给了它就不再逐点取 y（点的 y 仍然是真值，供提示框使用）。
+   */
+  domainValues?: number[];
+  /**
+   * x 轴的取值集合（参数曲线用）。
+   *
+   * 参数曲线的 `xValue` 是参数 t，不是横坐标 —— x 轴数据域必须来自 `x(t)`，
+   * 否则坐标轴会按 t 的范围来画（李萨如曲线会整条错位）。
+   */
+  domainXValues?: number[];
+  /** 表达式编译失败时的原因（图表不崩，但要把错误暴露给表单 / 调用方）。 */
+  expressionError?: string;
 }
 
 export interface InternalAxis {

@@ -93,12 +93,13 @@ export class ChartComponent extends ICEComponent {
   protected stopAnimating(): void {
     if (!this.loopRegistered) return;
     this.loopRegistered = false;
-    const animations: any = (this.props as any).animations;
-    if (animations) {
-      for (const key in animations) {
-        if (animations[key]) animations[key].finished = true;
-      }
+    // 整体替换成一份新的（props.animations 的默认值是引擎共享的冻结对象，不能原地改）
+    const animations: any = { ...((this.props as any).animations || {}) };
+    for (const key in animations) {
+      if (animations[key]) animations[key].finished = true;
     }
+    delete animations.__tick;
+    (this.props as any).animations = animations;
     if (this.ice && this.ice.animationManager) this.ice.animationManager.remove(this);
   }
 

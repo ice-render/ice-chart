@@ -21,4 +21,7 @@ export { TreemapSeries } from './TreemapSeries';
 export type { TreemapSeriesCoord } from './TreemapSeries';
 export { GraphSeries } from './GraphSeries';
 export type { GraphSeriesCoord } from './GraphSeries';
+export { CurveSeriesBase } from './CurveSeriesBase';
+export { FunctionSeries } from './FunctionSeries';
+export { ParametricSeries } from './ParametricSeries';
 export { BarSeries } from './BarSeries';

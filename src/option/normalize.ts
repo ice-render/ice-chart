@@ -4,6 +4,8 @@ import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
+import { compileExpression } from '../expr/expr';
+import { robustRange } from '../expr/sample';
 
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 12, left: 12 };
 
@@ -126,7 +128,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
 
   const radar = option.radar || null;
   const graphOption = option.graph || null;
-  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null, graphOption);
+  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null, graphOption, context);
   const hiddenIds: Record<string, boolean> = { ...(context.hiddenIds || {}) };
   for (const s of series) {
     if (merged.legend?.selected && merged.legend.selected[s.name] === false) {
@@ -291,7 +293,8 @@ function buildSeries(
   _selected: Record<string, boolean>,
   radar?: RadarOption | null,
   sankey?: SankeyOption | null,
-  graph?: GraphOption | null
+  graph?: GraphOption | null,
+  context?: NormalizeContext
 ): InternalSeries[] {
   const out: InternalSeries[] = [];
   const usedNames: Record<string, number> = {};
@@ -312,7 +315,7 @@ function buildSeries(
     }
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
-    const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph);
+    const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph, context);
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
       for (let p = 0; p < points.length; p++) {
@@ -321,7 +324,20 @@ function buildSeries(
         points[p].color = own || (p === 0 && option.color ? option.color : theme.colorPalette[p % theme.colorPalette.length]);
       }
     }
-    out.push({ id, index: i, type: option.type, name, color, option, points, hasExplicitX, hidden: false, axisIndex: 0 });
+    const internal: InternalSeries = {
+      id,
+      index: i,
+      type: option.type,
+      name,
+      color,
+      option,
+      points,
+      hasExplicitX,
+      hidden: false,
+      axisIndex: 0,
+    };
+    applyCurveDomain(internal, option, context);
+    out.push(internal);
   }
   return out;
 }
@@ -330,11 +346,16 @@ function buildPoints(
   option: SeriesOption,
   radar?: RadarOption | null,
   sankey?: SankeyOption | null,
-  graph?: GraphOption | null
+  graph?: GraphOption | null,
+  context?: NormalizeContext
 ): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
   const points: DataPoint[] = [];
   let hasExplicitX = false;
+  // 函数绘图 / 参数曲线：数据点由表达式现算（不是用户给的数组）
+  if (option.type === 'function' || option.type === 'parametric') {
+    return buildCurvePoints(option, context);
+  }
   // 关系图：点是「节点 + 连线」，索引 0..n-1 是节点，之后是连线
   if (option.type === 'graph' && graph) {
     const graphNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
@@ -705,6 +726,121 @@ export function applyAxisCategories(axis: AxisOption, series: InternalSeries[]):
   }
 }
 
+/**
+ * 函数绘图 / 参数曲线的「数据点」：由表达式在参数区间上现算。
+ *
+ * 这些点同时承担三个角色：
+ * 1. 提示框 / 高亮环的锚点（下标稳定，随可视区间重新生成）；
+ * 2. x 轴数据域的来源（function 用 x，parametric 用 `domainXValues` = x(t)）；
+ * 3. y 轴数据域的来源（用稳健范围，避免 `1/x`、`tan(x)` 的尖峰把轴拉到 ±2500）。
+ *
+ * 表达式编译失败**不抛异常**（否则一个手滑的输入会把整张图搞崩），
+ * 而是把原因写进 `expressionError`，由 `chart.expressionErrors()` 暴露给表单。
+ */
+function buildCurvePoints(option: SeriesOption, context?: NormalizeContext): { points: DataPoint[]; hasExplicitX: boolean } {
+  const points: DataPoint[] = [];
+  const params = option.params || {};
+  const isFunction = option.type === 'function';
+  const source = isFunction ? String(option.expression || '') : String(option.xExpression || '');
+  const sourceY = isFunction ? '' : String(option.yExpression || '');
+  let compiledX: { evaluate: (scope: Record<string, number>) => number } | null = null;
+  let compiledY: { evaluate: (scope: Record<string, number>) => number } | null = null;
+  try {
+    compiledX = compileExpression(source);
+    if (!isFunction) compiledY = compileExpression(sourceY);
+  } catch (err) {
+    // 编译失败：点全部为空（曲线不画），原因由 applyCurveDomain 记录到 expressionError
+    compiledX = null;
+    compiledY = null;
+  }
+
+  const fallbackDomain: [number, number] = isFunction ? [-10, 10] : [0, Math.PI * 2];
+  const declared = Array.isArray(option.domain) && option.domain.length >= 2 ? option.domain : null;
+  let from = declared ? Number(declared[0]) : fallbackDomain[0];
+  let to = declared ? Number(declared[1]) : fallbackDomain[1];
+  // 函数图的参数区间 = 当前可视 x 区间（缩放后重新生成锚点，y 轴才会自动贴合）
+  if (isFunction && context && Array.isArray(context.xDomain) && context.xDomain.length >= 2) {
+    const winFrom = Number(context.xDomain[0]);
+    const winTo = Number(context.xDomain[1]);
+    if (isFinite(winFrom) && isFinite(winTo) && winTo > winFrom) {
+      from = winFrom;
+      to = winTo;
+    }
+  }
+  if (!isFinite(from) || !isFinite(to) || to === from) {
+    from = fallbackDomain[0];
+    to = fallbackDomain[1];
+  }
+
+  const requested = Number(option.samples);
+  const count = Math.max(24, Math.min(6000, isFinite(requested) && requested > 0 ? Math.round(requested) : isFunction ? 240 : 360));
+  const scope: Record<string, number> = { ...params };
+  const variable = isFunction ? 'x' : 't';
+
+  for (let i = 0; i < count; i++) {
+    const parameter = from + ((to - from) * i) / (count - 1);
+    scope[variable] = parameter;
+    let x = parameter;
+    let y = NaN;
+    if (compiledX) {
+      if (isFunction) {
+        y = compiledX.evaluate(scope);
+      } else if (compiledY) {
+        x = compiledX.evaluate(scope);
+        y = compiledY.evaluate(scope);
+      }
+    }
+    const finite = isFinite(x) && isFinite(y);
+    points.push({
+      index: i,
+      // function 的 xValue 就是横坐标；parametric 的 xValue 是参数 t（横坐标另存在 raw.x）
+      xValue: isFunction ? parameter : parameter,
+      y: finite ? y : null,
+      raw: isFunction ? { x: parameter, y } : { t: parameter, x, y },
+      base: 0,
+      top: finite ? y : 0,
+      name: isFunction ? source : `(${source}, ${sourceY})`,
+    });
+  }
+  return { points, hasExplicitX: true };
+}
+
+/** 把曲线系列的「数据域采样值」挂到内部系列上（y 用稳健范围，x 取 x(t) 的极值）。 */
+function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?: NormalizeContext): void {
+  if (option.type !== 'function' && option.type !== 'parametric') return;
+  const ys: number[] = [];
+  const xs: number[] = [];
+  for (const point of series.points) {
+    const raw: any = point.raw;
+    if (raw && typeof raw === 'object') {
+      if (typeof raw.x === 'number') xs.push(raw.x);
+      if (typeof raw.y === 'number') ys.push(raw.y);
+    }
+  }
+  const finiteYs = ys.filter((v) => isFinite(v));
+  if (finiteYs.length) series.domainValues = robustRange(finiteYs);
+  if (option.type === 'parametric') {
+    const finiteXs = xs.filter((v) => isFinite(v));
+    if (finiteXs.length) series.domainXValues = [Math.min(...finiteXs), Math.max(...finiteXs)];
+  }
+  if (option.type === 'function') {
+    // 表达式编译失败时把原因带出来（图表不崩，表单可以提示）
+    try {
+      compileExpression(String(option.expression || ''));
+    } catch (err: any) {
+      series.expressionError = err && err.message ? String(err.message) : String(err);
+    }
+  } else {
+    try {
+      compileExpression(String(option.xExpression || ''));
+      compileExpression(String(option.yExpression || ''));
+    } catch (err: any) {
+      series.expressionError = err && err.message ? String(err.message) : String(err);
+    }
+  }
+  void context;
+}
+
 function buildXDomain(
   type: string,
   series: InternalSeries[],
@@ -731,6 +867,11 @@ function buildXDomain(
 
   const values: number[] = [];
   for (const s of series) {
+    // 参数曲线的横坐标不是 xValue（那是参数 t），要用 x(t) 的极值
+    if (s.domainXValues && s.domainXValues.length) {
+      for (const v of s.domainXValues) if (isFinite(v)) values.push(v);
+      continue;
+    }
     for (const p of s.points) {
       const v = type === 'time' ? toTimestamp(p.xValue) : Number(p.xValue);
       if (isFinite(v)) values.push(v);
@@ -768,6 +909,12 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     if (s.hidden) continue;
     if (s.axisIndex !== axisIndex) continue;
     if (s.type === 'bar' || s.type === 'area') includeZero = true;
+    // 函数绘图：数据域用稳健范围（分位数剪掉尖峰），而不是逐点求 min/max
+    if (s.domainValues && s.domainValues.length) {
+      const [lo, hi] = robustRange(s.domainValues);
+      values.push(lo, hi);
+      continue;
+    }
     for (const p of s.points) {
       if (p.y !== null) values.push(p.y);
       // K 线的影线（low/high）也要进数据域，否则影线会被裁掉

@@ -54,6 +54,31 @@ const SCENARIOS: Array<{ name: string; option: ChartOption; zoom?: [any, any] }>
     },
   },
   {
+    name: '函数绘图（表达式 + 参数）',
+    option: {
+      xAxis: { type: 'value' },
+      yAxis: {},
+      series: [
+        {
+          id: 'f',
+          type: 'function',
+          name: 'a*sin(x)/x',
+          expression: 'a*sin(x)/x',
+          domain: [-8, 8],
+          params: { a: 2 },
+        },
+        {
+          id: 'p',
+          type: 'parametric',
+          name: '李萨如',
+          xExpression: 'sin(3*t)',
+          yExpression: 'cos(2*t)',
+          domain: [0, Math.PI * 2],
+        },
+      ],
+    },
+  },
+  {
     name: 'K 线',
     option: {
       xAxis: { type: 'category' },

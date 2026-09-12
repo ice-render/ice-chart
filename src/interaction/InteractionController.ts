@@ -432,6 +432,33 @@ export class InteractionController {
         rows: [{ name: series.name, value: point.y === null ? '-' : String(point.y), color: series.color }],
       };
     }
+    // 函数绘图 / 参数曲线：把「自变量 → 坐标」讲清楚（数学图的提示框就是这个信息）
+    if (anchorItem && (anchorItem.series.type === 'function' || anchorItem.series.type === 'parametric')) {
+      const series = anchorItem.series;
+      const raw: any = anchorItem.point.raw || {};
+      const isFunction = series.type === 'function';
+      const variable = isFunction ? 'x' : 't';
+      const parameter = isFunction ? Number(raw.x ?? anchorItem.point.xValue) : Number(raw.t ?? anchorItem.point.xValue);
+      const x = Number(raw.x);
+      const y = Number(raw.y);
+      const fmt = (value: number): string => {
+        if (!isFinite(value)) return '—';
+        // 数学图看的是「形状」，4 位有效数字足够，又不至于出现 0.30000000000000004
+        return String(Number(value.toPrecision(4)));
+      };
+      return {
+        title: `${variable} = ${fmt(parameter)}`,
+        rows: isFunction
+          ? [
+              { name: series.name, value: fmt(y), color: series.color },
+              { name: '坐标', value: `(${fmt(x)}, ${fmt(y)})`, color: this.host.norm.theme.subTextColor },
+            ]
+          : [
+              { name: '坐标', value: `(${fmt(x)}, ${fmt(y)})`, color: series.color },
+              { name: 'y', value: fmt(y), color: this.host.norm.theme.subTextColor },
+            ],
+      };
+    }
     if (anchorItem && anchorItem.series.type === 'radar') {
       const series = anchorItem.series;
       return {
@@ -1070,7 +1097,10 @@ export class InteractionController {
     if (!this.resolver.isInsidePlot(target.chart[0], target.chart[1])) return false;
     this.preventDefault(evt);
     const zoomFactor = Number(zoomOption.wheelFactor) || 1.2;
-    const factor = deltaY > 0 ? zoomFactor : 1 / zoomFactor;
+    // 约定：滚轮向上（deltaY < 0）= 放大，factor > 1 表示放大。
+    // 曾经把 factor 定义成「缩小时 > 1」，结果类目轴（用除法）方向对、
+    // 数值轴与视口缩放（用乘法）方向反 —— 同一次滚轮在不同轴上行为相反。
+    const factor = deltaY < 0 ? zoomFactor : 1 / zoomFactor;
     if (zoomOption.mode === 'viewport') {
       this.host.ice.zoomAt(screenX, screenY, factor);
       return true;
@@ -1107,7 +1137,9 @@ export class InteractionController {
       const to = all.indexOf(current[current.length - 1]);
       const currentCount = Math.max(2, to - from + 1);
       const anchorRatio = clamp(anchorPixel / Math.max(1, size), 0, 1);
-      let nextCount = Math.round(clamp(currentCount * factor, Math.max(2, Math.ceil(n * minSpan)), Math.floor(n * maxSpan)));
+      let nextCount = Math.round(
+        clamp(currentCount / factor, Math.max(2, Math.ceil(n * minSpan)), Math.floor(n * maxSpan))
+      );
       nextCount = Math.min(nextCount, n);
       const anchorIndex = from + anchorRatio * (currentCount - 1);
       let nextFrom = Math.round(anchorIndex - anchorRatio * (nextCount - 1));

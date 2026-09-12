@@ -153,6 +153,8 @@ export class ICEChart {
     /** 非主轴 y 轴的窗口（多轴叠加时各自独立缩放）。 */
     yAxes: Array<[any, any] | null>;
   } = { x: null, y: null, yAxes: [] };
+  /** 存在 function 系列时为真：y 轴数据域每次重建都按可视 x 区间重算（自动贴合）。 */
+  private autoYCurve = false;
   private hiddenIds: Record<string, boolean> = {};
   private hiddenSlices: Record<string, boolean> = {};
   private seriesSignature = '';
@@ -248,6 +250,20 @@ export class ICEChart {
   /** 取当前配置（函数字段保留；持久化请用 toJSON）。 */
   public getOption(): ChartOption {
     return this.option;
+  }
+
+  /**
+   * 函数绘图 / 参数曲线的表达式错误（编译失败的原因）。
+   *
+   * 表达式来自用户输入，编译失败**不会**让图表崩掉（那会让表单很难用），
+   * 但错误必须能被拿到：表单可以据此标红，控制台也不必猜。
+   */
+  public expressionErrors(): Array<{ seriesId: string; message: string }> {
+    const out: Array<{ seriesId: string; message: string }> = [];
+    for (const series of this.norm.series) {
+      if (series.expressionError) out.push({ seriesId: series.id, message: series.expressionError });
+    }
+    return out;
   }
 
   /** 更新单个系列的数据。 */
@@ -643,6 +659,9 @@ export class ICEChart {
     this.fullXDomain = normalized.xAxis.domain.slice();
     this.fullYDomain = normalized.yAxis.domain.slice();
     this.fullYDomains = normalized.yAxes.map((axis) => axis.domain.slice());
+    // 函数绘图的 y 轴默认「自动贴合可视区间」（像 fplot）：数据域不锁死，
+    // 每次 rebuild 按当前 x 窗口重新算；用户显式给了 yAxis.min/max 或缩放过 y 就以它为准。
+    this.autoYCurve = (option.series || []).some((s) => !!s && s.type === 'function');
 
     if (!options.preserveView) {
       this.viewState = { x: null, y: null, yAxes: [] };
@@ -738,17 +757,28 @@ export class ICEChart {
       hiddenSlices: this.hiddenSlices,
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
       yDomain:
-        domainOverride && domainOverride.length === 2
+        this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
+          ? null
+          : domainOverride && domainOverride.length === 2
           ? [Number(domainOverride[0]), Number(domainOverride[1])]
           : effectiveYs[0] && effectiveYs[0].length === 2
             ? [Number(effectiveYs[0][0]), Number(effectiveYs[0][1])]
             : null,
       yDomains: effectiveYs.map((domain) =>
-        domain && domain.length === 2 ? [Number(domain[0]), Number(domain[1])] : null
+        this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
+          ? null
+          : domain && domain.length === 2
+            ? [Number(domain[0]), Number(domain[1])]
+            : null
       ),
     });
     // 第二次归一化后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
     this.norm = norm;
+    if (this.autoYCurve) {
+      // 自动贴合后同步 fullYDomains：currentRange() / y 轴缩放的夹取都以它为准
+      this.fullYDomain = norm.yAxis.domain.slice();
+      this.fullYDomains = norm.yAxes.map((axis) => axis.domain.slice());
+    }
     this.layout = computeLayout(norm, this.ice.ctx, canvas);
     this.buildScales(norm);
     this.root.state.ariaLabel = chartTitle(norm);

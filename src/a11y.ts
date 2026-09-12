@@ -308,4 +308,6 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   waterfall: '瀑布柱',
   treemap: '矩形树图单元',
   graph: '关系图节点',
+  function: '函数曲线',
+  parametric: '参数曲线',
 };

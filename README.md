@@ -74,7 +74,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / candlestick / heatmap / sankey / funnel / gauge / boxplot / waterfall / treemap / graph | 见下方「图表类型与写法」 |
+| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / candlestick / heatmap / sankey / funnel / gauge / boxplot / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter |
@@ -156,6 +156,37 @@ npm install ice-chart ice-render
 | `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
 | `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
 | `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、按权重定大小 |
+| `function` | `expression: 'sin(x)/x'`（+ `params` / `domain`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合 |
+| `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
+
+## 函数绘图（迷你 MATLAB）
+
+```ts
+ICEChart.createChart('chart', {
+  xAxis: { type: 'value' },
+  yAxis: {},
+  series: [
+    { type: 'function', name: 'sin(x)/x', expression: 'sin(x)/x', domain: [-10, 10] },
+    { type: 'function', name: 'a·sin(x)·e^-|x|/6', expression: 'a*sin(x)*exp(-abs(x)/6)', params: { a: 1.5 } },
+    { type: 'parametric', name: '李萨如', xExpression: 'sin(3*t)', yExpression: 'cos(2*t)', domain: [0, Math.PI * 2] },
+  ],
+});
+```
+
+表达式引擎是自研的（`src/expr/`，**不用 `eval` / `new Function`**，CSP 安全），
+支持 `+ - * / % ^`、`sin/cos/tan/exp/log/sqrt/abs/min/max/clamp/...`、常量 `pi/e/tau`，
+以及 MATLAB 习惯的**隐式乘法**（`2x`、`3sin(x)`、`2(x+1)`）。写错了会带上位置指针报错，
+但**不会把图表搞崩**：`chart.expressionErrors()` 把原因交给表单去标红。
+
+几个刻意的设计：
+
+- **按可视区间采样**：缩放之后按新的 x 区间重新采样并在曲率大的地方自适应加点，
+  所以放大看局部会越来越细，而不是把稀疏折线拉大；
+- **y 轴自动贴合**：数据域取可视区间内的**稳健范围**（IQR 剪掉离群尖峰），
+  `1/x`、`tan(x)` 不会把 y 轴拉到 ±2500；显式写了 `yAxis.min/max` 或缩放过 y 就以它为准；
+- **极点是真断点**：`tan(x)` 的渐近线两侧不会连出一条竖直假线（采样阶段就写成 NaN 分段）；
+- **参数扫动动画**：`sweep: { name: 'a', from: -3, to: 3 }` 让曲线连续变形 ——
+  表达式每帧重新求值（实测 3 条曲线同屏 58fps），这是引擎持续重绘能力最自然的用法。
 
 ## 动画
 
@@ -315,14 +346,14 @@ npm run verify        # lint → types:check → build → test
 ```bash
 npm run build && npm run examples:prepare
 node scripts/serve-examples.cjs &
-npm run audit:interactions -- ./.audit      # 12 页 × 10 步交互，逐步截图 + 几何断言
+npm run audit:interactions -- ./.audit      # 20 页 × 11 步交互，逐步截图 + 几何断言
 npm run audit:hover -- ./.hover-sweep       # 逐类型逐个数据点悬停：反馈动画 + 像素缓存新鲜度
 ```
 
 审计会检查每一步之后：提示框是否越出画布、是否压住坐标轴数值标签或图例、
 高亮标记是否落在绘图区内；任何一条不满足就以非 0 退出码结束，可用于 CI。
 
-悬停实测（`audit:hover`）会把指针移到 15 种图表的每一个数据点上，逐点断言三件事：
+悬停实测（`audit:hover`）会把指针移到 16 种图表的每一个数据点上，逐点断言三件事：
 交互层把 `hoverIndex` 下发到了对应系列、反馈动画确实推进到 1、悬停几何没有越界；
 同时做一次**像素缓存新鲜度**检查（清掉缓存键重算，两次像素必须一致）——
 它抓的是「缩放 / 数据变化后 `pixels` 没重算，悬停高亮画在别处」这类缓存 bug。
