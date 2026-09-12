@@ -16,6 +16,7 @@
       下方「镜像内容」是本页把同一张数据表渲染出来的样子，方便肉眼确认读屏看到的是什么。
     </p>
     <div class="card"><canvas id="chart" width="960" height="380"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="row">
       <div class="card">
         <div class="tips">
@@ -31,6 +32,7 @@
     </div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const days = ['6-01', '6-02', '6-03', '6-04', '6-05', '6-06', '6-07'];
       const chart = ICEChart.createChart('chart', {
@@ -63,6 +65,7 @@
       void table;
 
       window.__chart = chart;
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

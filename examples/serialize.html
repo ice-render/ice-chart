@@ -67,11 +67,12 @@
 
     <div class="card">
       <div class="tips" id="meta">快照信息：—</div>
-      <div class="log" id="json" style="max-height: 180px">（导出的 JSON 会显示在这里）</div>
     </div>
+    <div class="card" id="snapshot-panel"></div>
 
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const days = [];
       for (let i = 1; i <= 30; i++) days.push(`6-${String(i).padStart(2, '0')}`);
@@ -102,7 +103,6 @@
 
       const status = document.getElementById('status');
       const meta = document.getElementById('meta');
-      const jsonBox = document.getElementById('json');
       let latest = left.toJSONString();
 
       const setStatus = (text, kind) => {
@@ -120,7 +120,7 @@
 
       document.getElementById('btn-export').addEventListener('click', () => {
         latest = left.toJSONString();
-        jsonBox.textContent = latest.slice(0, 1200) + (latest.length > 1200 ? '\n…（已截断）' : '');
+        if (window.__snapshotPanel) window.__snapshotPanel.refresh();
         refreshMeta();
         setStatus('已导出', 'idle');
       });
@@ -141,7 +141,7 @@
         left.toggleSeries('refund');
         await left.render();
         latest = left.toJSONString();
-        jsonBox.textContent = latest.slice(0, 1200) + '…';
+        if (window.__snapshotPanel) window.__snapshotPanel.refresh();
         refreshMeta();
         setStatus('左图已缩放并隐藏「退款量」，点「还原」看右图是否同步', 'idle');
       });
@@ -154,6 +154,7 @@
 
       window.__charts = { left, right };
       window.__latest = () => latest;
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

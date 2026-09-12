@@ -16,9 +16,11 @@
       <div class="card"><canvas id="polygon" width="560" height="460"></canvas></div>
       <div class="card"><canvas id="circle" width="560" height="460"></canvas></div>
     </div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const indicators = [
         { name: '攻击', max: 100 },
@@ -65,6 +67,7 @@
         chart.on('legend:toggle', (p) => write(`${name} legend ${p.seriesName} → ${p.selected ? '显示' : '隐藏'}`));
       }
       window.__charts = { polygon, circle };
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

@@ -12,9 +12,11 @@
       <code>dataZoom.start/end</code> 只决定**初始**视窗，之后的滚轮缩放、拖拽平移不会重置它。
     </p>
     <div class="card"><canvas id="chart" width="960" height="420"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const start = Date.UTC(2026, 0, 1);
       const pointCount = 720; // 30 天，每小时一个点
@@ -55,6 +57,7 @@
       chart.on('zoom:change', (r) => write(`zoom   ${new Date(r.x[0]).toISOString()} → ${new Date(r.x[1]).toISOString()}`));
       chart.on('brush:end', (r) => write(`brush  完成（mode=zoom，自动应用为数据域）`));
       window.__chart = chart;
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

@@ -13,9 +13,11 @@
       系列通过 <code>yAxisIndex</code> 绑定到某个轴，堆叠也按「轴 + stack 名」分组。
     </p>
     <div class="card"><canvas id="chart" width="960" height="440"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const days = Array.from({ length: 40 }, (_, i) => `D${i + 1}`);
       const volume = days.map((_, i) => Math.round(800 + Math.abs(Math.sin(i / 5)) * 1600 + Math.random() * 300));
@@ -55,6 +57,7 @@
         write(`hover  ${p.seriesName} @ ${p.xValue} = ${p.value}（轴 ${chart.norm.series[p.seriesIndex].axisIndex}）`)
       );
       window.__chart = chart;
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

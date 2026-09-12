@@ -15,8 +15,10 @@
       <div class="card"><canvas id="grouped" width="620" height="400"></canvas></div>
       <div class="card"><canvas id="stacked" width="620" height="400"></canvas></div>
     </div>
+    <div class="card" id="snapshot-panel"></div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const regions = ['华东', '华北', '华南', '西南', '西北', '东北'];
       const base = {
@@ -51,6 +53,7 @@
         ],
       });
       window.__charts = { grouped, stacked };
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

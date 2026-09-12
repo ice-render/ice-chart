@@ -121,3 +121,98 @@ table td {
   font-size: 0.75rem;
   text-align: left;
 }
+
+/* ---------- 序列化 JSON 面板 ---------- */
+
+.snapshot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.snapshot-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.snapshot-meta {
+  color: var(--bs-secondary-color);
+  font-size: 0.75rem;
+}
+
+.snapshot-head .spacer {
+  flex: 1 1 auto;
+}
+
+.snapshot-tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.snapshot-tabs button,
+.snapshot-actions button {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--bs-border-color);
+  background: #fff;
+  color: var(--bs-body-color);
+  cursor: pointer;
+}
+
+.snapshot-tabs button.active {
+  border-color: var(--bs-primary);
+  color: var(--bs-primary);
+  background: rgba(13, 110, 253, 0.08);
+}
+
+.snapshot-actions button:hover,
+.snapshot-tabs button:hover {
+  border-color: var(--bs-primary);
+  color: var(--bs-primary);
+}
+
+.snapshot-json {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  background: #f8f9fa;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: #212529;
+  max-height: 17rem;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.snapshot-json .tok-key {
+  color: #0d6efd;
+}
+
+.snapshot-json .tok-str {
+  color: #198754;
+}
+
+.snapshot-json .tok-num {
+  color: #d63384;
+}
+
+.snapshot-json .tok-bool {
+  color: #fd7e14;
+}
+
+.snapshot-json .tok-null {
+  color: #6c757d;
+}
+
+.snapshot-note {
+  color: var(--bs-secondary-color);
+  font-size: 0.75rem;
+  margin-top: 0.4rem;
+}

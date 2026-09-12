@@ -14,6 +14,7 @@
       所有交互最终都抛出语义事件，业务代码不需要接触任何像素或比例尺。
     </p>
     <div class="card"><canvas id="chart" width="960" height="440"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="row">
       <div class="card">
         <div class="tips">
@@ -33,6 +34,7 @@
     </div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const hours = [];
       for (let i = 0; i < 48; i++) hours.push(`${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
@@ -80,6 +82,7 @@
       chart.on('zoom:change', (r) => write(`zoom   x = [${r.x.map((v) => (typeof v === 'number' ? v.toFixed(1) : v)).join(', ')}]`));
       chart.on('plot:click', () => write('plot   click 空白处'));
       window.__chart = chart;
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

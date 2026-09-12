@@ -13,9 +13,11 @@
     </p>
     <div class="card"><canvas id="chart-a" width="960" height="300"></canvas></div>
     <div class="card"><canvas id="chart-b" width="960" height="300"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       const points = 240;
       const start = Date.UTC(2026, 3, 1);
@@ -61,6 +63,7 @@
       chartA.on('zoom:change', (r) => write(`A zoom   ${new Date(r.x[0]).toISOString()} → ${new Date(r.x[1]).toISOString()}`));
       chartB.on('item:hover', (p) => write(`B hover  ${new Date(p.xValue).toISOString()} = ${p.value}`));
       window.__link = link;
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

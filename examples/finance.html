@@ -16,9 +16,11 @@
       <div class="card"><canvas id="candle" width="640" height="420"></canvas></div>
       <div class="card"><canvas id="heatmap" width="560" height="420"></canvas></div>
     </div>
+    <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
     <script src="./vendor/ice-render.umd.js"></script>
     <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
     <script>
       // ---- K 线：随机游走生成 60 根日 K
       let price = 100;
@@ -95,6 +97,7 @@
       });
       heatmap.on('item:hover', (p) => write(`热力图 ${p.data[0]} · ${p.data[1]} = ${p.data[2]}`));
       window.__charts = { candle, heatmap };
+      mountSnapshotPanel();
     </script>
   </body>
 </html>

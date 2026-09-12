@@ -249,7 +249,33 @@ for (const name of pages) {
     await page.mouse.move(x, y, { steps: 3 });
   });
 
-  report.push({ page: name, consoleErrors: errors });
+  // 序列化 JSON 面板：必须存在、内容是可解析的真实快照、且带版本号
+  const panel = await page.evaluate(() => {
+    const api = window.__snapshotPanel;
+    if (!api) return { present: false };
+    let parsed = null;
+    try {
+      parsed = JSON.parse(api.full);
+    } catch (err) {
+      return { present: true, parseError: String(err && err.message) };
+    }
+    return {
+      present: true,
+      hasVersion: parsed && parsed.version !== undefined,
+      hasOption: !!(parsed && parsed.option),
+      series: parsed && parsed.option && parsed.option.series ? parsed.option.series.length : 0,
+      bytes: api.full.length,
+    };
+  });
+  const panelIssues = [];
+  if (!panel.present) panelIssues.push('snapshot-panel-missing');
+  else if (panel.parseError) panelIssues.push('snapshot-json-unparsable');
+  else {
+    if (!panel.hasVersion) panelIssues.push('snapshot-without-version');
+    if (!panel.hasOption) panelIssues.push('snapshot-without-option');
+  }
+  report.push({ page: name, panel, issues: panelIssues, consoleErrors: errors });
+
   await page.close();
 }
 
