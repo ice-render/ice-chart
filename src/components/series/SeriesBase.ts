@@ -55,6 +55,14 @@ export abstract class SeriesBase extends ChartComponent {
   private cacheKey = '';
   /** 散点等「每个点都必须画」的系列不参与降采样。 */
   protected supportsSampling = true;
+  /**
+   * 是否把绘制裁剪到组件盒（= 本场景的绘图区）。
+   *
+   * 直角坐标系列必须开：缩放后落在窗口外的数据点会被映射到很远的位置，
+   * 不裁剪就会一路画到 y 轴标签、图例甚至画布外面去（用户实测反馈的问题）。
+   * 折线要的是「被绘图区边缘裁掉」，而不是「在边界处断开」，所以只能靠 clip，不能靠过滤点。
+   */
+  protected clipToBox = false;
   private localBoxScratch: number[] = [0, 0, 0, 0];
 
   constructor(series: InternalSeries, props: { left: number; top: number; width: number; height: number; zIndex?: number }) {
@@ -312,6 +320,12 @@ export abstract class SeriesBase extends ChartComponent {
   protected beginDraw(): void {
     this.ctx.beginPath();
     this.ctx.save();
+    if (this.clipToBox) {
+      // 组件盒就是绘图区（系列组件的 left/top/width/height 由 Chart 设成 plot rect）
+      this.ctx.beginPath();
+      this.ctx.rect(0, 0, this.state.width, this.state.height);
+      this.ctx.clip();
+    }
     this.ctx.lineJoin = 'round';
     this.ctx.lineCap = 'round';
     this.ctx.globalAlpha = this.opacity();

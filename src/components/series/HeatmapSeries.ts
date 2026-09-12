@@ -6,6 +6,7 @@ import type { Rect } from '../../internal';
 export class HeatmapSeries extends SeriesBase {
   public seriesType: SeriesType = 'heatmap';
   protected supportsSampling = false;
+  protected clipToBox = true;
   private heatCacheKey = '';
 
   /**

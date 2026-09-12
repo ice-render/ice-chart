@@ -138,4 +138,21 @@ describe('多 y 轴（引擎集成）', () => {
     expect(chart.axisYList).toHaveLength(1);
     expect(chart.norm.yAxes).toHaveLength(1);
   });
+
+  it('keeps bars anchored to their category after zooming (no off-window bars)', async () => {
+    chart = createChart(canvas, OPTION);
+    await chart.render();
+    const bars: any = chart.seriesComponents[0];
+    const before = bars.barRectAt(0);
+    expect(before).not.toBeNull();
+    // 缩放到只保留后两个类目
+    chart.setDomain('x', [2, 3]);
+    await chart.render();
+    // 窗口外的类目必须没有柱子（此前会用数据下标当类目下标，把柱子画到右轴上）
+    expect(bars.barRectAt(0)).toBeNull();
+    expect(bars.barRectAt(3)).not.toBeNull();
+    const rect = bars.barRectAt(3)!;
+    expect(rect.x).toBeGreaterThanOrEqual(0);
+    expect(rect.x + rect.width).toBeLessThanOrEqual(chart.layout.plot.width + 0.5);
+  });
 });

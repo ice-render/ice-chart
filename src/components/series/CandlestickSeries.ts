@@ -6,6 +6,7 @@ import type { Rect } from '../../internal';
 export class CandlestickSeries extends SeriesBase {
   public seriesType: SeriesType = 'candlestick';
   protected supportsSampling = false;
+  protected clipToBox = true;
 
   public hitTestIndex(localX: number, localY: number): number {
     const rects = this.candleRects();

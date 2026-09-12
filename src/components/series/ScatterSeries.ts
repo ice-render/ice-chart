@@ -6,6 +6,7 @@ export class ScatterSeries extends SeriesBase {
   public seriesType: SeriesType = 'scatter';
   /** 散点图的每个点都是图形本身，不参与降采样。 */
   protected supportsSampling = false;
+  protected clipToBox = true;
 
   protected doRender(): void {
     this.rebuildPixels();

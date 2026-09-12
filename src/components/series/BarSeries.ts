@@ -7,6 +7,7 @@ import { hexToRgba } from './LineSeries';
 /** 柱状图（支持分组与堆叠）。 */
 export class BarSeries extends SeriesBase {
   public seriesType: SeriesType = 'bar';
+  protected clipToBox = true;
 
   /** 单根柱子的像素矩形（组件本地坐标）。 */
   public barRectAt(index: number): Rect | null {
@@ -17,7 +18,9 @@ export class BarSeries extends SeriesBase {
     const top = this.effective[index * 2 + 1];
     const base = this.effective[index * 2];
     if (!isFinite(top)) return null;
-    const bandStart = coord.xScale.bandStart(point.xValue, index);
+    // 必须按「类目值」定位，不能传数据下标：类目轴缩放后可见窗口是类目的一个子集，
+    // 用下标会被当成可见窗口内的位置，把窗口外的柱子画到错误的地方（曾因此把高亮框画到右轴上）。
+    const bandStart = coord.xScale.bandStart(point.xValue);
     if (!isFinite(bandStart)) return null;
     const bandWidth = coord.xScale.bandwidth() || coord.xScale.step() * 0.6;
     const slotCount = Math.max(1, this.barSlot.count);

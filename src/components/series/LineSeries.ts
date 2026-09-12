@@ -4,6 +4,8 @@ import type { SeriesType } from '../../types';
 /** 折线 / 面积图。fillArea 为 true 时在折线下方填充到基线（堆叠时基线为前序堆叠值）。 */
 export class LineSeries extends SeriesBase {
   public seriesType: SeriesType = 'line';
+  /** 折线/面积必须裁剪到绘图区：缩放后窗口外的点会被映射到画布之外 */
+  protected clipToBox = true;
   /** 面积填充（面积系列恒为 true）。 */
   public fillArea = false;
 

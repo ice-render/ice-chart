@@ -34,18 +34,16 @@ export class BandScale implements Scale {
   }
 
   private indexOf(value: any): number {
-    let index = this.domain.indexOf(value);
+    const index = this.domain.indexOf(value);
     if (index === -1) {
       // 宽松匹配：数字与字符串混用（CSV 解析出来的类目常是字符串）
       for (let i = 0; i < this.domain.length; i++) {
         if (String(this.domain[i]) === String(value)) return i;
       }
-      index = -1;
     }
-    if (index === -1 && isFinite(Number(value))) {
-      const n = Number(value);
-      if (n >= 0 && n < this.domain.length && Math.floor(n) === n) index = n;
-    }
+    // 注意：这里**不要**再退化成「把数值当类目下标」——
+    // 数值类目（x 为 0/1/2…）在缩放后可见窗口是类目的子集，
+    // 用「值 == 下标」兜底会把窗口外的类目锚到窗口内的位置上（柱子会画错位置）。
     return index;
   }
 
