@@ -2,6 +2,19 @@
 
 ## 0.17.0
 
+### 发布到 npm（首个公开发布版本）
+
+- 版本号从 `0.1.0` 对齐到 **`0.17.0`** —— 之前只发仓库、没发 npm，`package.json` 一直没跟着
+  CHANGELOG 走，这次把两边并成一条线。
+- 补齐发布元数据：`license: MIT`、`homepage`、`bugs`、描述与关键词（原先只有 `files: dist`）。
+- 新增 **`prepublishOnly: npm run verify`**：`dist` 是构建产物（不进 git），
+  没有这道闸门就可能把上一次的旧产物甚至空目录发上去。
+- 体积分析图从 `dist/stats.html` 挪到 `.stats/bundle.html`：`dist` 是发布内容，
+  `files: ["dist/**/*"]` 会把它一起打包（实测白送 187.8 kB 的开发产物）。
+- CI 不再克隆引擎源码（引擎已经是 npm 依赖），改成 `npm ci && npm run verify`。
+- README 面向 npm 用户重写开头：徽章 / 头图 / 30 秒上手（含 UMD + CDN 写法）/
+  交互与序列化截图 / 六个大屏的对比图，截图放在 `docs/screenshots/`（不进 npm 包）。
+
 ### 依赖：引擎改为 npm 安装
 
 - `ice-render` 从 `file:../ice-render` 改成 **npm 依赖**（`peerDependencies` + `devDependencies`

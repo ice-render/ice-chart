@@ -54,7 +54,8 @@ const CommonPlugins = [
       },
     },
   }),
-  env === 'production' && visualizer({ filename: 'dist/stats.html' }),
+  // 体积分析图是开发产物，别放进 dist —— dist 是要发到 npm 的（files 只收 dist，多一个文件就多一份噪音）
+  env === 'production' && visualizer({ filename: '.stats/bundle.html' }),
 ].filter(Boolean);
 
 /** @type {import('rollup').RollupOptions[]} */

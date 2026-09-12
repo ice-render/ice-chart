@@ -1,11 +1,24 @@
 # ICEChart · 交互式图表库
 
-构建在 [ice-render](https://gitee.com/ice-render/ice-render) Canvas 引擎之上的**交互式图表库**。
+[![npm](https://img.shields.io/npm/v/ice-chart.svg?label=npm)](https://www.npmjs.com/package/ice-chart)
+[![downloads](https://img.shields.io/npm/dm/ice-chart.svg)](https://www.npmjs.com/package/ice-chart)
+[![license](https://img.shields.io/npm/l/ice-chart.svg)](./LICENSE)
+[![CI](https://github.com/ice-render/ice-chart/actions/workflows/ci.yml/badge.svg)](https://github.com/ice-render/ice-chart/actions/workflows/ci.yml)
+
+构建在 [ice-render](https://github.com/ice-render/ice-render) Canvas 引擎之上的**交互式图表库**。
 
 它不是「把数据画成图」的又一个图表库 —— 命中测试、事件派发、嵌套坐标系、脏矩形局部重绘
 全部交给 ice-render 引擎，图表层只负责把「数据 ↔ 像素 ↔ 语义事件」这三件事打通。
 于是悬停、点击下钻、框选、缩放平移、图例联动、跨图联动、键盘导航都是**内建能力**，
 而不是事后打补丁的插件。
+
+![运营监控大屏](./docs/screenshots/hero.png)
+
+## 快速开始
+
+```bash
+npm install ice-chart ice-render
+```
 
 ```ts
 import { createChart } from 'ice-chart';
@@ -14,9 +27,9 @@ const chart = createChart('canvas-id', {
   title: { text: '近 30 天流量' },
   tooltip: { trigger: 'axis' },
   interaction: {
-    hover: { enabled: true, dimOthers: true },
-    select: { enabled: true, mode: 'multiple' },
-    brush: { enabled: true, axes: 'x', mode: 'zoom' },
+    hover: { enabled: true, dimOthers: true },   // 悬停高亮 + 压暗其他系列
+    select: { enabled: true, mode: 'multiple' }, // 点多选（或键盘 Enter）
+    brush: { enabled: true, axes: 'x', mode: 'zoom' }, // 拖拽框选，直接当缩放用
     zoom: { enabled: true, axes: 'x', wheel: true },
     pan: { enabled: true, axes: 'x' },
     keyboard: true,
@@ -34,6 +47,21 @@ chart.on('item:click', (params) => {
 });
 ```
 
+`ice-render` 是 peer 依赖：一个页面上多张图共用同一个引擎实例池，跨图联动才有统一的事件语义。
+包同时提供 ESM / CJS / UMD 三种产物与完整类型声明（`dist/types`），
+Vite / webpack / Rollup 直接 import，Node 侧 `require('ice-chart')` 也拿得到 CJS。
+
+浏览器直接用（CDN 或本地文件，注意引擎要先于图表引入）：
+
+```html
+<canvas id="chart" width="960" height="420"></canvas>
+<script src="https://unpkg.com/ice-render/dist/index.umd.js"></script>
+<script src="https://unpkg.com/ice-chart/dist/index.umd.js"></script>
+<script>
+  ICEChart.createChart('chart', { series: [{ type: 'line', data: [1, 3, 2] }] });
+</script>
+```
+
 ## 设计原则
 
 **0. 视觉基调是 Bootstrap**
@@ -42,6 +70,8 @@ chart.on('item:click', (params) => {
 gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 Bootstrap 页面里
 与按钮、卡片、表格是同一套视觉语言。需要换品牌色时用 `theme: { colorPalette: [...] }` 覆盖即可，
 或直接改 `BOOTSTRAP_TOKENS` 派生自己的主题。
+
+![Bootstrap 风格默认主题](./docs/screenshots/charts-light.png)
 
 **1. 交互是一等公民，命中判定写进组件**
 
@@ -59,6 +89,11 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 鼠标在数据点上移动时，只有 `Highlight` / `Crosshair` / `Tooltip` 这三个覆盖层变脏，
 脏矩形就是标记环那一小块像素 —— 折线与柱形完全不动。压暗其他系列只在「悬停系列变了」时
 写一次 state，不会每帧把所有系列置脏。
+
+下图是同一个页面上同时打开悬停 / 框选 / dataZoom 的样子：框选区域是独立覆盖层，
+折线本身没有重绘，底部是语义事件日志。
+
+![框选 · 十字准星 · 提示框 · 事件日志](./docs/screenshots/interaction.png)
 
 **4. 声明式 spec 可序列化**
 
@@ -93,25 +128,6 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 大数据 | LTTB 降采样 + 二分命中 | 5 万点 × 3 系列构建 35ms，每条曲线只绘制约 2 点/像素 |
 | 无障碍 | 数据表镜像 + aria-live 播报 | `attachA11yMirror()` / `getDataTable()` / `getA11yTree()` |
 | 序列化 | `toJSON` / `fromJSONString` | 配置 + 缩放窗口 + 图例显隐状态 |
-
-## 安装
-
-```bash
-npm install ice-chart ice-render
-```
-
-`ice-render` 是 peer 依赖：一个页面上多张图共用同一个引擎实例池，跨图联动才有统一的事件语义。
-
-浏览器直接引入（UMD）：
-
-```html
-<canvas id="chart" width="960" height="420"></canvas>
-<script src="./ice-render.umd.js"></script>
-<script src="./ice-chart.umd.js"></script>
-<script>
-  const chart = ICEChart.createChart('chart', { series: [{ type: 'line', data: [1, 3, 2] }] });
-</script>
-```
 
 ## 事件
 
@@ -243,6 +259,11 @@ ICEChart.createChart('chart', {
 支持 `+ - * / % ^`、`sin/cos/tan/exp/log/sqrt/abs/min/max/clamp/...`、常量 `pi/e/tau`，
 以及 MATLAB 习惯的**隐式乘法**（`2x`、`3sin(x)`、`2(x+1)`）。写错了会带上位置指针报错，
 但**不会把图表搞崩**：`chart.expressionErrors()` 把原因交给表单去标红。
+
+配套示例 [examples/mini-matlab.html](./examples/mini-matlab.html) 可以在页面上直接改公式、
+拖参数、切换参数曲线与极坐标曲线：
+
+![迷你 MATLAB](./docs/screenshots/mini-matlab.png)
 
 ### 怎么知道用户写错了公式
 
@@ -383,6 +404,11 @@ const chart = ICEChart.restore('canvas-2', json, {
 });
 ```
 
+每个示例页底部都挂着这块面板，直接显示**当前图表的真实快照**（多图页面按图切换 tab）。
+它不是调试用的字符串，而是 `toJSON()` 的原样输出 —— 缩放、平移、图例切换之后会自动刷新：
+
+![序列化 JSON 面板](./docs/screenshots/snapshot.png)
+
 **为什么不用引擎的组件树？** `ice.toJSONString()` 确实能存下组件树（几何 + 样式），
 但组件树是 option 的**渲染投影**：没有比例尺、数据点、命中缓存这些语义，
 反序列化回来只是一棵空壳（未注册类型会被整段跳过）。所以 ice-chart 刻意让
@@ -431,6 +457,11 @@ K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件
 大数据量（5 万点降采样）、无障碍、跨图联动、迷你 MATLAB，以及 **6 个深色大屏**
 （运营 / 设备 / 行情 / 能源 / 物流 / 函数实验）。
 
+六个大屏共用同一套脚手架（`examples/assets/dash-kit.js`：12 列栅格 + 面板组件 + 数据流主循环），
+每个大屏只换一套配色身份与面板清单 —— 底色与主色同源，是「同一个库、不同视觉身份」的六种样子：
+
+![六个大屏案例](./docs/screenshots/dashboards.png)
+
 每个示例页在图表下方都有两块面板：
 
 - **序列化 JSON**（`examples/assets/snapshot-panel.js`）：实时显示 `chart.toJSON()` 的**真实内容**，
@@ -469,6 +500,12 @@ npm run audit:hover -- ./.hover-sweep       # 18 种图表逐个数据点悬停�
 交互层把 `hoverIndex` 下发到了对应系列、反馈动画确实推进到 1、悬停几何没有越界；
 同时做一次**像素缓存新鲜度**检查（清掉缓存键重算，两次像素必须一致）——
 它抓的是「缩放 / 数据变化后 `pixels` 没重算，悬停高亮画在别处」这类缓存 bug。
+
+README 里的截图也是脚本拍的（同一个浏览器环境、同一条示例服务）：
+
+```bash
+node scripts/readme-shots.mjs        # 重新生成 docs/screenshots/*.png
+```
 
 测试用例覆盖的关键路径：比例尺换算、数据归一化与堆叠、布局量测、系列命中判定，
 以及「引擎命中测试 → 数据下标 → 语义事件」这条端到端链路（含多图隔离与联动回归）。

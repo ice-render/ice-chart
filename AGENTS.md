@@ -102,6 +102,9 @@ npm run audit:interactions -- ./.audit
 高亮在绘图区内、没有饱和色墨迹跑到坐标轴带上）。新增交互能力时请同步补一步，
 新增示例页时请同步加进两个脚本的 `pages` 列表，否则这个门禁覆盖不到。
 
+README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境，产物在 `docs/screenshots/`）：
+改了主题 / 大屏配色 / 示例布局之后请重跑，别让文档里的图停在旧版本。
+
 ## 视觉基调
 
 - 默认主题 = **Bootstrap 5**（`src/theme/chartTheme.ts` 的 `BOOTSTRAP_TOKENS`）。

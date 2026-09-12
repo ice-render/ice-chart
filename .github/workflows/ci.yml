@@ -13,13 +13,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # ice-chart 通过 file: 链接本地 ice-render 仓库；CI 上先克隆同级目录。
-      - name: 准备 ice-render（peer 依赖）
-        run: |
-          git clone --depth 1 https://gitee.com/ice-render/ice-render.git ../ice-render || \
-          git clone --depth 1 https://github.com/ice-render/ice-render.git ../ice-render
-          cd ../ice-render && npm install --no-audit --no-fund && npm run build
+      # 引擎走 npm 依赖（peer + dev），CI 只装 chart 自己的依赖。
+      # 想连引擎源码一起测：把 devDependencies 里那条改成 file:../ice-render，
+      # 并把引擎仓库克隆到同级目录。
       - name: 安装依赖
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: 全量门禁
         run: npm run verify
