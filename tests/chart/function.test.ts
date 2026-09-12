@@ -162,6 +162,35 @@ describe('函数绘图（引擎集成）', () => {
     expect(errors[0].message).toMatch(/缺少右括号/);
   });
 
+  it('未定义变量：诊断报错、曲线不画、但图表不崩', async () => {
+    const c = await mount({
+      ...OPTION,
+      series: [{ id: 'typo', type: 'function', name: 'typo', expression: 'b*sin(x)', params: { a: 1 } }],
+    });
+    const diagnostics = c.expressionDiagnostics();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].seriesId).toBe('typo');
+    const codes = diagnostics[0].diagnostics.map((d) => d.code);
+    expect(codes).toContain('unknown-variable');
+    expect(codes).toContain('unused-parameter');
+    // 变量名写错 → 曲线画不出来（而不是「悄悄画成 0」）
+    expect(c.seriesComponents[0].pixelAt(10)).toBeNull();
+    // 报错只有 error 级：警告不该混进「红字」
+    expect(c.expressionErrors()).toHaveLength(1);
+    expect(c.expressionErrors()[0].message).toMatch(/未定义的变量/);
+  });
+
+  it('警告级诊断不阻断绘制（参数没用上照样画）', async () => {
+    const c = await mount({
+      ...OPTION,
+      series: [{ id: 'w', type: 'function', name: 'w', expression: 'sin(x)', params: { a: 1 } }],
+    });
+    const diagnostics = c.expressionDiagnostics();
+    expect(diagnostics[0].diagnostics.map((d) => d.code)).toEqual(['unused-parameter']);
+    expect(c.expressionErrors()).toEqual([]);
+    expect(c.seriesComponents[0].pixelAt(10)).not.toBeNull();
+  });
+
   it('参数曲线：曲线闭合、可命中、提示框给 (x, y)', async () => {
     const c = await mount({
       legend: { show: false },

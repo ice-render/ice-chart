@@ -5,6 +5,7 @@ import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
 import { compileExpression } from '../expr/expr';
+import { diagnoseExpression } from '../expr/diagnostics';
 import { robustRange } from '../expr/sample';
 
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 12, left: 12 };
@@ -825,22 +826,44 @@ function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?
     const finiteXs = xs.filter((v) => isFinite(v));
     if (finiteXs.length) series.domainXValues = [Math.min(...finiteXs), Math.max(...finiteXs)];
   }
+  // 表达式诊断：语法 → 未定义变量 / 参数没用上 → 整段画不出来 / 输出恒定。
+  // 图表永远不崩：错误只挂在这里，表单可以标红，控制台不必猜。
+  const params = option.params || {};
+  let diagnostics: ReturnType<typeof diagnoseExpression> = [];
   if (option.type === 'function') {
-    // 表达式编译失败时把原因带出来（图表不崩，表单可以提示）
-    try {
-      compileExpression(String(option.expression || ''));
-    } catch (err: any) {
-      series.expressionError = err && err.message ? String(err.message) : String(err);
-    }
+    diagnostics = diagnoseExpression(String(option.expression || ''), {
+      variable: 'x',
+      params,
+      values: ys,
+    });
   } else {
-    try {
-      compileExpression(String(option.xExpression || ''));
-      compileExpression(String(option.yExpression || ''));
-    } catch (err: any) {
-      series.expressionError = err && err.message ? String(err.message) : String(err);
-    }
+    const sourceX = String(option.xExpression || '');
+    const sourceY = String(option.yExpression || '');
+    const varsX = expressionVariables(sourceX);
+    const varsY = expressionVariables(sourceY);
+    const withPrefix = (list: ReturnType<typeof diagnoseExpression>, prefix: string) =>
+      list.map((item) => ({ ...item, message: `${prefix}：${item.message}` }));
+    diagnostics = [
+      // x(t) 与 y(t) 是两条表达式：各自的错误分别报，参数「没用上」按两条的并集判断
+      ...withPrefix(diagnoseExpression(sourceX, { variable: 't', params, values: xs, additionalVariables: varsY }), 'x(t)'),
+      ...withPrefix(diagnoseExpression(sourceY, { variable: 't', params, values: ys, additionalVariables: varsX }), 'y(t)'),
+    ];
+  }
+  if (diagnostics.length) {
+    series.expressionDiagnostics = diagnostics;
+    const firstError = diagnostics.find((item) => item.severity === 'error');
+    if (firstError) series.expressionError = firstError.message;
   }
   void context;
+}
+
+/** 取表达式的自由变量；编译失败就返回空（错误由诊断负责报）。 */
+function expressionVariables(source: string): string[] {
+  try {
+    return compileExpression(source).variables;
+  } catch (err) {
+    return [];
+  }
 }
 
 function buildXDomain(

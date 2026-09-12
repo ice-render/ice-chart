@@ -77,6 +77,13 @@ export interface InternalSeries {
   domainXValues?: number[];
   /** 表达式编译失败时的原因（图表不崩，但要把错误暴露给表单 / 调用方）。 */
   expressionError?: string;
+  /** 表达式诊断（语法 / 未定义变量 / 整段画不出来 / 输出恒定），交给表单去标红与提示。 */
+  expressionDiagnostics?: Array<{
+    code: string;
+    severity: 'error' | 'warning';
+    message: string;
+    position?: number;
+  }>;
 }
 
 export interface InternalAxis {

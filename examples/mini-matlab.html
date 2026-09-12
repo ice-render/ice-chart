@@ -34,8 +34,27 @@
         border-color: #dc3545;
         background: rgba(220, 53, 69, 0.06);
       }
+      .fx-field input[type='text'].warned {
+        border-color: #ffc107;
+        background: rgba(255, 193, 7, 0.08);
+      }
       .fx-field input[type='range'] {
         flex: 1 1 auto;
+      }
+      .fx-field button {
+        white-space: nowrap;
+        font: inherit;
+        font-size: 0.75rem;
+        padding: 0.2rem 0.5rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.25rem;
+        background: #fff;
+        color: var(--bs-body-color);
+        cursor: pointer;
+      }
+      .fx-field button:hover {
+        border-color: var(--bs-primary);
+        color: var(--bs-primary);
       }
       .fx-value {
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -55,10 +74,33 @@
       }
       .fx-error {
         margin-top: 0.5rem;
-        color: #dc3545;
         font-size: 0.75rem;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .fx-status {
+        font-size: 0.75rem;
+        color: var(--bs-secondary-color);
+        margin-top: 0.5rem;
+      }
+      .fx-status .ok {
+        color: #198754;
+      }
+      .fx-message {
+        display: flex;
+        gap: 0.35rem;
+        align-items: flex-start;
+        padding: 0.25rem 0;
         white-space: pre-wrap;
+      }
+      .fx-message .badge {
+        flex: 0 0 auto;
+        font-weight: 600;
+      }
+      .fx-message.error {
+        color: #dc3545;
+      }
+      .fx-message.warning {
+        color: #997404;
       }
     </style>
   </head>
@@ -121,11 +163,20 @@
           <label for="adaptive">自适应细分</label>
           <input type="checkbox" id="adaptive" checked />
         </div>
+        <div class="fx-field">
+          <label>故意写错看看</label>
+          <button type="button" id="btn-bad-syntax">缺右括号</button>
+          <button type="button" id="btn-bad-var">未定义变量</button>
+          <button type="button" id="btn-bad-nan">整段开不出来</button>
+        </div>
       </div>
-      <div class="fx-error" id="error"></div>
     </div>
 
     <div class="card"><canvas id="functions" width="960" height="460"></canvas></div>
+    <div class="card">
+      <div class="fx-status" id="status"></div>
+      <div class="fx-error" id="messages"></div>
+    </div>
 
     <div class="card">
       <div class="snapshot-head">
@@ -258,6 +309,8 @@
         const sweepOn = document.getElementById('sweep').checked;
         const a = Number(document.getElementById('param-a').value);
         const expressions = ['expr1', 'expr2', 'expr3'].map((id) => document.getElementById(id).value.trim());
+        // 参数按名字自动挂上：表达式里用到了才传（否则会一直提示「参数没用上」）
+        const usesParam = (expression, name) => new RegExp(`(^|[^A-Za-z0-9_])${name}([^A-Za-z0-9_]|$)`).test(expression);
         const adaptive = document.getElementById('adaptive').checked;
         const samples = readSamples();
         const colors = ['#0d6efd', '#dc3545', '#198754'];
@@ -271,7 +324,7 @@
             domain: [d0, d1],
             samples,
             adaptive,
-            params: { a },
+            params: usesParam(expression, 'a') ? { a } : {},
             color: colors[i],
             lineWidth: 2,
             ...(i === 1 && sweepOn ? { sweep: { name: 'a', from: -3, to: 3, duration: 2600, mode: 'pingpong' } } : {}),
@@ -281,16 +334,53 @@
         showErrors();
       }
 
+      /**
+       * 把表达式诊断显示出来。
+       *
+       * 三层都在这里体现：语法错误（带位置指针）、未定义变量、整段画不出来；
+       * 警告级（参数没用上 / 输出恒定）用琥珀色，不阻断绘制。
+       * 注意：消息里嵌着用户输入的原文，所以一律用 textContent 构建，不用 innerHTML。
+       */
       function showErrors() {
-        const errors = chart.expressionErrors();
-        const box = document.getElementById('error');
-        box.textContent = errors.length ? errors.map((e) => e.message).join('\n') : '';
+        const diagnostics = chart.expressionDiagnostics();
         const ids = ['expr1', 'expr2', 'expr3'];
-        ids.forEach((id) => document.getElementById(id).classList.remove('invalid'));
-        for (const error of errors) {
-          const index = Number(String(error.seriesId).replace('f', '')) - 1;
-          if (ids[index]) document.getElementById(ids[index]).classList.add('invalid');
+        const inputs = ids.map((id) => document.getElementById(id));
+        inputs.forEach((el) => el.classList.remove('invalid', 'warned'));
+
+        const box = document.getElementById('messages');
+        box.textContent = '';
+        let errorSeries = 0;
+        let warningSeries = 0;
+        for (const entry of diagnostics) {
+          const index = Number(String(entry.seriesId).replace('f', '')) - 1;
+          const hasError = entry.diagnostics.some((d) => d.severity === 'error');
+          if (hasError) errorSeries++;
+          else warningSeries++;
+          if (inputs[index]) inputs[index].classList.add(hasError ? 'invalid' : 'warned');
+          for (const item of entry.diagnostics) {
+            const row = document.createElement('div');
+            row.className = `fx-message ${item.severity}`;
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = item.severity === 'error' ? '✕' : '!';
+            const text = document.createElement('span');
+            text.textContent = `y${index + 1}：${item.message}`;
+            row.appendChild(badge);
+            row.appendChild(text);
+            box.appendChild(row);
+          }
         }
+
+        const total = Number(document.getElementById('expr1') ? 3 : 0);
+        const status = document.getElementById('status');
+        status.textContent = '';
+        const summary = document.createElement('span');
+        summary.className = errorSeries ? '' : 'ok';
+        summary.textContent =
+          `已绘制 ${total - errorSeries} / ${total} 条曲线` +
+          (errorSeries ? `，${errorSeries} 条有错误（不会画出来）` : '') +
+          (warningSeries ? `，${warningSeries} 条有警告（仍会绘制）` : '');
+        status.appendChild(summary);
       }
 
       ['expr1', 'expr2', 'expr3'].forEach((id) => {
@@ -308,12 +398,27 @@
       document.getElementById('samples').addEventListener('change', () => syncFunctions(false));
       document.getElementById('adaptive').addEventListener('change', () => syncFunctions(false));
 
+      // 演示：故意写错，看看诊断怎么提示
+      const badSamples = [
+        ['#btn-bad-syntax', 'sin(x'],
+        ['#btn-bad-var', 'b*sin(x)'],
+        ['#btn-bad-nan', 'sqrt(-1-x^2)'],
+      ];
+      badSamples.forEach(([selector, expression]) => {
+        document.querySelector(selector).addEventListener('click', () => {
+          document.getElementById('expr1').value = expression;
+          syncFunctions(true);
+          write(`写了一个错误公式：${expression}`);
+        });
+      });
+
       chart.on('item:hover', (p) => write(`函数 hover  x = ${Number(p.xValue).toFixed(3)}  y = ${Number(p.value).toFixed(3)}`));
       chart.on('zoom:change', () => write('缩放 / 平移：曲线按新的可视区间重新采样'));
       parametric.on('item:hover', (p) => write(`参数曲线 hover  ${p.name}`));
 
       window.__chart = chart;
       window.__charts = { functions: chart, parametric };
+      showErrors();
       mountSnapshotPanel();
     </script>
   </body>

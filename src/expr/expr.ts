@@ -13,12 +13,17 @@
  * - **隐式乘法**：`2x`、`3sin(x)`、`2(x+1)`、`2pi`（MATLAB 习惯）。
  */
 
+/** 编译失败的原因分类：调用方可以据此做不同的提示（不用解析错误文本）。 */
+export type ExpressionErrorCode = 'empty' | 'syntax' | 'unknown-character' | 'unknown-function' | 'arity';
+
 export class ExpressionError extends Error {
   public position: number;
-  constructor(message: string, position: number, source: string) {
+  public code: ExpressionErrorCode;
+  constructor(message: string, position: number, source: string, code: ExpressionErrorCode = 'syntax') {
     super(`[ice-chart] 表达式错误：${message}（位置 ${position}）\n  ${source}\n  ${' '.repeat(Math.max(0, position))}^`);
     this.name = 'ExpressionError';
     this.position = position;
+    this.code = code;
   }
 }
 
@@ -160,7 +165,7 @@ function tokenize(source: string): Token[] {
       i++;
       continue;
     }
-    throw new ExpressionError(`无法识别的字符「${ch}」`, i, source);
+    throw new ExpressionError(`无法识别的字符「${ch}」`, i, source, 'unknown-character');
   }
   tokens.push({ type: 'end', value: '', position: source.length });
   return tokens;
@@ -178,7 +183,7 @@ class Parser {
   }
 
   public parse(): Node {
-    if (this.peek().type === 'end') throw new ExpressionError('表达式是空的', 0, this.source);
+    if (this.peek().type === 'end') throw new ExpressionError('表达式是空的', 0, this.source, 'empty');
     const node = this.parseSum();
     const token = this.peek();
     if (token.type !== 'end') throw new ExpressionError(`多余的内容「${token.value}」`, token.position, this.source);
@@ -278,7 +283,7 @@ class Parser {
       const name = token.value;
       if (this.peek().type === 'lparen') {
         const arity = FUNCTIONS[name];
-        if (arity === undefined) throw new ExpressionError(`未知函数「${name}」`, token.position, this.source);
+        if (arity === undefined) throw new ExpressionError(`未知函数「${name}」`, token.position, this.source, 'unknown-function');
         this.next();
         const args: Node[] = [this.parseSum()];
         while (this.peek().type === 'comma') {
@@ -289,7 +294,12 @@ class Parser {
         if (close.type !== 'rparen') throw new ExpressionError(`函数「${name}」缺少右括号`, close.position, this.source);
         this.next();
         if (args.length !== arity) {
-          throw new ExpressionError(`函数「${name}」需要 ${arity} 个参数，收到 ${args.length} 个`, token.position, this.source);
+          throw new ExpressionError(
+            `函数「${name}」需要 ${arity} 个参数，收到 ${args.length} 个`,
+            token.position,
+            this.source,
+            'arity'
+          );
         }
         return { kind: 'call', name, args };
       }

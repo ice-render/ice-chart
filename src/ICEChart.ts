@@ -253,15 +253,33 @@ export class ICEChart {
   }
 
   /**
-   * 函数绘图 / 参数曲线的表达式错误（编译失败的原因）。
+   * 函数绘图 / 参数曲线的表达式诊断（**回答「用户是不是写错了公式」**）。
    *
-   * 表达式来自用户输入，编译失败**不会**让图表崩掉（那会让表单很难用），
-   * 但错误必须能被拿到：表单可以据此标红，控制台也不必猜。
+   * 三类都覆盖：
+   * - `error`：语法错误（带位置）、未定义的变量、在当前区间内没有任何可绘制的值；
+   * - `warning`：参数定义了没用上、输出恒定（画出来是一条水平线）。
+   *
+   * 表达式来自用户输入，写错**不会**让图表崩掉（那会让表单很难用），
+   * 但错误必须能被拿到：表单据此标红 / 提示，控制台不必猜。
    */
+  public expressionDiagnostics(): Array<{ seriesId: string; diagnostics: NonNullable<InternalSeries['expressionDiagnostics']> }> {
+    const out: Array<{ seriesId: string; diagnostics: NonNullable<InternalSeries['expressionDiagnostics']> }> = [];
+    for (const series of this.norm.series) {
+      if (series.expressionDiagnostics && series.expressionDiagnostics.length) {
+        out.push({ seriesId: series.id, diagnostics: series.expressionDiagnostics });
+      }
+    }
+    return out;
+  }
+
+  /** 只取错误（标红用）。需要警告（提示用）请用 `expressionDiagnostics()`。 */
   public expressionErrors(): Array<{ seriesId: string; message: string }> {
     const out: Array<{ seriesId: string; message: string }> = [];
     for (const series of this.norm.series) {
-      if (series.expressionError) out.push({ seriesId: series.id, message: series.expressionError });
+      if (!series.expressionDiagnostics) continue;
+      for (const diagnosis of series.expressionDiagnostics) {
+        if (diagnosis.severity === 'error') out.push({ seriesId: series.id, message: diagnosis.message });
+      }
     }
     return out;
   }

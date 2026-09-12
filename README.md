@@ -179,6 +179,31 @@ ICEChart.createChart('chart', {
 以及 MATLAB 习惯的**隐式乘法**（`2x`、`3sin(x)`、`2(x+1)`）。写错了会带上位置指针报错，
 但**不会把图表搞崩**：`chart.expressionErrors()` 把原因交给表单去标红。
 
+### 怎么知道用户写错了公式
+
+`chart.expressionDiagnostics()` 把三层检查合成一份结果（`error` 画不出来 / `warning` 多半不是本意）：
+
+| 层 | code | 例子 | 级别 |
+| --- | --- | --- | --- |
+| 语法 | `syntax` / `unknown-character` / `unknown-function` / `arity` / `empty` | `sin(x`、`foo(x)`、`sin(1,2)` | error（带字符位置） |
+| 静态 | `unknown-variable` | `b*sin(x)` 但没定义 `b` | error |
+| 静态 | `unused-parameter` | `params: {a: 1}` 但表达式里没有 `a` | warning |
+| 运行 | `no-finite-values` | 整段 `sqrt(-1-x^2)`、`log(0*x-1)` | error |
+| 运行 | `constant-value` | `sin(0)`，画出来是一条水平线 | warning |
+
+```ts
+for (const { seriesId, diagnostics } of chart.expressionDiagnostics()) {
+  for (const d of diagnostics) {
+    // d.severity: 'error' | 'warning'；d.code 见上表；d.position 只有语法类才有
+    markInputRed(seriesId, d.message + (d.position === undefined ? '' : `（位置 ${d.position}）`));
+  }
+}
+chart.expressionErrors(); // 只取 error（标红用）
+```
+
+诊断**永远不让图表崩**（一个手滑的输入不该把整张图搞没）；有静态错误时不再跑运行层检查，
+避免「`b` 没定义」连带报一条「整段画不出来」这种症状级联。
+
 几个刻意的设计：
 
 - **按可视区间采样**：缩放之后按新的 x 区间重新采样并在曲率大的地方自适应加点，

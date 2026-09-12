@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.12.2
+
+回答一个问题：**怎么知道用户有没有胡乱输入公式**。
+
+### 新增
+
+- **表达式诊断 `chart.expressionDiagnostics()`**（`src/expr/diagnostics.ts`，纯函数）：
+  三层检查合成一份结构化结果，交给表单标红 / 提示：
+  1. **语法层**：编译失败（带字符位置），按 `ExpressionErrorCode` 分类
+     （`syntax` / `unknown-character` / `unknown-function` / `arity` / `empty`）；
+  2. **静态层**：`unknown-variable`（**以前最坑的一类**：`b*sin(x)` 里 b 没定义，
+     曲线静默消失，用户只看到一片空白）、`unused-parameter`（参数定义了没用上）；
+  3. **运行层**：`no-finite-values`（整段开不出来：负数开方 / 对 0 取对数 / 分母恒为 0）、
+     `constant-value`（输出恒定，画出来是一条水平线）。
+- 严重级别区分 `error`（画不出来）/ `warning`（画出来了但多半不是本意）；
+  `errorsOf()` / `warningsOf()` 便于筛选；`expressionErrors()` 保留为「只要错误」的快捷方式。
+- 示例页加了「故意写错看看」三个按钮（缺右括号 / 未定义变量 / 整段开不出来），
+  现场演示三类提示；状态行给出「已绘制 2 / 3 条曲线，1 条有错误」。
+
+### 修复
+
+- **级联报错**：`b*sin(x)` 以前会同时报「未定义变量」和「整段画不出来」，
+  用户看到的是症状不是根因。现在有静态错误时不再跑运行层检查。
+
 ## 0.12.1
 
 补齐「数学图」最要紧的一块：**等比坐标**（MATLAB 的 `axis equal`）。
