@@ -125,6 +125,29 @@ npm run audit:interactions -- ./.audit
 8. 测试三类：纯函数（归一化 / 几何）、组件命中、引擎集成（真实 hitTest + 事件）；
    再加一个示例页并把页面名加进 `scripts/audit-interactions.mjs` 的 pages 列表。
 
+## 动画（改动画相关代码前必读）
+
+- **三段式配置**：`option.animation.enter / update / highlight`，归一化在 `normalizeAnimation()`；
+  扁平写法（`duration/easing/stagger`）等价于 `enter`。新增动画能力请接到这套配置上，不要另起一套参数。
+- **错峰靠「每项自己的进度」**：`SeriesBase.itemProgress`（`computeItemProgress()` / `progressFor()`），
+  不要为每个数据点建一个组件（那样组件数会爆）。
+- **画布缓存键必须带动画进度**：任何覆写 `rebuildPixels` 的系列，键一律走
+  `this.buildSeriesKey([...几何参数])` —— 它会把 `progress` / 阶段 / 错峰拼进去。
+  这条曾被六个系列同时违反，表现为「动画只动第一帧，之后冻住」（外部完全看不出来，只有逐帧采样才发现）。
+- **入场动画只在 `enter` 阶段做「画出来」这类形态**：`isEntering()` 判断。
+  更新阶段截断折线会变成「重画」而不是「折点动起来」。
+- **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。
+  `ICEChart.domainTransition` + `stepDomainTransition()` 每帧按系列进度插值数据域；
+  过渡期间同步组件必须传 `preserveAnimation=true`（只换 series 引用，不清 `fromEffective`），
+  否则值插值会断。
+- **`finishAnimations()` 必须同时取消引擎补间**（把 `props.animations[*].finished = true` 并从
+  AnimationManager 摘掉），否则下一帧引擎又把 progress 写回去。
+- **动效偏好是产品能力**：`setMotionPreference('auto' | 'instant' | 'full')`，
+  `auto` 跟随 `prefers-reduced-motion`。测试通过 `tests/setup/canvas-env.ts` 全局设为 `instant`，
+  这样既有断言确定、也快；动画的时序行为另有 `tests/chart/animation.test.ts` 覆盖。
+- **不要把动画放到「不可见的驱动组件」上**：实测证明引擎补间期间的 `interactive=false`
+  只存在于同步块内，动画与命中互不影响。
+
 ## 已实现 / 未实现
 
 已实现：直角坐标 / 极坐标（饼图、玫瑰图）/ 雷达图 / 桑基图；多 y 轴；dataZoom 滑块；

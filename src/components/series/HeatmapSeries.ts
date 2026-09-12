@@ -20,7 +20,7 @@ export class HeatmapSeries extends SeriesBase {
       this.pixels = new Float64Array(0);
       return;
     }
-    const key = [n, coord.plot.width, coord.plot.height, String(coord.yScale.domain.join(','))].join('|');
+    const key = this.buildSeriesKey([n, coord.plot.width, coord.plot.height, String(coord.yScale.domain.join(','))]);
     if (key === this.heatCacheKey && this.pixels.length === n * 2) return;
     this.heatCacheKey = key;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
@@ -83,14 +83,29 @@ export class HeatmapSeries extends SeriesBase {
     const option = this.series.option.heatmap || {};
     const from = option.minColor || '#EFF6FF';
     const to = option.maxColor || this.series.color;
+    const entering = this.isEntering();
+    this.computeItemProgress();
+    const columns = coord.xScale.domain.length || 1;
     this.beginDraw();
     for (let i = 0; i < this.series.points.length; i++) {
       const point = this.series.points[i];
       const rect = this.cellRectAt(i);
       if (!rect) continue;
       const ratio = point.y === null ? 0 : (point.y - min) / (max - min || 1);
+      // 入场：按「对角线」逐格浮现（左上先、右下后）
+      let alpha = 1;
+      if (entering) {
+        const row = Math.floor(i / columns);
+        const column = i % columns;
+        const phase = ((column + row) % Math.max(1, columns)) / Math.max(1, columns);
+        const t = this.progress();
+        alpha = Math.max(0, Math.min(1, (t - phase * (this.stagger || 0.35)) / Math.max(0.05, 1 - phase * (this.stagger || 0.35))));
+        if (alpha <= 0) continue;
+        ctx.globalAlpha = alpha;
+      }
       ctx.fillStyle = mixColors(from, to, Math.max(0, Math.min(1, ratio)));
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      if (entering) ctx.globalAlpha = 1;
     }
     this.endDraw();
   }

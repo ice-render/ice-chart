@@ -391,10 +391,31 @@ export interface InteractionOption {
   keyboard?: boolean;
 }
 
+/** 一段动画的配置。 */
+export interface AnimationStageOption {
+  duration?: number;
+  /** 整体延迟（毫秒）。 */
+  delay?: number;
+  easing?: string;
+  /**
+   * 错峰比例（0~1）：把入场拆成「依次发生」的波浪。
+   * 0.4 表示最后一个数据项比第一个晚 0.4 段，所有项仍会在同一时刻结束。
+   */
+  stagger?: number;
+}
+
 export interface AnimationOption {
   enabled?: boolean;
+  /** 入场动画（首次渲染与系列新增）。 */
+  enter?: AnimationStageOption | false;
+  /** 数据更新动画（setData / setOption 之后）。 */
+  update?: AnimationStageOption | false;
+  /** 交互反馈动画（悬停放大等）。 */
+  highlight?: AnimationStageOption | false;
+  /** 兼容扁平写法：等价于 enter.duration / enter.easing / enter.stagger。 */
   duration?: number;
   easing?: string;
+  stagger?: number;
 }
 
 export interface ChartOption {

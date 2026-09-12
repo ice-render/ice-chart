@@ -28,7 +28,7 @@ export class BarSeries extends SeriesBase {
       this.pixels = new Float64Array(0);
       return;
     }
-    const key = [n, coord.plot.width, coord.plot.height, this.isHorizontal() ? 'h' : 'v', String(coord.yScale.domain.join(','))].join('|');
+    const key = this.buildSeriesKey([n, coord.plot.width, coord.plot.height, this.isHorizontal() ? 'h' : 'v', String(coord.yScale.domain.join(','))]);
     if (key === this.barCacheKey && this.pixels.length === n * 2) return;
     this.barCacheKey = key;
     this.computeEffective();

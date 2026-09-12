@@ -54,7 +54,7 @@ export class TreemapSeries extends SeriesBase {
       this.pixels = new Float64Array(0);
       return;
     }
-    const key = [nodes.length, coord.plot.width, coord.plot.height].join('|');
+    const key = this.buildSeriesKey([nodes.length, coord.plot.width, coord.plot.height]);
     if (key === this.treemapKey && this.pixels.length === nodes.length * 2) return;
     this.treemapKey = key;
     this.pixels = new Float64Array(nodes.length * 2);

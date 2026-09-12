@@ -89,7 +89,7 @@ export class GraphSeries extends SeriesBase {
     }
     const { nodes, links } = coord.layout;
     const total = nodes.length + links.length;
-    const key = [total, coord.plot.width, coord.plot.height, nodes.length, links.length].join('|');
+    const key = this.buildSeriesKey([total, coord.plot.width, coord.plot.height, nodes.length, links.length]);
     if (key === this.graphKey && this.pixels.length === total * 2) return;
     this.graphKey = key;
     if (this.pixels.length !== total * 2) this.pixels = new Float64Array(total * 2);
@@ -149,12 +149,21 @@ export class GraphSeries extends SeriesBase {
     const unit = this.unit();
     const { nodes, links } = coord.layout;
     const curve = coord.options.curve !== false;
+    // 入场：节点从「环形铺开」的初始位置收敛到力布局结果（把迭代过程演出来）
+    const entering = this.isEntering();
+    const t = entering ? Math.max(0, Math.min(1, this.progress())) : 1;
+    const positionOf = (node: any): [number, number] =>
+      entering ? [node.initialX + (node.x - node.initialX) * t, node.initialY + (node.y - node.initialY) * t] : [node.x, node.y];
+    const layoutNodes = nodes.map((node: any) => {
+      const [x, y] = positionOf(node);
+      return { ...node, x, y };
+    });
     this.beginDraw();
 
     // 连线
     ctx.globalAlpha = 0.55;
     for (const link of links) {
-      const points = sampleGraphLink(link, nodes, curve, 16);
+      const points = sampleGraphLink(link, layoutNodes, curve, 16);
       if (points.length < 2) continue;
       ctx.beginPath();
       ctx.moveTo(points[0][0] - plot.x, points[0][1] - plot.y);
@@ -167,8 +176,9 @@ export class GraphSeries extends SeriesBase {
 
     // 节点
     for (const node of nodes) {
-      const x = node.x - plot.x;
-      const y = node.y - plot.y;
+      const [nx, ny] = positionOf(node);
+      const x = nx - plot.x;
+      const y = ny - plot.y;
       ctx.beginPath();
       ctx.arc(x, y, Math.max(2, node.size / 2), 0, Math.PI * 2);
       ctx.fillStyle = node.color;
@@ -184,8 +194,9 @@ export class GraphSeries extends SeriesBase {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = theme.textColor;
     for (const node of nodes) {
-      const x = node.x - plot.x;
-      const y = node.y - plot.y + node.size / 2 + 9 * unit;
+      const [nx, ny] = positionOf(node);
+      const x = nx - plot.x;
+      const y = ny - plot.y + node.size / 2 + 9 * unit;
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 3 * unit;
       ctx.strokeText(node.name, x, y);

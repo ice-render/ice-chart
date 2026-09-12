@@ -6,6 +6,9 @@ export interface ForceNodeLayout {
   name: string;
   x: number;
   y: number;
+  /** 力布局开始前的位置（环形铺开）——入场动画从它收敛到最终位置。 */
+  initialX: number;
+  initialY: number;
   /** 由权重映射出的直径。 */
   size: number;
   value: number;
@@ -81,6 +84,8 @@ export function forceLayout(
     return { x: cx + Math.cos(angle) * maxRadius * 0.8, y: cy + Math.sin(angle) * maxRadius * 0.8 };
   });
   const velocity = positions.map(() => ({ x: 0, y: 0 }));
+  /** 入场动画的起点：迭代**之前**的位置（环形铺开），不是迭代后的结果。 */
+  const initialPositions = positions.map((p) => ({ x: p.x, y: p.y }));
 
   const degree = new Array(count).fill(0);
   const weight = new Array(count).fill(0);
@@ -206,6 +211,8 @@ export function forceLayout(
       name: node.name,
       x,
       y,
+      initialX: initialPositions[i].x,
+      initialY: initialPositions[i].y,
       size: sizeOf(i),
       value: weight[i],
       degree: degree[i],

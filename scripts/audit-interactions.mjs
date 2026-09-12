@@ -26,6 +26,7 @@ const pages = [
   'boxplot-waterfall',
   'treemap',
   'graph',
+  'animation',
   'finance',
   'sankey',
   'serialize',

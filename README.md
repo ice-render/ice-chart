@@ -157,6 +157,33 @@ npm install ice-chart ice-render
 | `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
 | `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、按权重定大小 |
 
+## 动画
+
+默认播**入场动画**（首次渲染就会播，不是只有更新才播）。`animation` 分三段，每段可单独配置或用 `false` 关掉：
+
+```ts
+animation: {
+  enter:     { duration: 900, easing: 'easeOutCubic', stagger: 0.45 },  // 首次渲染 / 新增系列
+  update:    { duration: 700, easing: 'easeOutCubic' },                 // setData / setOption
+  highlight: { duration: 260, easing: 'springSnappy' },                 // 悬停反馈（预留）
+}
+```
+
+- **错峰 `stagger`**：把入场拆成波浪（队列靠前的数据项先动），所有项仍在同一时刻结束。
+- **缓动**直接用引擎的曲线名：`linear`、`easeIn*/easeOut*/easeInOut*`（Quad / Cubic / Quart）以及三条**解析弹簧**
+  `spring` / `springSoft` / `springSnappy` —— 仪表盘指针、气泡弹出、交互反馈用它们最自然。
+- 兼容扁平写法：`animation: { duration, easing, stagger }` 等价于配置 `enter`。
+- **动效偏好**（无障碍）：`ICEChart.setMotionPreference('instant')` 让所有动画瞬时到位；
+  `'auto'`（默认）跟随系统的 `prefers-reduced-motion`；`'full'` 始终播动画。
+  `chart.finishAnimations()` 可把当前动画一次性推到终态（截图 / 测试用）。
+
+各类型的入场形态：柱形从基线错峰长出、折线/面积从左到右画出来、气泡依次弹出、
+饼图/玫瑰图扇形依次扫开、雷达从中心展开、K 线从开盘价上下展开、箱线图从中位线展开、
+热力图沿对角线逐格浮现、漏斗从等宽收拢成漏斗、仪表盘指针扫到目标值（可配弹簧回弹）、
+桑基连线从源流向目标、矩形树图逐层展开、关系图从环形铺开**收敛到力布局结果**。
+
+数据更新时，系列的值会从旧值插值到新值，**坐标轴数据域也跟着一起过渡**（否则域瞬跳会让图形先蹦一下再动）。
+
 ## 主要 API
 
 ```ts

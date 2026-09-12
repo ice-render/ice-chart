@@ -56,6 +56,12 @@ export abstract class SeriesBase extends ChartComponent {
   protected xMonotonic = true;
   /** 第三维（气泡尺寸）的取值范围，映射到 symbolSizeRange。 */
   protected sizeExtent: [number, number] = [0, 1];
+  /** 每个数据项各自的动画进度（错峰入场用），0~1。 */
+  protected itemProgress: Float64Array = new Float64Array(0);
+  /** 错峰比例：0 = 所有项同时动画。 */
+  protected stagger = 0;
+  /** 当前动画阶段：enter 可以「画出来」，update 只能「动起来」。 */
+  protected animationKind: 'enter' | 'update' = 'enter';
   private cacheKey = '';
   /** 散点等「每个点都必须画」的系列不参与降采样。 */
   protected supportsSampling = true;
@@ -144,13 +150,70 @@ export abstract class SeriesBase extends ChartComponent {
     return this.markDirty();
   }
 
+  /** 图表层在每次播放动画前注入该阶段的配置（错峰比例会存下来供逐项计算）。 */
+  public setAnimationStage(stage: { stagger?: number; kind?: 'enter' | 'update' } | null | undefined): this {
+    this.stagger = stage && isFinite(Number(stage.stagger)) ? Math.max(0, Math.min(0.95, Number(stage.stagger))) : 0;
+    this.animationKind = stage && stage.kind === 'update' ? 'update' : 'enter';
+    return this;
+  }
+
+  /** 是否正在播「入场」动画（用于「画出来」这类只在入场成立的动效）。 */
+  protected isEntering(): boolean {
+    return this.animationKind === 'enter' && this.progress() < 1;
+  }
+
+  /** 单个数据项的动画进度：把整体进度按「波浪」拆到每一项。 */
+  protected progressFor(index: number, total: number): number {
+    const t = this.progress();
+    if (t >= 1) return 1;
+    if (this.stagger <= 0 || total <= 1) return t;
+    // 波浪：每项持续 span，起始时间依次后移；最后一项恰好在 t=1 时结束
+    const span = 1 / (1 + this.stagger);
+    const delay = (index / (total - 1)) * this.stagger * span;
+    const local = (t - delay) / span;
+    return local <= 0 ? 0 : local >= 1 ? 1 : local;
+  }
+
+  /** 每项进度的缓存（数据量变化时重建）。 */
+  protected computeItemProgress(): void {
+    const n = this.series.points.length;
+    if (this.itemProgress.length !== n) this.itemProgress = new Float64Array(n);
+    for (let i = 0; i < n; i++) this.itemProgress[i] = this.progressFor(i, n);
+  }
+
+  /** 当前动画状态（测试与调试用；不参与序列化）。 */
+  public getAnimationState(): { progress: number; kind: 'enter' | 'update'; stagger: number; itemProgress: number[] } {
+    this.computeItemProgress();
+    return {
+      progress: this.progress(),
+      kind: this.animationKind,
+      stagger: this.stagger,
+      itemProgress: Array.from(this.itemProgress),
+    };
+  }
+
+  /**
+   * 派生几何的缓存键。
+   *
+   * **必须**把参与动画的 state 字段一起放进来（progress / 阶段 / 错峰），
+   * 否则动画期间键不变、缓存命中，几何会冻结在动画开始的那一帧。
+   * 子类覆写 `rebuildPixels` 时用自己的几何参数组键，请一律走这个方法。
+   */
+  protected buildSeriesKey(parts: Array<any>): string {
+    return [...parts, this.progress(), this.animationKind, this.stagger].join('|');
+  }
+
   /**
    * 替换数据。`animate` 为真时，把当前有效值记为动画起点（首次进入时从 0 开始），
    * 由 Chart 触发引擎动画把 state.progress 从 0 推到 1。
    */
-  public updateSeries(series: InternalSeries, animate: boolean): this {
-    this.fromEffective =
-      animate && this.effective.length === series.points.length * 2 ? new Float64Array(this.effective) : null;
+  public updateSeries(series: InternalSeries, animate: boolean, preserveAnimation = false): this {
+    // preserveAnimation：只换数据引用、**不动**动画起点。
+    // 坐标轴数据域过渡期间每帧都会走一次同步，如果这里清掉 fromEffective，值插值就断了。
+    if (!preserveAnimation) {
+      this.fromEffective =
+        animate && this.effective.length === series.points.length * 2 ? new Float64Array(this.effective) : null;
+    }
     this.series = series;
     this.cacheKey = '';
     return this.markDirty();
@@ -190,8 +253,11 @@ export abstract class SeriesBase extends ChartComponent {
       this.effective = new Float64Array(n * 2);
       this.fromEffective = null;
     }
+    this.computeItemProgress();
     const t = this.progress();
     for (let i = 0; i < n; i++) {
+      // 每个数据项用**自己的**进度：错峰入场时就是「依次长出来」
+      const ti = this.itemProgress[i];
       const p = points[i];
       const targetTop = p.top;
       if (targetTop === null || targetTop === undefined) {
@@ -208,8 +274,8 @@ export abstract class SeriesBase extends ChartComponent {
         if (isFinite(fb)) fromBase = fb;
         if (isFinite(ft)) fromTop = ft;
       }
-      this.effective[i * 2] = t >= 1 ? targetBase : fromBase + (targetBase - fromBase) * t;
-      this.effective[i * 2 + 1] = t >= 1 ? targetTop : fromTop + (targetTop - fromTop) * t;
+      this.effective[i * 2] = ti >= 1 ? targetBase : fromBase + (targetBase - fromBase) * ti;
+      this.effective[i * 2 + 1] = ti >= 1 ? targetTop : fromTop + (targetTop - fromTop) * ti;
     }
     if (t >= 1) this.fromEffective = null;
   }

@@ -46,7 +46,7 @@ export class SankeySeries extends SeriesBase {
     const { nodes, links } = coord.layout;
     const total = nodes.length + links.length;
     const [plotX, plotY] = [coord.plot.x, coord.plot.y];
-    const key = [total, plotX, plotY, coord.plot.width, coord.plot.height, nodes.length, links.length].join('|');
+    const key = this.buildSeriesKey([total, plotX, plotY, coord.plot.width, coord.plot.height, nodes.length, links.length]);
     if (key === this.sankeyCacheKey && this.pixels.length === total * 2) return;
     this.sankeyCacheKey = key;
     this.pixels = new Float64Array(total * 2);

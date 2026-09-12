@@ -142,3 +142,20 @@ if (canvasProto && typeof canvasProto.getBoundingClientRect === 'function') {
 }
 
 export {};
+
+/**
+ * 测试统一跑「瞬时动效」：动画直接落到终态。
+ *
+ * 图表默认会播入场动画（这是产品行为），但单测断言的是几何与命中，
+ * 需要在 `await chart.render()` 之后拿到稳定状态。全局设成 instant 既让断言确定，
+ * 也避免每个用例都要等 500ms 的动画 —— 动画本身另有专门的时序用例覆盖。
+ */
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const chartModule = require('../../src/index');
+  if (chartModule && typeof chartModule.setMotionPreference === 'function') {
+    chartModule.setMotionPreference('instant');
+  }
+} catch (err) {
+  // 忽略：极少数用例可能先加载了别的模块
+}

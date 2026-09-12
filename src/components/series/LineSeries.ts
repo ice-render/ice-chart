@@ -56,7 +56,12 @@ export class LineSeries extends SeriesBase {
    */
   protected renderPoints(): Array<[number, number]> {
     const out: Array<[number, number]> = [];
-    const count = this.renderCount();
+    let count = this.renderCount();
+    // 入场动画：从左到右「画」出来（按比例揭示前 k 个点）。
+    // 更新动画不做截断 —— 那条线本来就是「折点动起来」，截断会变成重画。
+    if (this.isEntering()) {
+      count = Math.max(1, Math.ceil(count * this.progress()));
+    }
     for (let k = 0; k < count; k++) {
       const i = this.renderIndexAt(k);
       const x = this.pixels[i * 2];
@@ -65,6 +70,12 @@ export class LineSeries extends SeriesBase {
       out.push([x, y]);
     }
     return out;
+  }
+
+  /** 当前实际绘制的点数（测试与调试用：入场动画会随时间从左到右增加）。 */
+  public revealedPointCount(): number {
+    this.rebuildPixels();
+    return this.renderPoints().length;
   }
 
   private drawStraightLine(pts: Array<[number, number]>): void {

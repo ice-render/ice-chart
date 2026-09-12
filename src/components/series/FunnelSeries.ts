@@ -65,7 +65,15 @@ export class FunnelSeries extends SeriesBase {
       return;
     }
     const options = coord.options || {};
-    const key = [n, coord.plot.width, coord.plot.height, options.sort, options.minSize, options.trapezoid, this.hiddenSlices.join(',')].join('|');
+    const key = this.buildSeriesKey([
+      n,
+      coord.plot.width,
+      coord.plot.height,
+      options.sort,
+      options.minSize,
+      options.trapezoid,
+      this.hiddenSlices.join(','),
+    ]);
     if (key === this.funnelKey && this.pixels.length === n * 2) return;
     this.funnelKey = key;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
@@ -90,10 +98,14 @@ export class FunnelSeries extends SeriesBase {
     const minSize = Math.max(0, Math.min(1, options.minSize === undefined ? 0.12 : Number(options.minSize)));
     const maxWidth = coord.plot.width;
     const cx = coord.plot.width / 2;
+    // 入场：所有阶段先等宽（像一个矩形），再收拢成漏斗
+    const morph = this.isEntering() ? Math.max(0, Math.min(1, this.progress())) : 1;
+    const flatWidth = maxWidth * 0.72;
     const widths = visible.map((i) => {
       const value = points[i].y || 0;
       const ratio = maxValue > 0 ? value / maxValue : 1;
-      return Math.max(maxWidth * minSize, maxWidth * Math.max(0, Math.min(1, ratio)));
+      const target = Math.max(maxWidth * minSize, maxWidth * Math.max(0, Math.min(1, ratio)));
+      return flatWidth + (target - flatWidth) * morph;
     });
     const trapezoid = options.trapezoid !== false;
 

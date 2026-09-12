@@ -72,6 +72,9 @@ export class CandlestickSeries extends SeriesBase {
     const bandWidth = coord.xScale.bandwidth() || coord.xScale.step() * 0.6;
     const bodyWidth = this.resolveBodyWidth(bandWidth);
     const rects = this.candleRects();
+    // 入场：蜡烛以「开盘价」为轴上下展开（影线随后到位），按日期错峰
+    const entering = this.isEntering();
+    this.computeItemProgress();
 
     this.beginDraw();
     for (let i = 0; i < this.series.points.length; i++) {
@@ -82,22 +85,28 @@ export class CandlestickSeries extends SeriesBase {
       const rising = close >= open;
       const color = rising ? upColor : downColor;
       const centerX = rect.x + rect.width / 2;
+      const p = entering ? this.itemProgress[i] : 1;
+      if (p <= 0) continue;
       const yOpen = coord.yScale.map(open);
       const yClose = coord.yScale.map(close);
       const yLow = coord.yScale.map(low);
       const yHigh = coord.yScale.map(high);
+      // 从开盘价向上下两端生长
+      const yMid = yOpen;
+      const lerp = (target: number) => yMid + (target - yMid) * p;
 
       // 影线
       ctx.beginPath();
-      ctx.moveTo(centerX, yHigh);
-      ctx.lineTo(centerX, yLow);
+      ctx.moveTo(centerX, lerp(yHigh));
+      ctx.lineTo(centerX, lerp(yLow));
       ctx.strokeStyle = color;
       ctx.lineWidth = borderWidth;
       ctx.stroke();
 
       // 实体（涨用空心、跌用实心，与国际惯例一致的可读性折中：这里统一描边 + 填充同色）
-      const top = Math.min(yOpen, yClose);
-      const height = Math.max(borderWidth, Math.abs(yClose - yOpen));
+      const yCloseAnimated = lerp(yClose);
+      const top = Math.min(yOpen, yCloseAnimated);
+      const height = Math.max(borderWidth, Math.abs(yCloseAnimated - yOpen));
       ctx.beginPath();
       ctx.rect(centerX - bodyWidth / 2, top, bodyWidth, height);
       ctx.fillStyle = color;

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 动画</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>动画：入场 / 更新 / 错峰 / 动效偏好</h1>
+    <p class="lead">
+      图表默认播入场动画（首次渲染就会播）。<code>animation</code> 分三段：
+      <code>enter</code>（入场）、<code>update</code>（数据更新）、<code>highlight</code>（交互反馈），
+      每段可配 <code>duration / delay / easing / stagger</code>；<code>stagger</code> 是<b>错峰</b>，
+      让数据项像波浪一样依次进场。
+      <br />
+      缓动直接用引擎的曲线名（含 <code>spring</code> / <code>springSoft</code> / <code>springSnappy</code> 三条弹簧）。
+      另外还有<b>动效偏好</b>：<code>instant</code> 模式下所有动画瞬时到位（尊重系统「减少动态效果」，也方便截图与测试）。
+    </p>
+
+    <div class="card">
+      <div class="snapshot-head">
+        <span class="snapshot-title">控制</span>
+        <span class="snapshot-actions">
+          <button type="button" id="btn-replay">重播入场</button>
+          <button type="button" id="btn-update">换一批数据（看更新动画）</button>
+          <button type="button" id="btn-stagger">错峰：开 / 关</button>
+          <button type="button" id="btn-motion">动效偏好：full / instant</button>
+        </span>
+        <span class="spacer"></span>
+        <span class="snapshot-meta" id="meta">—</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card"><canvas id="bar" width="620" height="380"></canvas></div>
+      <div class="card"><canvas id="line" width="620" height="380"></canvas></div>
+    </div>
+    <div class="row">
+      <div class="card"><canvas id="scatter" width="620" height="380"></canvas></div>
+      <div class="card"><canvas id="gauge" width="620" height="380"></canvas></div>
+    </div>
+    <div class="card"><canvas id="graph" width="1260" height="420"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      let stagger = 0.45;
+      const DAYS = ['6-01', '6-02', '6-03', '6-04', '6-05', '6-06', '6-07', '6-08'];
+      const buildBars = (seed) => DAYS.map((_, i) => Math.round(280 + Math.sin(i / 1.4 + seed) * 120 + (i % 3) * 40));
+
+      const common = {
+        theme: 'light',
+        legend: { show: false },
+        animation: {
+          enter: { duration: 900, easing: 'easeOutCubic', stagger },
+          update: { duration: 700, easing: 'easeOutCubic' },
+        },
+      };
+
+      const bar = ICEChart.createChart('bar', {
+        ...common,
+        title: { text: '柱形：错峰从基线长出' },
+        xAxis: { type: 'category', data: DAYS },
+        yAxis: { name: '单量' },
+        series: [{ id: 'bar', type: 'bar', name: '单量', data: buildBars(0), barWidth: 0.55 }],
+      });
+
+      const line = ICEChart.createChart('line', {
+        ...common,
+        title: { text: '折线：从左到右画出来' },
+        xAxis: { type: 'category', data: DAYS },
+        yAxis: { name: '访问' },
+        series: [
+          { id: 'line', type: 'area', name: '访问', data: buildBars(1.2), smooth: true, areaOpacity: 0.22, animation: undefined },
+        ],
+      });
+
+      const scatter = ICEChart.createChart('scatter', {
+        ...common,
+        title: { text: '气泡：依次弹出（弹簧）' },
+        animation: {
+          enter: { duration: 1100, easing: 'springSnappy', stagger: 0.7 },
+          update: { duration: 600, easing: 'easeOutCubic' },
+        },
+        xAxis: { type: 'value', name: '人口' },
+        yAxis: { type: 'value', name: 'GDP' },
+        series: [
+          {
+            id: 'bubble',
+            type: 'scatter',
+            name: '城市',
+            symbolSizeRange: [14, 52],
+            data: [
+              [1200, 3200, 22],
+              [2200, 4400, 40],
+              [900, 1800, 12],
+              [1700, 2900, 28],
+              [1400, 2100, 18],
+              [2600, 4800, 48],
+            ],
+          },
+        ],
+      });
+
+      const gauge = ICEChart.createChart('gauge', {
+        ...common,
+        title: { text: '仪表盘：指针弹簧回弹' },
+        animation: {
+          enter: { duration: 1400, easing: 'spring', stagger: 0 },
+          update: { duration: 900, easing: 'springSoft' },
+        },
+        gauge: {
+          min: 0,
+          max: 100,
+          splitNumber: 5,
+          lineWidth: 16,
+          axisLineColor: [
+            [0.6, '#198754'],
+            [0.85, '#ffc107'],
+            [1, '#dc3545'],
+          ],
+          detail: { formatter: (v) => `${v.toFixed(1)}%`, fontSize: 34 },
+        },
+        series: [{ id: 'g', type: 'gauge', name: '完成率', data: [{ name: '季度目标', value: 76 }] }],
+      });
+
+      const graph = ICEChart.createChart('graph', {
+        ...common,
+        title: { text: '关系图：从环形铺开收敛到力布局结果' },
+        animation: { enter: { duration: 1200, easing: 'easeOutCubic', stagger: 0 }, update: { duration: 600, easing: 'easeOutCubic' } },
+        graph: {
+          layout: 'force',
+          repulsion: 9000,
+          edgeLength: 90,
+          iterations: 280,
+          symbolSizeRange: [14, 44],
+          categories: [
+            { name: '接入', color: '#0d6efd' },
+            { name: '服务', color: '#198754' },
+            { name: '存储', color: '#fd7e14' },
+          ],
+          nodes: [
+            { id: 'gw', name: '网关', value: 100, category: '接入' },
+            { id: 'bff', name: 'BFF', value: 70, category: '接入' },
+            { id: 'user', name: '用户', value: 58, category: '服务' },
+            { id: 'order', name: '订单', value: 76, category: '服务' },
+            { id: 'pay', name: '支付', value: 40, category: '服务' },
+            { id: 'stock', name: '库存', value: 34, category: '服务' },
+            { id: 'mysql', name: 'MySQL', value: 88, category: '存储' },
+            { id: 'redis', name: 'Redis', value: 70, category: '存储' },
+            { id: 'mq', name: 'Kafka', value: 46, category: '存储' },
+          ],
+          links: [
+            { source: 'gw', target: 'bff', value: 20 },
+            { source: 'bff', target: 'user', value: 12 },
+            { source: 'bff', target: 'order', value: 16 },
+            { source: 'user', target: 'mysql', value: 18 },
+            { source: 'user', target: 'redis', value: 16 },
+            { source: 'order', target: 'pay', value: 12 },
+            { source: 'order', target: 'stock', value: 9 },
+            { source: 'order', target: 'mysql', value: 22 },
+            { source: 'order', target: 'mq', value: 11 },
+            { source: 'stock', target: 'redis', value: 8 },
+          ],
+        },
+        series: [{ id: 'net', type: 'graph', name: '依赖' }],
+      });
+
+      const charts = { bar, line, scatter, gauge, graph };
+      const meta = document.getElementById('meta');
+      let instant = false;
+      const refreshMeta = () => {
+        meta.textContent = `错峰 ${stagger.toFixed(2)} ｜ 动效偏好 ${instant ? 'instant（瞬时到位）' : 'full（播动画）'} ｜ 引擎缓动：linear / easeOut* / spring / springSoft / springSnappy …`;
+      };
+      refreshMeta();
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+
+      document.getElementById('btn-replay').addEventListener('click', () => {
+        Object.values(charts).forEach((chart) => chart.setOption(chart.getOption(), { animate: 'enter', preserveView: true }));
+        write('重播入场动画');
+      });
+      document.getElementById('btn-update').addEventListener('click', () => {
+        const seed = Math.random() * 6;
+        bar.setData('bar', buildBars(seed));
+        line.setData('line', buildBars(seed + 1));
+        scatter.setData(
+          'bubble',
+          [
+            [1200, 3200, 22],
+            [2200, 4400, 40],
+            [900, 1800, 12],
+            [1700, 2900, 28],
+            [1400, 2100, 18],
+            [2600, 4800, 48],
+          ].map((d) => [d[0] * (0.6 + Math.random() * 0.8), d[1] * (0.6 + Math.random() * 0.8), d[2]])
+        );
+        gauge.setData('g', [{ name: '季度目标', value: Math.round(20 + Math.random() * 75) }]);
+        write('更新数据（看值插值 + 坐标轴数据域过渡）');
+      });
+      document.getElementById('btn-stagger').addEventListener('click', () => {
+        stagger = stagger > 0 ? 0 : 0.45;
+        Object.values(charts).forEach((chart) => {
+          const option = chart.getOption();
+          option.animation = {
+            ...option.animation,
+            enter: { duration: 900, easing: 'easeOutCubic', stagger },
+          };
+          chart.setOption(option, { animate: 'enter', preserveView: true });
+        });
+        refreshMeta();
+        write(`错峰 ${stagger > 0 ? '开启' : '关闭'}`);
+      });
+      document.getElementById('btn-motion').addEventListener('click', () => {
+        instant = !instant;
+        ICEChart.setMotionPreference(instant ? 'instant' : 'full');
+        refreshMeta();
+        write(`动效偏好 → ${instant ? 'instant（所有动画瞬时到位）' : 'full（播动画）'}`);
+      });
+
+      window.__charts = charts;
+      window.__motion = () => ({ stagger, instant });
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

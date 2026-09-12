@@ -7,8 +7,24 @@
  */
 
 // 图表主类
-export { ICEChart, createChart, computeBarSlots, isChartSnapshot, mergeOptionPatch, SNAPSHOT_VERSION } from './ICEChart';
-export type { ICEChartOptions, ApplyOptionOptions, ChartSnapshot, SnapshotRestoreOptions } from './ICEChart';
+export {
+  ICEChart,
+  createChart,
+  computeBarSlots,
+  isChartSnapshot,
+  mergeOptionPatch,
+  SNAPSHOT_VERSION,
+  setMotionPreference,
+  getMotionPreference,
+  shouldAnimate,
+} from './ICEChart';
+export type {
+  ICEChartOptions,
+  ApplyOptionOptions,
+  ChartSnapshot,
+  SnapshotRestoreOptions,
+  MotionPreference,
+} from './ICEChart';
 
 // 类型
 export type {
@@ -30,6 +46,7 @@ export type {
   DataZoomOption,
   InteractionOption,
   AnimationOption,
+  AnimationStageOption,
   DataPointParams,
   BrushRange,
   ZoomRange,
@@ -52,7 +69,7 @@ export { createScale, formatTick, formatNumberTick, LinearScale, BandScale, Time
 export type { Scale, CreateScaleOptions } from './scale';
 
 // 归一化 / 布局（纯函数，便于在应用层复用或做 DSL 编译）
-export { normalizeOption, toSerializableOption } from './option/normalize';
+export { normalizeOption, toSerializableOption, normalizeAnimation, DEFAULT_ANIMATION_STAGES } from './option/normalize';
 export type { NormalizeContext } from './option/normalize';
 export { computeLayout } from './layout/layout';
 export type { DataPoint, InternalSeries, InternalAxis, NormalizedOption, ChartLayout, Rect, LegendItemLayout } from './internal';

@@ -74,7 +74,7 @@ export class GaugeSeries extends SeriesBase {
     }
     const options = coord.options || {};
     const value = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
-    const key = [coord.polar.radius, options.startAngle, options.endAngle, options.min, options.max, value].join('|');
+    const key = this.buildSeriesKey([coord.polar.radius, options.startAngle, options.endAngle, options.min, options.max, value]);
     if (key === this.gaugeKey && this.pixels.length === 2) return;
     this.gaugeKey = key;
     if (this.pixels.length !== 2) this.pixels = new Float64Array(2);
@@ -109,7 +109,10 @@ export class GaugeSeries extends SeriesBase {
     const { a0, sweep } = this.angles();
     const { min, max } = this.range();
     const lineWidth = Math.max(2, Number(options.lineWidth) || 14);
-    const value = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    const targetValue = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    // 入场：指针从最小值扫到目标值，数值文本同步 count-up。
+    // 缓动交给引擎 —— 配 `easing: 'spring'` 就是仪表盘最自然的回弹手感。
+    const value = min + (targetValue - min) * this.progress();
 
     this.beginDraw();
 

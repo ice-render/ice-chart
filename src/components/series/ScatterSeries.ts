@@ -18,12 +18,20 @@ export class ScatterSeries extends SeriesBase {
     const fill = option.symbolFill || color;
     const stroke = option.symbolStroke || '#ffffff';
     this.beginDraw();
+    // 入场：气泡按顺序「弹」出来（先小后大 + 淡入）；更新：位置插值，不再缩放
+    const entering = this.isEntering();
+    this.computeItemProgress();
     for (let i = 0; i < n; i++) {
       const x = this.pixels[i * 2];
       const y = this.pixels[i * 2 + 1];
       if (!isFinite(x) || !isFinite(y)) continue;
+      const p = entering ? this.itemProgress[i] : 1;
+      if (p <= 0) continue;
+      const size = this.symbolSizeAt(i) * (entering ? 0.2 + 0.8 * p : 1);
+      if (entering && p < 1) this.ctx.globalAlpha = 0.25 + 0.75 * p;
       // 气泡图：每个点用自己解析出来的尺寸
-      this.drawSymbol(x, y, shape, this.symbolSizeAt(i), fill, stroke);
+      this.drawSymbol(x, y, shape, size, fill, stroke);
+      if (entering && p < 1) this.ctx.globalAlpha = 1;
     }
     this.endDraw();
   }

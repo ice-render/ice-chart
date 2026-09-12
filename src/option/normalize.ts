@@ -7,7 +7,47 @@ import { toTimestamp } from '../scale/TimeScale';
 
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 12, left: 12 };
 
-const DEFAULT_ANIMATION = { enabled: true, duration: 480, easing: 'cubicOut' };
+/** 入场 / 更新 / 交互反馈三段动画的默认值。 */
+export const DEFAULT_ANIMATION_STAGES = {
+  enter: { duration: 520, delay: 0, easing: 'easeOutCubic', stagger: 0.35 },
+  update: { duration: 420, delay: 0, easing: 'easeOutCubic', stagger: 0 },
+  highlight: { duration: 260, delay: 0, easing: 'springSnappy', stagger: 0 },
+};
+
+/**
+ * 归一化动画配置：
+ * - 支持 `animation: false` 一键关闭；
+ * - 支持扁平写法（duration / easing / stagger）等价于 `enter` 的配置；
+ * - `enter / update / highlight` 三段可以分别配置或用 `false` 单独关闭。
+ */
+export function normalizeAnimation(input: any): any {
+  if (input === false) {
+    return { enabled: false, enter: false, update: false, highlight: false };
+  }
+  const raw: any = input || {};
+  const enabled = raw.enabled !== false;
+  const flat: any = {
+    duration: raw.duration,
+    easing: raw.easing,
+    stagger: raw.stagger,
+    delay: raw.delay,
+  };
+  const stage = (name: 'enter' | 'update' | 'highlight'): any => {
+    if (raw[name] === false) return false;
+    const merged: any = { ...DEFAULT_ANIMATION_STAGES[name] };
+    if (name === 'enter') {
+      // 扁平写法只影响入场，保持向后兼容
+      for (const key of Object.keys(flat)) {
+        if (flat[key] !== undefined) merged[key] = flat[key];
+      }
+    }
+    if (raw[name] && typeof raw[name] === 'object') {
+      Object.assign(merged, raw[name]);
+    }
+    return merged;
+  };
+  return { enabled, enter: stage('enter'), update: stage('update'), highlight: stage('highlight') };
+}
 
 export interface NormalizeContext {
   hiddenIds?: Record<string, boolean>;
@@ -72,7 +112,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
       pan: option.interaction?.pan === false ? false : { enabled: false, axes: 'xy', ...(option.interaction?.pan || {}) },
       keyboard: option.interaction?.keyboard === undefined ? true : option.interaction.keyboard,
     },
-    animation: { ...DEFAULT_ANIMATION, ...(option.animation || {}) },
+    animation: normalizeAnimation(option.animation),
     margin: { ...DEFAULT_MARGIN, ...(option.margin || {}) },
   };
   merged.series = option.series;

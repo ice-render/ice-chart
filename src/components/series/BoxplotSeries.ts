@@ -46,7 +46,7 @@ export class BoxplotSeries extends SeriesBase {
       this.pixels = new Float64Array(0);
       return;
     }
-    const key = [n, coord.plot.width, coord.plot.height, String(coord.xScale.domain.join(','))].join('|');
+    const key = this.buildSeriesKey([n, coord.plot.width, coord.plot.height, String(coord.xScale.domain.join(','))]);
     if (key === this.boxCacheKey && this.pixels.length === n * 2) return;
     this.boxCacheKey = key;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
@@ -94,6 +94,9 @@ export class BoxplotSeries extends SeriesBase {
     const theme = this.chartTheme;
     const unit = this.unit();
     const color = this.pointColor(0);
+    // 入场：以中位线为轴，箱体与须一起展开
+    const entering = this.isEntering();
+    this.computeItemProgress();
     this.beginDraw();
     for (let i = 0; i < this.series.points.length; i++) {
       const point = this.series.points[i];
@@ -101,15 +104,26 @@ export class BoxplotSeries extends SeriesBase {
       if (!point || !point.boxplot || !rect) continue;
       const [min, q1, median, q3, max] = point.boxplot;
       const centerX = rect.x + rect.width / 2;
-      const yMin = coord.yScale.map(min);
-      const yMax = coord.yScale.map(max);
       const yMedian = coord.yScale.map(median);
+      const p = entering ? this.itemProgress[i] : 1;
+      if (p <= 0) continue;
+      const lerp = (target: number) => yMedian + (target - yMedian) * p;
+      const yMin = lerp(coord.yScale.map(min));
+      const yMax = lerp(coord.yScale.map(max));
+      const boxTop = lerp(coord.yScale.map(q3));
+      const boxBottom = lerp(coord.yScale.map(q1));
+      const boxRect = {
+        x: rect.x,
+        y: Math.min(boxTop, boxBottom),
+        width: rect.width,
+        height: Math.max(Math.abs(boxBottom - boxTop), this.unit()),
+      };
 
       // 须
       ctx.beginPath();
       ctx.moveTo(centerX, yMax);
-      ctx.lineTo(centerX, rect.y);
-      ctx.moveTo(centerX, rect.y + rect.height);
+      ctx.lineTo(centerX, boxRect.y);
+      ctx.moveTo(centerX, boxRect.y + boxRect.height);
       ctx.lineTo(centerX, yMin);
       ctx.strokeStyle = color;
       ctx.lineWidth = unit;
@@ -124,7 +138,7 @@ export class BoxplotSeries extends SeriesBase {
 
       // 箱体
       ctx.beginPath();
-      ctx.rect(rect.x, rect.y, rect.width, rect.height);
+      ctx.rect(boxRect.x, boxRect.y, boxRect.width, boxRect.height);
       ctx.fillStyle = hexWithAlpha(color, 0.28);
       ctx.fill();
       ctx.strokeStyle = color;
@@ -133,8 +147,8 @@ export class BoxplotSeries extends SeriesBase {
 
       // 中位线
       ctx.beginPath();
-      ctx.moveTo(rect.x, yMedian);
-      ctx.lineTo(rect.x + rect.width, yMedian);
+      ctx.moveTo(boxRect.x, yMedian);
+      ctx.lineTo(boxRect.x + boxRect.width, yMedian);
       ctx.lineWidth = Math.max(unit, 2 * unit);
       ctx.stroke();
       void q1;

@@ -41,6 +41,34 @@ const Z = {
 /** 快照格式版本：结构变化时递增，还原时校验。 */
 export const SNAPSHOT_VERSION = 1;
 
+/** 全局动效偏好：auto 跟随系统「减少动态效果」，instant 一切动画瞬时到位，full 始终动画。 */
+export type MotionPreference = 'auto' | 'instant' | 'full';
+let motionPreference: MotionPreference = 'auto';
+
+export function setMotionPreference(preference: MotionPreference): void {
+  motionPreference = preference;
+}
+
+export function getMotionPreference(): MotionPreference {
+  return motionPreference;
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof (window as any).matchMedia !== 'function') return false;
+  try {
+    return !!(window as any).matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (err) {
+    return false;
+  }
+}
+
+/** 当前是否应该播放动画（无障碍：尊重系统的「减少动态效果」）。 */
+export function shouldAnimate(): boolean {
+  if (motionPreference === 'instant') return false;
+  if (motionPreference === 'full') return true;
+  return !prefersReducedMotion();
+}
+
 export interface SnapshotRestoreOptions {
   /**
    * 还原时叠加的非序列化配置补丁（formatter、函数型回调等）。
@@ -92,7 +120,8 @@ export interface ICEChartOptions {
 }
 
 export interface ApplyOptionOptions {
-  animate?: boolean;
+  /** true = 播「更新」动画；'enter' = 播「入场」动画；false = 不播。 */
+  animate?: boolean | 'enter' | 'update';
   /** 保留当前缩放窗口（图例切换、数据更新时用）。 */
   preserveView?: boolean;
 }
@@ -157,6 +186,15 @@ export class ICEChart {
   /** 抑制对外事件的重入深度（跨图联动时避免 A→B→A 的回环）。 */
   private silenceDepth = 0;
   private a11yMirror = new A11yMirror(this);
+  /**
+   * 更新动画期间的坐标轴数据域过渡。
+   *
+   * 数据更新时 y 轴数据域常常会变（例如最大值从 50 掉到 40），如果域瞬跳，
+   * 柱子会在动画**开始的那一帧**整体位移一下，值插值反而看不见。
+   * 所以域要和系列的值一起插值：每帧按同一进度重算域与坐标，动画结束时再回到常规路径。
+   */
+  private domainTransition: { from: number[]; to: number[] } | null = null;
+  private domainFrameHandler: any = null;
 
   constructor(target: any, option: ChartOption, chartOptions: ICEChartOptions = {}) {
     if (!target) throw new Error('[ice-chart] 初始化失败：缺少 canvas 元素或其 id。');
@@ -216,7 +254,8 @@ export class ICEChart {
     ]);
 
     this.controller = new InteractionController(this);
-    this.applyOption(option, { animate: false, preserveView: false });
+    // 首次渲染也要播「入场」动画（历史 bug：构造时传 animate:false，导致进场是硬切）
+    this.applyOption(option, { animate: 'enter', preserveView: false });
     this.controller.bind();
 
     if (chartOptions.autoResize) this.observeResize();
@@ -226,7 +265,7 @@ export class ICEChart {
 
   /** 更新配置。默认保留当前缩放窗口，可用 resetZoom 恢复。 */
   public setOption(option: ChartOption, options: ApplyOptionOptions = {}): this {
-    this.applyOption(option, { animate: options.animate !== false, preserveView: options.preserveView !== false });
+    this.applyOption(option, { animate: options.animate === undefined ? true : options.animate, preserveView: options.preserveView !== false });
     return this;
   }
 
@@ -479,6 +518,7 @@ export class ICEChart {
   public destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.stopDomainTransition();
     // 无障碍镜像是挂在 canvas 旁边的 DOM，必须在销毁时一并摘掉（否则页面会残留隐藏表格）
     this.a11yMirror.detach();
     this.controller.destroy();
@@ -619,6 +659,8 @@ export class ICEChart {
 
   private applyOption(option: ChartOption, options: ApplyOptionOptions): void {
     this.option = option;
+    // 记录更新前的 y 数据域：更新动画需要把「域的变化」也一起插值，否则会瞬跳
+    const previousYDomain = this.norm ? this.norm.yAxis.domain.slice() : null;
     const normalized = normalizeOption(option, { hiddenIds: this.hiddenIds, hiddenSlices: this.hiddenSlices });
     this.fullXDomain = normalized.xAxis.domain.slice();
     this.fullYDomain = normalized.yAxis.domain.slice();
@@ -633,7 +675,13 @@ export class ICEChart {
     }
     this.hiddenIds = normalized.hiddenIds;
     this.hiddenSlices = normalized.hiddenSlices;
-    this.rebuild(options.animate !== false);
+    this.rebuild(options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update');
+    const trigger = options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update';
+    if (trigger === 'update' && shouldAnimate() && previousYDomain && this.norm && this.norm.yAxis.domain.length === 2) {
+      const next = this.norm.yAxis.domain;
+      const changed = Math.abs(Number(previousYDomain[0]) - Number(next[0])) > 1e-9 || Math.abs(Number(previousYDomain[1]) - Number(next[1])) > 1e-9;
+      if (changed) this.startDomainTransition([Number(previousYDomain[0]), Number(previousYDomain[1])], [Number(next[0]), Number(next[1])]);
+    }
   }
 
   /** dataZoom 的 start/end 只影响初始窗口。 */
@@ -657,7 +705,49 @@ export class ICEChart {
   }
 
   /** 用当前 viewState 重新归一化 → 布局 → 同步组件。 */
-  private rebuild(animate: boolean): void {
+  /** 启动数据域过渡：每帧按系列动画进度插值 y 轴数据域。 */
+  private startDomainTransition(from: number[], to: number[]): void {
+    this.domainTransition = { from, to };
+    if (this.domainFrameHandler) return;
+    const bus: any = this.ice.evtBus;
+    if (!bus) return;
+    this.domainFrameHandler = () => this.stepDomainTransition();
+    bus.on('ICE_FRAME_EVENT', this.domainFrameHandler, this);
+  }
+
+  private stepDomainTransition(): void {
+    const transition = this.domainTransition;
+    if (!transition || this.destroyed) {
+      this.stopDomainTransition();
+      return;
+    }
+    // 用系列自己的进度当时间轴：两者必须是同一条时间线
+    let t = 0;
+    for (const component of this.seriesComponents) {
+      const value = Number(component.state.progress);
+      if (isFinite(value) && value > t) t = value;
+    }
+    if (t >= 1) {
+      this.domainTransition = null;
+      this.stopDomainTransition();
+      this.rebuild(false);
+      return;
+    }
+    const domain = transition.to.map((value, index) => {
+      const start = transition.from[index];
+      return isFinite(start) ? start + (value - start) * t : value;
+    });
+    this.rebuild(false, domain);
+  }
+
+  private stopDomainTransition(): void {
+    if (!this.domainFrameHandler) return;
+    const bus: any = this.ice && this.ice.evtBus;
+    if (bus) bus.off('ICE_FRAME_EVENT', this.domainFrameHandler, this);
+    this.domainFrameHandler = null;
+  }
+
+  private rebuild(animate: boolean | 'enter' | 'update', domainOverride?: number[] | null): void {
     if (this.destroyed) return;
     const canvas = this.canvasRect();
     const effectiveX = this.viewState.x || this.fullXDomain;
@@ -670,9 +760,11 @@ export class ICEChart {
       hiddenSlices: this.hiddenSlices,
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
       yDomain:
-        effectiveYs[0] && effectiveYs[0].length === 2
-          ? [Number(effectiveYs[0][0]), Number(effectiveYs[0][1])]
-          : null,
+        domainOverride && domainOverride.length === 2
+          ? [Number(domainOverride[0]), Number(domainOverride[1])]
+          : effectiveYs[0] && effectiveYs[0].length === 2
+            ? [Number(effectiveYs[0][0]), Number(effectiveYs[0][1])]
+            : null,
       yDomains: effectiveYs.map((domain) =>
         domain && domain.length === 2 ? [Number(domain[0]), Number(domain[1])] : null
       ),
@@ -682,7 +774,9 @@ export class ICEChart {
     this.layout = computeLayout(norm, this.ice.ctx, canvas);
     this.buildScales(norm);
     this.root.state.ariaLabel = chartTitle(norm);
-    this.syncComponents(animate);
+    // 域过渡期间不要重跑「数据 → 系列」那条链路：数据没变，
+    // 重跑会清掉系列的动画起点（fromEffective），值插值就断了。
+    this.syncComponents(domainOverride ? false : animate);
     this.ice.dirty = true;
     // 缩放 / 平移 / 数据更新后，悬停视觉（准星、高亮环、提示框）必须跟着数据重新定位
     if (this.controller) this.controller.refreshHover();
@@ -701,7 +795,7 @@ export class ICEChart {
     }
   }
 
-  private syncComponents(animate: boolean): void {
+  private syncComponents(animate: boolean | 'enter' | 'update'): void {
     const norm = this.norm;
     const layout = this.layout;
     const canvas = layout.canvas;
@@ -897,7 +991,7 @@ export class ICEChart {
     }
   }
 
-  private syncSeries(animate: boolean): void {
+  private syncSeries(animate: boolean | 'enter' | 'update'): void {
     const norm = this.norm;
     const plot = this.layout.plot;
     const signature = norm.series.map((s) => `${s.id}:${s.type}`).join('|');
@@ -987,33 +1081,80 @@ export class ICEChart {
       component.barSlot = slots[series.id] || { index: 0, count: 1 };
       component.chartTheme = norm.theme;
       component.state.ariaLabel = `${series.name} 系列，共 ${series.points.length} 个数据点`;
-      component.updateSeries(series, animate && !this.viewState.x);
+      component.updateSeries(series, !!animate && !this.viewState.x, !!this.domainTransition);
       if (series.type === 'pie' || series.type === 'funnel') {
         component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));
       }
       component.setCoord(coord as any);
       component.markDirty();
       if (animate && visible) {
-        const animation = norm.option.animation;
-        if (!animation || animation.enabled !== false) {
-          this.playEnter(
-            component,
-            (animation && animation.duration) || 480,
-            (animation && animation.easing) || 'cubicOut'
-          );
+        const animation: any = norm.option.animation;
+        if (animation && animation.enabled !== false) {
+          const stage = animation[animate === 'enter' ? 'enter' : 'update'];
+          if (stage) this.playStage(component, { ...stage, kind: animate === 'enter' ? 'enter' : 'update' });
         }
       }
     }
   }
 
-  /** 让引擎的 AnimationManager 把 progress 从 0 推到 1。 */
-  public playEnter(seriesComponent: SeriesBase, duration: number, easing: string): void {
+  /**
+   * 让引擎的 AnimationManager 把 progress 从 0 推到 1。
+   *
+   * 实测（`hitTest` 逐帧采样）：引擎在补间期间把 `interactive` 置 false 只发生在
+   * 同一帧的同步块内（保存→置 false→补间→恢复），事件处理与命中检测看不到，
+   * 所以动画期间交互照常可用 —— 不需要额外的「驱动组件」绕开它。
+   */
+  public playStage(
+    seriesComponent: SeriesBase,
+    stage: { duration?: number; delay?: number; easing?: string; stagger?: number; kind?: 'enter' | 'update' }
+  ): void {
+    if (!shouldAnimate()) {
+      // 无障碍 / 测试的瞬时模式：直接落到终态，不占用帧循环
+      seriesComponent.setAnimationStage(stage);
+      seriesComponent.setState({ progress: 1 });
+      seriesComponent.markDirty();
+      return;
+    }
+    seriesComponent.setAnimationStage(stage);
     const animations: any = {
-      progress: { from: 0, to: 1, duration, easing, startTime: undefined, finished: false },
+      progress: {
+        from: 0,
+        to: 1,
+        duration: Math.max(1, Number(stage.duration) || 480),
+        delay: Number(stage.delay) || 0,
+        easing: stage.easing || 'easeOutCubic',
+        startTime: undefined,
+        finished: false,
+      },
     };
     (seriesComponent.props as any).animations = animations;
     seriesComponent.setState({ progress: 0 });
     if (this.ice.animationManager) this.ice.animationManager.add(seriesComponent);
+  }
+
+  /** 兼容旧 API：按「入场」阶段播放。 */
+  public playEnter(seriesComponent: SeriesBase, duration: number, easing: string): void {
+    this.playStage(seriesComponent, { duration, easing, stagger: 0 });
+  }
+
+  /** 把当前所有未完成的动画一次性推到终态（截图 / 测试 / 无障碍瞬时模式用）。 */
+  public finishAnimations(): this {
+    this.domainTransition = null;
+    this.stopDomainTransition();
+    for (const component of this.seriesComponents) {
+      // 必须同时取消引擎里的补间：只把 progress 置 1 的话，下一帧引擎又会把它写回去
+      const animations: any = (component.props as any).animations;
+      if (animations) {
+        for (const key in animations) {
+          if (animations[key]) animations[key].finished = true;
+        }
+      }
+      if (this.ice.animationManager) this.ice.animationManager.remove(component);
+      if (Number(component.state.progress) < 1) component.setState({ progress: 1 });
+      component.markDirty();
+    }
+    this.ice.dirty = true;
+    return this;
   }
 
   // ------------------------------------------------------------- 内部工具

@@ -93,7 +93,8 @@ export class PieSeries extends SeriesBase {
       if (value > maxValue) maxValue = value;
     }
 
-    const progress = this.progress();
+    // 每个扇区用自己的进度：入场时扇形「依次扫开」
+    this.computeItemProgress();
     const dir = option.clockwise === false ? -1 : 1;
     let angle = -((option.startAngle === undefined ? 90 : Number(option.startAngle)) * Math.PI) / 180;
     const innerRatio = Math.max(0, Math.min(0.95, Number(option.innerRadius) || 0));
@@ -102,7 +103,7 @@ export class PieSeries extends SeriesBase {
     for (let i = 0; i < n; i++) {
       const hidden = this.hiddenSlices.indexOf(i) >= 0;
       const value = hidden ? 0 : points[i].y || 0;
-      const sweep = total > 0 ? (value / total) * TAU * progress : 0;
+      const sweep = total > 0 ? (value / total) * TAU * (hidden ? 0 : this.itemProgress[i]) : 0;
       const a0 = angle;
       const a1 = angle + dir * sweep;
       angle = a1;

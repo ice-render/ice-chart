@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.9.0
+
+把引擎的动画能力真正接进图表（此前只有一个 `progress` 字段）。
+
+### 新增
+
+- **三段动画配置**：`animation.enter / update / highlight`，每段可配 `duration / delay / easing / stagger`，
+  也可单独用 `false` 关掉；保留扁平写法的向后兼容。
+- **错峰入场（stagger）**：每个数据项用自己的进度（`SeriesBase.itemProgress`），
+  波浪式依次进场，所有项仍在同一时刻结束。
+- **动效偏好（无障碍）**：`setMotionPreference('auto' | 'instant' | 'full')`，
+  `auto` 跟随 `prefers-reduced-motion`；`chart.finishAnimations()` 推到终态。
+- **更新动画**：`setData` / `setOption` 时系列值从旧值插值到新值（此前是瞬跳）。
+- **坐标轴数据域过渡**：更新动画期间 y 轴数据域与系列值同步插值，避免「域瞬跳导致图形先蹦一下」。
+- **逐类型入场形态**：柱形错峰长出、折线从左到右画出、气泡弹簧弹出、扇形依次扫开、
+  K 线从开盘价展开、箱线图从中位线展开、热力图对角线浮现、漏斗从等宽收拢、
+  仪表盘指针扫值、关系图从环形收敛到力布局结果。
+- `examples/animation.html`：五张图 + 重播 / 换数据 / 错峰开关 / 动效偏好切换。
+
+### 修复
+
+- **首次渲染不播动画**：构造函数里传了 `animate: false`，`playEnter` 只在后续更新时才触发。
+- **动画期间几何被冻住**（系统性）：六个系列各自覆写 `rebuildPixels` 时，缓存键里没有动画进度，
+  缓存命中后几何停在动画第一帧。统一改用 `SeriesBase.buildSeriesKey()`（把 progress / 阶段 / 错峰写进键）。
+- **`finishAnimations()` 无效**：只把 progress 置 1 而不取消引擎补间，下一帧又被写回去。
+- **域过渡期间清掉了动画起点**：轻量同步仍调用 `updateSeries(series, false)`，
+  现在支持 `preserveAnimation` 参数，域过渡只换引用、不动插值起点。
+
+### 实测结论（纠正一条我此前的担心）
+
+- 引擎在补间期间把 `interactive` 置 false，**只发生在同一帧的同步块内**（保存→置 false→补间→恢复），
+  事件处理与命中检测看不到它 —— 逐帧采样实测：动画进行中 `hitTest` 始终命中系列。
+  因此**不需要**用「不可见驱动组件」绕开它，动画与交互可以同时成立。
+
 ## 0.8.0
 
 新增力导向关系图（无底图）。
