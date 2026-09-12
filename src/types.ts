@@ -15,6 +15,8 @@ export type SeriesType = 'line' | 'bar' | 'area' | 'scatter';
 
 export interface AxisOption {
   type?: ScaleType;
+  /** y 轴位置：left / right。默认第一个 y 轴在左，其余在右。 */
+  position?: 'left' | 'right';
   /** 轴名称，绘制在轴线外侧。 */
   name?: string;
   /** 数据域下限；'dataMin' 表示跟随数据。 */
@@ -41,6 +43,8 @@ export interface AxisOption {
 export interface SeriesOption {
   id?: string;
   type: SeriesType;
+  /** 绑定的 y 轴下标，默认 0（对应 option.yAxis 数组下标）。 */
+  yAxisIndex?: number;
   name?: string;
   data?: DataItem[];
   /** 对象型数据项的取值字段。 */
@@ -190,7 +194,8 @@ export interface ChartOption {
   theme?: 'light' | 'dark' | 'auto' | Partial<ChartTheme>;
   title?: TitleOption;
   xAxis?: AxisOption;
-  yAxis?: AxisOption;
+  /** 单个 y 轴，或 y 轴数组（多轴叠加：涨跌幅用右轴、成交量用左轴之类）。 */
+  yAxis?: AxisOption | AxisOption[];
   grid?: GridOption;
   legend?: LegendOption;
   tooltip?: TooltipOption;

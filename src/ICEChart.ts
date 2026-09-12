@@ -63,7 +63,8 @@ export class ICEChart {
   public plotArea: PlotArea;
   public grid: GridLines;
   public axisX: Axis;
-  public axisY: Axis;
+  /** y 轴组件，与 norm.yAxes 一一对应（axisYList[0] 是主 y 轴）。 */
+  public axisYList: Axis[] = [];
   public legend: Legend | null = null;
   public titleComponent: Title | null = null;
   public tooltip: Tooltip | null = null;
@@ -81,13 +82,21 @@ export class ICEChart {
   /** 未经缩放/筛选的完整数据域（缩放约束与跨图联动用）。 */
   public fullXDomain: any[] = [];
   public fullYDomain: any[] = [];
+  /** 每个 y 轴的完整数据域（未缩放）。 */
+  public fullYDomains: any[][] = [];
 
   private emitter = new Emitter();
   private canvasEl: any;
   private chartOptions: ICEChartOptions;
-  private viewState: { x: [any, any] | null; y: [any, any] | null } = { x: null, y: null };
+  private viewState: {
+    x: [any, any] | null;
+    y: [any, any] | null;
+    /** 非主轴 y 轴的窗口（多轴叠加时各自独立缩放）。 */
+    yAxes: Array<[any, any] | null>;
+  } = { x: null, y: null, yAxes: [] };
   private hiddenIds: Record<string, boolean> = {};
   private seriesSignature = '';
+  private axisSignature = '';
   private resizeObserver: any = null;
   private destroyed = false;
   /** 抑制对外事件的重入深度（跨图联动时避免 A→B→A 的回环）。 */
@@ -123,7 +132,9 @@ export class ICEChart {
     this.plotArea = new PlotArea({ left: 0, top: 0, width: 1, height: 1, zIndex: Z.plotArea });
     this.grid = new GridLines({ width: canvas.width, height: canvas.height, zIndex: Z.grid });
     this.axisX = new Axis({ orientation: 'x', width: canvas.width, height: canvas.height, zIndex: Z.axis });
-    this.axisY = new Axis({ orientation: 'y', width: canvas.width, height: canvas.height, zIndex: Z.axis });
+    this.axisYList = [
+      new Axis({ orientation: 'y', width: canvas.width, height: canvas.height, zIndex: Z.axis, axisIndex: 0, position: 'left' }),
+    ];
     this.legend = new Legend({ width: canvas.width, height: canvas.height, zIndex: Z.legend });
     this.titleComponent = new Title({ width: canvas.width, height: canvas.height, zIndex: Z.title });
     this.crosshair = new Crosshair({ width: canvas.width, height: canvas.height, zIndex: Z.crosshair });
@@ -135,7 +146,7 @@ export class ICEChart {
       this.plotArea,
       this.grid,
       this.axisX,
-      this.axisY,
+      ...this.axisYList,
       this.titleComponent,
       this.legend,
       this.crosshair,
@@ -189,7 +200,7 @@ export class ICEChart {
 
   /** 恢复完整数据域。 */
   public resetZoom(): this {
-    this.viewState = { x: null, y: null };
+    this.viewState = { x: null, y: null, yAxes: [] };
     this.rebuild(true);
     this.emit('zoom:change', this.currentRange());
     return this;
@@ -248,6 +259,24 @@ export class ICEChart {
   /** 当前数据域。 */
   public getDomain(axis: 'x' | 'y'): any[] {
     return axis === 'x' ? this.norm.xAxis.domain.slice() : this.norm.yAxis.domain.slice();
+  }
+
+  /** 指定 y 轴的数据域（多轴叠加时按 index 区分）。 */
+  public getAxisDomain(index: number): any[] {
+    const axis = this.norm.yAxes[index];
+    return axis ? axis.domain.slice() : this.norm.yAxis.domain.slice();
+  }
+
+  /** 设置指定 y 轴的数据域（多轴叠加时的程序化控制）。 */
+  public setAxisDomain(index: number, domain: any[], source = 'api'): this {
+    if (index === 0) return this.setDomain('y', domain, source);
+    if (this.destroyed) return this;
+    const clamped = this.clampAxisDomain(index, domain);
+    if (!clamped) return this;
+    this.viewState.yAxes[index] = clamped as [any, any];
+    this.rebuild(false);
+    this.emit(source === 'pan' ? 'pan:change' : 'zoom:change', this.currentRange());
+    return this;
   }
 
   /** 完整数据域（未缩放）。 */
@@ -366,10 +395,14 @@ export class ICEChart {
 
   // ------------------------------------------------------------- 序列化
 
-  public toJSON(): { option: ChartOption; view: { x: [any, any] | null; y: [any, any] | null }; hidden: Record<string, boolean> } {
+  public toJSON(): {
+    option: ChartOption;
+    view: { x: [any, any] | null; y: [any, any] | null; yAxes: Array<[any, any] | null> };
+    hidden: Record<string, boolean>;
+  } {
     return {
       option: toSerializableOption(this.option),
-      view: { x: this.viewState.x, y: this.viewState.y },
+      view: { x: this.viewState.x, y: this.viewState.y, yAxes: this.viewState.yAxes },
       hidden: { ...this.hiddenIds },
     };
   }
@@ -393,7 +426,8 @@ export class ICEChart {
     if (!snapshot) return;
     const option = snapshot.option || snapshot;
     this.hiddenIds = snapshot.hidden || {};
-    this.viewState = snapshot.view || { x: null, y: null };
+    const view = snapshot.view || {};
+    this.viewState = { x: view.x || null, y: view.y || null, yAxes: view.yAxes || [] };
     this.option = option;
     this.rebuild(false);
   }
@@ -405,9 +439,10 @@ export class ICEChart {
     const normalized = normalizeOption(option, { hiddenIds: this.hiddenIds });
     this.fullXDomain = normalized.xAxis.domain.slice();
     this.fullYDomain = normalized.yAxis.domain.slice();
+    this.fullYDomains = normalized.yAxes.map((axis) => axis.domain.slice());
 
     if (!options.preserveView) {
-      this.viewState = { x: null, y: null };
+      this.viewState = { x: null, y: null, yAxes: [] };
       const initial = this.initialWindow(normalized);
       if (initial) {
         this.viewState.x = initial;
@@ -442,11 +477,20 @@ export class ICEChart {
     if (this.destroyed) return;
     const canvas = this.canvasRect();
     const effectiveX = this.viewState.x || this.fullXDomain;
-    const effectiveY = this.viewState.y || this.fullYDomain;
+    const effectiveYs = this.fullYDomains.map((full, index) => {
+      const view = index === 0 ? this.viewState.y : this.viewState.yAxes[index];
+      return view && view.length === 2 ? view : full;
+    });
     const norm = normalizeOption(this.option, {
       hiddenIds: this.hiddenIds,
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
-      yDomain: effectiveY && effectiveY.length === 2 ? [Number(effectiveY[0]), Number(effectiveY[1])] : null,
+      yDomain:
+        effectiveYs[0] && effectiveYs[0].length === 2
+          ? [Number(effectiveYs[0][0]), Number(effectiveYs[0][1])]
+          : null,
+      yDomains: effectiveYs.map((domain) =>
+        domain && domain.length === 2 ? [Number(domain[0]), Number(domain[1])] : null
+      ),
     });
     // 第二次归一化后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
     this.norm = norm;
@@ -461,9 +505,11 @@ export class ICEChart {
     norm.xAxis.scale = createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, plot.width)], {
       logBase: norm.xAxis.option.logBase,
     });
-    norm.yAxis.scale = createScale(norm.yAxis.type, norm.yAxis.domain, [Math.max(1, plot.height), 0], {
-      logBase: norm.yAxis.option.logBase,
-    });
+    for (const axis of norm.yAxes) {
+      axis.scale = createScale(axis.type, axis.domain, [Math.max(1, plot.height), 0], {
+        logBase: axis.option.logBase,
+      });
+    }
   }
 
   private syncComponents(animate: boolean): void {
@@ -485,16 +531,33 @@ export class ICEChart {
     this.grid.setState({ width: canvas.width, height: canvas.height });
     this.grid.xScale = norm.xAxis.scale;
     this.grid.yScale = norm.yAxis.scale;
+    // 默认只有主轴画水平网格线；其它轴需要显式 showGrid: true
+    this.grid.horizontal = norm.yAxes
+      .map((axis, index) => ({ axis, axisLayout: layout.yAxes[index], index }))
+      .filter((item) => (item.axis.option.showGrid === undefined ? item.index === 0 : item.axis.option.showGrid !== false))
+      .map((item) => ({ scale: item.axis.scale as Scale, ticks: item.axisLayout.ticks }));
     this.grid.plot = plot;
     this.grid.grid = norm.option.grid || {};
     this.grid.theme = theme;
     this.grid.markDirty();
 
-    for (const axis of [this.axisX, this.axisY]) {
+    this.syncAxisComponents();
+    for (let i = 0; i < this.axisYList.length; i++) {
+      const axisComponent = this.axisYList[i];
+      axisComponent.setState({ width: canvas.width, height: canvas.height });
+      axisComponent.layout = layout;
+      axisComponent.theme = theme;
+      axisComponent.axis = norm.yAxes[i] || norm.yAxis;
+      axisComponent.axisIndex = i;
+      axisComponent.position = (norm.yAxes[i] && norm.yAxes[i].position) || 'left';
+      axisComponent.markDirty();
+    }
+    {
+      const axis = this.axisX;
       axis.setState({ width: canvas.width, height: canvas.height });
       axis.layout = layout;
       axis.theme = theme;
-      axis.axis = axis.orientation === 'x' ? norm.xAxis : norm.yAxis;
+      axis.axis = norm.xAxis;
       axis.markDirty();
     }
 
@@ -533,6 +596,36 @@ export class ICEChart {
     this.syncSeries(animate);
   }
 
+  /** 让 y 轴组件数量 / 位置与 norm.yAxes 保持一致（轴数量变化时增删组件）。 */
+  private syncAxisComponents(): void {
+    const axes = this.norm.yAxes;
+    const count = axes.length;
+    const signature = axes.map((axis) => axis.position).join('|');
+    if (this.axisSignature !== signature) {
+      for (const component of this.axisYList) {
+        this.root.removeChild(component);
+      }
+      const canvas = this.layout.canvas;
+      this.axisYList = axes.map(
+        (axis, index) =>
+          new Axis({
+            orientation: 'y',
+            width: canvas.width,
+            height: canvas.height,
+            zIndex: Z.axis + index,
+            axisIndex: index,
+            position: axis.position,
+          })
+      );
+      this.root.addChildren(this.axisYList);
+      this.axisSignature = signature;
+    }
+    while (this.axisYList.length > count) {
+      const extra = this.axisYList.pop() as Axis;
+      this.root.removeChild(extra);
+    }
+  }
+
   private syncSeries(animate: boolean): void {
     const norm = this.norm;
     const plot = this.layout.plot;
@@ -556,17 +649,19 @@ export class ICEChart {
       this.seriesSignature = signature;
     }
 
-    const coord = {
-      plot,
-      canvas: this.layout.canvas,
-      xScale: norm.xAxis.scale as Scale,
-      yScale: norm.yAxis.scale as Scale,
-      theme: norm.theme,
-    };
     for (let i = 0; i < this.seriesComponents.length; i++) {
       const component = this.seriesComponents[i];
       const series = norm.series[i];
       const visible = !series.hidden;
+      const axis = norm.yAxes[series.axisIndex] || norm.yAxis;
+      const coord = {
+        plot,
+        canvas: this.layout.canvas,
+        xScale: norm.xAxis.scale as Scale,
+        yScale: axis.scale as Scale,
+        yAxisIndex: series.axisIndex,
+        theme: norm.theme,
+      };
       component.setState({
         left: plot.x,
         top: plot.y,
@@ -613,9 +708,16 @@ export class ICEChart {
   }
 
   private clampDomain(axis: 'x' | 'y', domain: any[]): any[] | null {
-    const full = axis === 'x' ? this.fullXDomain : this.fullYDomain;
+    if (axis === 'y') return this.clampAxisDomain(0, domain);
+    return this.clampAxisDomain(-1, domain);
+  }
+
+  /** index = -1 表示 x 轴，>=0 表示对应的 y 轴。 */
+  private clampAxisDomain(index: number, domain: any[]): any[] | null {
+    const full = index < 0 ? this.fullXDomain : this.fullYDomains[index];
     if (!full || full.length < 2 || !domain || domain.length < 2) return null;
-    const internal = axis === 'x' ? this.norm.xAxis : this.norm.yAxis;
+    const internal = index < 0 ? this.norm.xAxis : this.norm.yAxes[index];
+    if (!internal) return null;
     if (internal.type === 'category') {
       const all = full;
       let from = all.indexOf(domain[0]);

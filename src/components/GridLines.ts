@@ -7,6 +7,8 @@ import type { Scale } from '../scale';
 export class GridLines extends ChartComponent {
   public xScale: Scale | null = null;
   public yScale: Scale | null = null;
+  /** 水平网格线：每个 y 轴一组（默认只有主轴画网格线）。 */
+  public horizontal: Array<{ scale: Scale; ticks: any[] }> = [];
   public plot: Rect = { x: 0, y: 0, width: 0, height: 0 };
   public grid: GridOption = {};
   public theme: ChartTheme | null = null;
@@ -26,13 +28,20 @@ export class GridLines extends ChartComponent {
     if (typeof ctx.setLineDash === 'function') {
       ctx.setLineDash((this.grid.lineDash || []).map((d) => d * this.unit()));
     }
+    const horizontal = this.horizontal.length
+      ? this.horizontal
+      : this.yScale
+        ? [{ scale: this.yScale, ticks: this.yScale.ticks(5) }]
+        : [];
     if (this.grid.y !== false) {
       ctx.beginPath();
-      for (const tick of this.yScale.ticks(5)) {
-        const y = this.snap(plot.y + this.yScale.map(tick));
-        if (!isFinite(y)) continue;
-        ctx.moveTo(plot.x, y);
-        ctx.lineTo(plot.x + plot.width, y);
+      for (const group of horizontal) {
+        for (const tick of group.ticks) {
+          const y = this.snap(plot.y + group.scale.map(tick));
+          if (!isFinite(y)) continue;
+          ctx.moveTo(plot.x, y);
+          ctx.lineTo(plot.x + plot.width, y);
+        }
       }
       ctx.stroke();
     }

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 多 y 轴</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>多 y 轴叠加</h1>
+    <p class="lead">
+      成交量用左轴（柱形，自动包含 0），涨跌幅与换手率用右轴（折线，量纲完全不同）。
+      两个轴各自独立计算数据域、独立量测刻度宽度；同侧出现多个轴时逐层外移。
+      系列通过 <code>yAxisIndex</code> 绑定到某个轴，堆叠也按「轴 + stack 名」分组。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="440"></canvas></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script>
+      const days = Array.from({ length: 40 }, (_, i) => `D${i + 1}`);
+      const volume = days.map((_, i) => Math.round(800 + Math.abs(Math.sin(i / 5)) * 1600 + Math.random() * 300));
+      const change = days.map((_, i) => Number((Math.sin(i / 3) * 3 + (Math.random() - 0.5)).toFixed(2)));
+      const turnover = days.map((_, i) => Number((2 + Math.cos(i / 4) * 1.2).toFixed(2)));
+
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '成交量 / 涨跌幅 / 换手率（三轴叠加）' },
+        theme: 'light',
+        legend: { show: true, position: 'top' },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        xAxis: { type: 'category' },
+        yAxis: [
+          { name: '成交量（手）' },
+          { name: '涨跌幅 / 换手率（%）', position: 'right' },
+        ],
+        interaction: {
+          hover: { enabled: true, dimOthers: true },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+          select: { enabled: true, mode: 'single' },
+        },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+        series: [
+          { id: 'volume', type: 'bar', name: '成交量', data: volume, barWidth: 0.6 },
+          { id: 'change', type: 'line', name: '涨跌幅', yAxisIndex: 1, data: change, smooth: true, symbolSize: 6 },
+          { id: 'turnover', type: 'line', name: '换手率', yAxisIndex: 1, data: turnover, lineDash: [5, 4] },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      chart.on('item:hover', (p) =>
+        write(`hover  ${p.seriesName} @ ${p.xValue} = ${p.value}（轴 ${chart.norm.series[p.seriesIndex].axisIndex}）`)
+      );
+      window.__chart = chart;
+    </script>
+  </body>
+</html>

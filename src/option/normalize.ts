@@ -12,7 +12,10 @@ export interface NormalizeContext {
   hiddenIds?: Record<string, boolean>;
   /** 当前 x 数据域（数据缩放后）。不传表示自动。 */
   xDomain?: [any, any] | null;
+  /** 主 y 轴的数据域（缩放后），等价于 yDomains[0]。 */
   yDomain?: [number, number] | null;
+  /** 每个 y 轴的数据域（多轴时按 index 区分）。 */
+  yDomains?: Array<[number, number] | null>;
 }
 
 /**
@@ -92,20 +95,45 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const { domain: rawXDomain, categories } = buildXDomain(xType, series, xAxisOption);
   const xDomain = context.xDomain ? [context.xDomain[0], context.xDomain[1]] : rawXDomain;
 
+  // 多 y 轴：option.yAxis 可以是单个对象或数组；每个系列用 yAxisIndex 绑定到其中一个
+  const yAxisOptions: AxisOption[] = Array.isArray(option.yAxis) ? option.yAxis : [option.yAxis || {}];
+  if (!yAxisOptions.length) yAxisOptions.push({});
+  for (const s of series) {
+    const raw = Number(s.option.yAxisIndex);
+    s.axisIndex = isFinite(raw) ? Math.max(0, Math.min(yAxisOptions.length - 1, Math.floor(raw))) : 0;
+  }
+
   applyStacking(series);
 
-  const yAxisOption: AxisOption = merged.yAxis;
-  const yType = yAxisOption.type || 'linear';
-  const yDomain = context.yDomain ? context.yDomain : buildYDomain(series, yAxisOption, yType);
-
-  const xAxis: InternalAxis = { option: xAxisOption, type: xType, domain: xDomain, scale: null };
-  const yAxis: InternalAxis = { option: yAxisOption, type: yType, domain: yDomain as any[], scale: null };
+  const xAxis: InternalAxis = {
+    option: xAxisOption,
+    type: xType,
+    domain: xDomain,
+    scale: null,
+    index: 0,
+    position: 'left',
+  };
+  const yAxes: InternalAxis[] = yAxisOptions.map((option, index) => {
+    const type = option.type || 'linear';
+    const explicit = context.yDomains ? context.yDomains[index] : index === 0 ? context.yDomain : null;
+    const domain = explicit ? (explicit as any[]) : ((buildYDomain(series, index, option, type) as any[]) as any[]);
+    return {
+      option,
+      type,
+      domain,
+      scale: null,
+      index,
+      position: option.position || (index === 0 ? 'left' : 'right'),
+    };
+  });
+  const yAxis = yAxes[0];
 
   return {
     option: merged,
     theme,
     series,
     xAxis,
+    yAxes,
     yAxis,
     categories,
     visibleSeries: series.filter((s) => !s.hidden),
@@ -134,7 +162,7 @@ function buildSeries(seriesOptions: SeriesOption[], theme: ChartTheme, _selected
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
     const { points, hasExplicitX } = buildPoints(option);
-    out.push({ id, index: i, type: option.type, name, color, option, points, hasExplicitX, hidden: false });
+    out.push({ id, index: i, type: option.type, name, color, option, points, hasExplicitX, hidden: false, axisIndex: 0 });
   }
   return out;
 }
@@ -237,11 +265,12 @@ function buildXDomain(
   return { domain: [min, max], categories: [] };
 }
 
-function buildYDomain(series: InternalSeries[], option: AxisOption, type: string): [number, number] {
+function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisOption, type: string): [number, number] {
   const values: number[] = [];
   let includeZero = false;
   for (const s of series) {
     if (s.hidden) continue;
+    if (s.axisIndex !== axisIndex) continue;
     if (s.type === 'bar' || s.type === 'area') includeZero = true;
     for (const p of s.points) {
       if (p.y !== null) values.push(p.y);
@@ -287,7 +316,8 @@ function applyStacking(series: InternalSeries[]): void {
       }
       continue;
     }
-    const key = s.option.stack;
+    // 堆叠按「轴 + stack 名」分组：不同 y 轴上的同名 stack 不应互相累加
+    const key = `${s.axisIndex}::${s.option.stack}`;
     (groups[key] = groups[key] || []).push(s);
   }
   for (const key in groups) {

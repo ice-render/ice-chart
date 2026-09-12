@@ -8,6 +8,8 @@ export interface SeriesCoord {
   canvas: Rect;
   xScale: Scale;
   yScale: Scale;
+  /** 该系列绑定的 y 轴下标。 */
+  yAxisIndex?: number;
   theme: ChartTheme;
 }
 

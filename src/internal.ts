@@ -29,6 +29,8 @@ export interface InternalSeries {
   hasExplicitX: boolean;
   /** 该系列是否被图例隐藏。 */
   hidden: boolean;
+  /** 绑定的 y 轴下标。 */
+  axisIndex: number;
 }
 
 export interface InternalAxis {
@@ -36,6 +38,10 @@ export interface InternalAxis {
   type: 'linear' | 'category' | 'time' | 'log';
   domain: any[];
   scale: Scale | null;
+  /** 轴下标：x 轴恒为 0；y 轴对应 option.yAxis 数组下标。 */
+  index: number;
+  /** y 轴位置（x 轴为 left，不使用）。 */
+  position: 'left' | 'right';
 }
 
 export interface NormalizedOption {
@@ -44,6 +50,9 @@ export interface NormalizedOption {
   theme: ChartTheme;
   series: InternalSeries[];
   xAxis: InternalAxis;
+  /** 全部 y 轴（yAxes[0] 是主 y 轴）。 */
+  yAxes: InternalAxis[];
+  /** 主 y 轴别名，等价于 yAxes[0]。 */
   yAxis: InternalAxis;
   /** 类目轴的类目列表（数值轴为空数组）。 */
   categories: any[];
@@ -64,6 +73,8 @@ export interface AxisLayout {
   ticks: any[];
   /** 刻度标签文本。 */
   labels: string[];
+  /** 该轴相对绘图区边缘外扩的像素距离（多轴时同侧的轴逐层外移）。 */
+  offset: number;
   /** 刻度标签的最大宽度 / 高度（像素）。 */
   labelWidth: number;
   labelHeight: number;
@@ -80,6 +91,9 @@ export interface ChartLayout {
   legend: LegendLayout | null;
   title: TitleLayout | null;
   xAxisLayout: AxisLayout;
+  /** 每个 y 轴的刻度布局，与 norm.yAxes 一一对应。 */
+  yAxes: AxisLayout[];
+  /** 主 y 轴的刻度布局（yAxes[0] 的别名）。 */
   yAxisLayout: AxisLayout;
   margin: { top: number; right: number; bottom: number; left: number };
 }

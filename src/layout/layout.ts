@@ -29,12 +29,34 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   const xScale = createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, canvas.width)], {
     logBase: norm.xAxis.option.logBase,
   });
-  const yScale = createScale(norm.yAxis.type, norm.yAxis.domain, [Math.max(1, canvas.height), 0], {
-    logBase: norm.yAxis.option.logBase,
+  const xAxisLayout = buildAxisLayout(norm, 'x', norm.xAxis, xScale, ctx);
+  // 每个 y 轴各量一次刻度：多轴时刻度数量与标签宽度互不影响
+  const yAxisLayouts: AxisLayout[] = norm.yAxes.map((axis) => {
+    const scale = createScale(axis.type, axis.domain, [Math.max(1, canvas.height), 0], {
+      logBase: axis.option.logBase,
+    });
+    return buildAxisLayout(norm, 'y', axis, scale, ctx);
   });
-
-  const xAxisLayout = buildAxisLayout(norm, 'x', xScale, ctx);
-  const yAxisLayout = buildAxisLayout(norm, 'y', yScale, ctx);
+  // 同侧的多个轴逐层外移；offset 是相对绘图区边缘的距离
+  let leftOffset = 0;
+  let rightOffset = 0;
+  for (let i = 0; i < norm.yAxes.length; i++) {
+    const axis = norm.yAxes[i];
+    const layout = yAxisLayouts[i];
+    if (axis.option.show === false) {
+      layout.offset = 0;
+      continue;
+    }
+    const width = yAxisReserve(axis, layout);
+    if (axis.position === 'right') {
+      layout.offset = rightOffset;
+      rightOffset += width;
+    } else {
+      layout.offset = leftOffset;
+      leftOffset += width;
+    }
+  }
+  const yAxisLayout = yAxisLayouts[0];
 
   const title = buildTitleLayout(norm);
   const titleHeight = title ? (title.text ? title.textStyle.fontSize * 1.5 : 0) + (title.subtext ? title.subtextStyle.fontSize * 1.4 : 0) : 0;
@@ -56,11 +78,8 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   }
 
   const showX = norm.xAxis.option.show !== false;
-  const showY = norm.yAxis.option.show !== false;
-  if (showY) {
-    left += yAxisLayout.labelWidth + TICK_LENGTH + LABEL_GAP;
-    if (norm.yAxis.option.name) left += yAxisLayout.nameHeight + AXIS_NAME_GAP;
-  }
+  left += leftOffset;
+  right -= rightOffset;
   if (showX) {
     bottom -= xAxisLayout.labelHeight + TICK_LENGTH + LABEL_GAP;
     if (norm.xAxis.option.name) bottom -= xAxisLayout.nameHeight + AXIS_NAME_GAP;
@@ -85,17 +104,31 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     legend,
     title,
     xAxisLayout,
+    yAxes: yAxisLayouts,
     yAxisLayout,
     margin,
   };
 }
 
-function buildAxisLayout(norm: NormalizedOption, axis: 'x' | 'y', scale: any, ctx: any): AxisLayout {
-  const axisOption = axis === 'x' ? norm.xAxis.option : norm.yAxis.option;
+/** 单个 y 轴占用的横向空间。 */
+function yAxisReserve(axis: { option: { name?: string } }, layout: AxisLayout): number {
+  let width = layout.labelWidth + TICK_LENGTH + LABEL_GAP;
+  if (axis.option.name) width += layout.nameHeight + AXIS_NAME_GAP;
+  return width;
+}
+
+function buildAxisLayout(
+  norm: NormalizedOption,
+  axis: 'x' | 'y',
+  internal: { option: any },
+  scale: any,
+  ctx: any
+): AxisLayout {
+  const axisOption = internal.option;
   const fontSize = norm.theme.fontSize;
   const fontFamily = norm.theme.fontFamily;
   if (axisOption.show === false) {
-    return { ticks: [], labels: [], labelWidth: 0, labelHeight: 0, nameWidth: 0, nameHeight: 0 };
+    return { ticks: [], labels: [], offset: 0, labelWidth: 0, labelHeight: 0, nameWidth: 0, nameHeight: 0 };
   }
   const ticks = scale.ticks(axisOption.tickCount || 5);
   const labels: string[] = [];
@@ -114,6 +147,7 @@ function buildAxisLayout(norm: NormalizedOption, axis: 'x' | 'y', scale: any, ct
   return {
     ticks,
     labels,
+    offset: 0,
     labelWidth: axis === 'y' ? maxLabelWidth : 0,
     labelHeight: axis === 'x' ? (rotate > 0 ? rotatedHeight : fontSize * 1.4) : 0,
     nameWidth: axis === 'x' ? nameWidth : 0,
