@@ -329,9 +329,9 @@
         xAxis: { type: 'value', name: 'x', min: -6, max: 6 },
         yAxis: { name: 'y', min: -1.6, max: 1.6 },
         series: [
-          { id: 'd1', type: 'function', name: '9 点 · 均匀', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 9, adaptive: false, lineWidth: 2.4, color: '#ff5b6a' },
-          { id: 'd2', type: 'function', name: '40 点 · 均匀', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 40, adaptive: false, lineWidth: 1.6, color: '#fac858' },
-          { id: 'd3', type: 'function', name: '自适应细分', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 40, lineWidth: 1.6, color: IDENTITY.accent },
+          { id: 'dens1', type: 'function', name: '9 点 · 均匀', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 9, adaptive: false, lineWidth: 2.4, color: '#ff5b6a' },
+          { id: 'dens2', type: 'function', name: '40 点 · 均匀', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 40, adaptive: false, lineWidth: 1.6, color: '#fac858' },
+          { id: 'dens3', type: 'function', name: '自适应细分', expression: 'sin(3*x)*exp(-x^2/8)', domain: [-6, 6], samples: 40, lineWidth: 1.6, color: IDENTITY.accent },
         ],
       };
       const density = ICEChart.createChart('density', densityOption);
