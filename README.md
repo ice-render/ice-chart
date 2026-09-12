@@ -415,6 +415,10 @@ K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件
 
 ## 开发
 
+本包的 `devDependencies` 把引擎写成 `file:../ice-render`（本地联调用）：
+**克隆下来后请把 ice-render 仓库放到同级目录**，再 `npm install`；
+只想跑测试、不打算改引擎的话，把这条换成 `npm i -D ice-render@^1.4.7` 即可。
+
 ```bash
 npm test              # jest（纯函数单测 + 真实引擎集成的 jsdom 测试）
 npm run types:check   # tsc --noEmit
@@ -427,14 +431,14 @@ npm run verify        # lint → types:check → build → test
 ```bash
 npm run build && npm run examples:prepare
 node scripts/serve-examples.cjs &
-npm run audit:interactions -- ./.audit      # 20 页 × 11 步交互，逐步截图 + 几何断言
+npm run audit:interactions -- ./.audit      # 22 页 × 11 步交互，逐步截图 + 几何断言
 npm run audit:hover -- ./.hover-sweep       # 逐类型逐个数据点悬停：反馈动画 + 像素缓存新鲜度
 ```
 
 审计会检查每一步之后：提示框是否越出画布、是否压住坐标轴数值标签或图例、
 高亮标记是否落在绘图区内；任何一条不满足就以非 0 退出码结束，可用于 CI。
 
-悬停实测（`audit:hover`）会把指针移到 16 种图表的每一个数据点上，逐点断言三件事：
+悬停实测（`audit:hover`）会把指针移到 18 种图表的每一个数据点上，逐点断言三件事：
 交互层把 `hoverIndex` 下发到了对应系列、反馈动画确实推进到 1、悬停几何没有越界；
 同时做一次**像素缓存新鲜度**检查（清掉缓存键重算，两次像素必须一致）——
 它抓的是「缩放 / 数据变化后 `pixels` 没重算，悬停高亮画在别处」这类缓存 bug。
