@@ -27,7 +27,7 @@ const pages = [
   'boxplot-waterfall',
   'treemap',
   'graph',
-  'function',
+  'mini-matlab',
   'finance',
   'sankey',
   'time-series',
