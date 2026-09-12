@@ -215,8 +215,8 @@
         stream.appendData('mem', [[t, Number(state.mem.toFixed(2))]], { maxPoints: WINDOW });
         state.pushed += 2;
 
-        // 蜡烛聚合：最后一根随数据实时跳动
-        const load = (state.cpu + state.mem + state.io) / 3;
+        // 蜡烛聚合：最后一根随数据实时跳动（用 CPU 单指标，波动比三项平均更直观）
+        const load = state.cpu;
         if (!building) building = { o: load, c: load, l: load, h: load };
         building.c = load;
         building.h = Math.max(building.h, load);
