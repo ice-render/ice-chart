@@ -34,6 +34,7 @@ const pages = [
   'interactions',
   'time-series',
   'live-stream',
+  'dashboard',
   'large-data',
   'a11y',
   'linked-charts',

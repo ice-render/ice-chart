@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 运营监控大屏</title>
+    <style>
+      :root {
+        --bg: #070d1a;
+        --panel: rgba(15, 26, 46, 0.92);
+        --panel-border: rgba(77, 148, 255, 0.22);
+        --panel-glow: rgba(77, 148, 255, 0.12);
+        --text: #dbe4f3;
+        --muted: #7d8ba3;
+        --accent: #4d94ff;
+        --ok: #479f76;
+        --warn: #ffda6a;
+        --danger: #ea868f;
+        --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background:
+          radial-gradient(1200px 600px at 20% -10%, rgba(77, 148, 255, 0.14), transparent 60%),
+          radial-gradient(900px 500px at 90% 0%, rgba(110, 223, 246, 0.1), transparent 55%),
+          var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        min-height: 100vh;
+      }
+      .screen { max-width: 1400px; margin: 0 auto; padding: 14px 16px 28px; }
+
+      header.bar {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 10px 14px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(28, 46, 78, 0.95), rgba(12, 21, 38, 0.95));
+        box-shadow: 0 0 24px var(--panel-glow);
+      }
+      header.bar h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 2px;
+      }
+      header.bar h1 span { color: var(--accent); }
+      .bar .spacer { flex: 1 1 auto; }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--panel-border);
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .pill b { color: var(--text); font-weight: 600; }
+      .pill.ok { border-color: rgba(71, 159, 118, 0.5); color: var(--ok); }
+      .pill.warn { border-color: rgba(255, 218, 106, 0.55); color: var(--warn); }
+      .pill.danger { border-color: rgba(234, 134, 143, 0.6); color: var(--danger); }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+      .bar button {
+        font: inherit;
+        font-size: 12px;
+        padding: 4px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        background: rgba(77, 148, 255, 0.12);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .bar button:hover { border-color: var(--accent); color: #fff; }
+
+      .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 12px; }
+      .kpi {
+        position: relative;
+        padding: 10px 12px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+      .kpi::after {
+        content: '';
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 3px;
+        background: var(--accent);
+        box-shadow: 0 0 12px var(--accent);
+      }
+      .kpi .label { font-size: 12px; color: var(--muted); }
+      .kpi .value { margin-top: 2px; font-family: var(--mono); font-size: 24px; line-height: 1.15; }
+      .kpi .value small { font-size: 12px; color: var(--muted); margin-left: 4px; }
+      .kpi .trend { font-family: var(--mono); font-size: 12px; color: var(--ok); }
+      .kpi .trend.down { color: var(--danger); }
+      .kpi.alert { border-color: rgba(234, 134, 143, 0.65); box-shadow: 0 0 18px rgba(234, 134, 143, 0.25); }
+      .kpi.alert::after { background: var(--danger); box-shadow: 0 0 12px var(--danger); }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 420px);
+        justify-content: center;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .panel {
+        position: relative;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: inset 0 0 30px rgba(9, 18, 34, 0.8);
+        padding: 8px;
+      }
+      .panel.wide { grid-column: span 2; }
+      .panel .panel-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text);
+        padding: 2px 2px 6px;
+      }
+      .panel .panel-title i {
+        width: 3px; height: 12px; border-radius: 2px;
+        background: var(--accent);
+        box-shadow: 0 0 10px var(--accent);
+      }
+      .panel .panel-title .meta { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .panel.alert { border-color: rgba(234, 134, 143, 0.65); box-shadow: 0 0 22px rgba(234, 134, 143, 0.2); }
+      canvas { display: block; touch-action: none; }
+      .footnote { margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.9; text-align: center; }
+      .footnote code { color: var(--accent); font-family: var(--mono); }
+
+      /* 序列化 JSON 面板（assets/snapshot-panel.js 的 class 名）—— 大屏是深色，这里覆盖成暗色 */
+      #snapshot-panel {
+        margin-top: 12px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 10px 12px;
+      }
+      #snapshot-panel .snapshot-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      #snapshot-panel .snapshot-title { font-size: 13px; }
+      #snapshot-panel .spacer { flex: 1 1 auto; }
+      #snapshot-panel .snapshot-meta,
+      #snapshot-panel .snapshot-note { color: var(--muted); font-size: 11px; }
+      #snapshot-panel .snapshot-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+      #snapshot-panel button {
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 5px;
+        border: 1px solid var(--panel-border);
+        background: rgba(77, 148, 255, 0.1);
+        color: var(--muted);
+        cursor: pointer;
+      }
+      #snapshot-panel button:hover { border-color: var(--accent); color: var(--text); }
+      #snapshot-panel .snapshot-tabs button.active {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(77, 148, 255, 0.16);
+      }
+      #snapshot-panel .snapshot-json {
+        margin: 0;
+        padding: 8px 10px;
+        max-height: 15rem;
+        overflow: auto;
+        border: 1px solid rgba(77, 148, 255, 0.16);
+        border-radius: 6px;
+        background: rgba(6, 12, 24, 0.9);
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      #snapshot-panel .tok-key { color: #6edff6; }
+      #snapshot-panel .tok-str { color: #79dfc1; }
+      #snapshot-panel .tok-num { color: #ffda6a; }
+      #snapshot-panel .tok-bool { color: #e685b5; }
+      #snapshot-panel .tok-null { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="screen">
+      <header class="bar">
+        <h1>运营监控<span>大屏</span></h1>
+        <span class="pill ok"><i class="dot"></i>链路正常</span>
+        <span class="pill" id="pill-clock">--:--:--</span>
+        <span class="pill">运行 <b id="pill-uptime">00:00</b></span>
+        <span class="pill" id="pill-alert">告警 <b>0</b></span>
+        <span class="spacer"></span>
+        <button id="btn-toggle">暂停</button>
+      </header>
+
+      <div class="kpis">
+        <div class="kpi" id="kpi-qps">
+          <div class="label">实时 QPS</div>
+          <div class="value">0<small>req/s</small></div>
+          <div class="trend">▲ 0.0%</div>
+        </div>
+        <div class="kpi" id="kpi-users">
+          <div class="label">在线用户</div>
+          <div class="value">0<small>人</small></div>
+          <div class="trend">▲ 0.0%</div>
+        </div>
+        <div class="kpi" id="kpi-cpu">
+          <div class="label">CPU 负载</div>
+          <div class="value">0<small>%</small></div>
+          <div class="trend">▲ 0.0%</div>
+        </div>
+        <div class="kpi" id="kpi-latency">
+          <div class="label">P95 延迟</div>
+          <div class="value">0<small>ms</small></div>
+          <div class="trend">▲ 0.0%</div>
+        </div>
+        <div class="kpi" id="kpi-errors">
+          <div class="label">错误率</div>
+          <div class="value">0<small>%</small></div>
+          <div class="trend">▲ 0.0%</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="panel wide">
+          <div class="panel-title"><i></i>实时流量（滑动窗口）<span class="meta">60Hz 追加 · 与左侧联动</span></div>
+          <canvas id="flow" width="836" height="240"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>实时延迟<span class="meta">联动：悬停/缩放</span></div>
+          <canvas id="latency" width="404" height="240"></canvas>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><i></i>负载仪表盘<span class="meta">弹簧指针</span></div>
+          <canvas id="gauge" width="404" height="240"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>机房能力对比<span class="meta">实时抖动</span></div>
+          <canvas id="radar" width="404" height="240"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>时段热力图<span class="meta">每 250ms 左移</span></div>
+          <canvas id="heat" width="404" height="240"></canvas>
+        </div>
+
+        <div class="panel wide">
+          <div class="panel-title"><i></i>流量来源 → 转化路径<span class="meta">桑基流动</span></div>
+          <canvas id="sankey" width="836" height="240"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>渠道占比<span class="meta">实时重排</span></div>
+          <canvas id="rose" width="404" height="240"></canvas>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><i></i>服务拓扑<span class="meta">可拖拽节点</span></div>
+          <canvas id="graph" width="404" height="240"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>资源构成<span class="meta">矩形 morph</span></div>
+          <canvas id="treemap" width="404" height="240"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>转化漏斗<span class="meta">阶段显隐</span></div>
+          <canvas id="funnel" width="404" height="240"></canvas>
+        </div>
+
+        <div class="panel wide">
+          <div class="panel-title"><i></i>实时负载 K 线（每 8 个采样聚合一根）<span class="meta">最后一根随数据跳动</span></div>
+          <canvas id="candles" width="836" height="220"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><i></i>数据流说明<span class="meta"></span></div>
+          <div class="footnote" style="text-align:left; margin:2px 4px">
+            11 张图共用一条数据流：折线 / 延迟用 <code>appendData</code> 滑动窗口（60Hz），
+            仪表盘、雷达、热力图按不同频率 <code>setData</code>，玫瑰图 / 矩形树图 / 漏斗用更新动画做
+            <b>重排过渡</b>，K 线最后一根实时跳动。<code>linkCharts</code> 把流量与延迟按 x 值联动
+            （悬停 / 缩放 / 框选三路）。<br />
+            面板在 CPU &gt; 85% 时会亮红边 —— 点「注入尖峰」看整屏反应。
+          </div>
+        </div>
+      </div>
+
+      <div class="footnote">
+        ice-chart · 全部交互（悬停 / 缩放 / 平移 / 框选 / 图例 / 拖拽节点 / 键盘）都是引擎内建能力
+      </div>
+
+      <div id="snapshot-panel"></div>
+    </div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      const WINDOW = 180;
+      const CANDLE_TICKS = 8;
+      const CANDLE_COUNT = 26;
+      const HEAT_COLS = 20;
+      const HEAT_ROWS = ['华东', '华北', '华南'];
+      const BASE = {
+        theme: 'dark',
+        legend: { show: false },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        animation: { enter: { duration: 600, easing: 'easeOutCubic' } },
+        xAxis: { type: 'value' },
+        yAxis: {},
+      };
+
+      // ---------------- 数据源：一条流喂所有面板 ----------------
+      const state = {
+        running: true,
+        t: 0,
+        cpu: 42,
+        cpuTarget: 42,
+        spike: 0,
+        qps: 1200,
+        users: 8600,
+        latency: 180,
+        errors: 0.4,
+        alerts: 0,
+        startedAt: Date.now(),
+        drift: (v, target, volatility, k = 0.08) => v + (target - v) * k + (Math.random() - 0.5) * volatility,
+      };
+
+      // ---------------- 1) 实时流量（面积 + 折线） ----------------
+      const flow = ICEChart.createChart('flow', {
+        ...BASE,
+        title: null,
+        yAxis: { name: 'req/s', min: 0, max: 2600 },
+        series: [
+          { id: 'qps', type: 'area', name: 'QPS', data: [], color: '#4D94FF', areaOpacity: 0.22, lineWidth: 2, smooth: 0.25 },
+          { id: 'p95', type: 'line', name: 'P95(ms)', data: [], color: '#6EDFF6', lineWidth: 1.5, smooth: 0.25 },
+        ],
+      });
+
+      // ---------------- 2) 实时延迟（与流量联动） ----------------
+      const latency = ICEChart.createChart('latency', {
+        ...BASE,
+        title: null,
+        yAxis: { name: 'ms', min: 0, max: 600 },
+        series: [
+          {
+            id: 'lat',
+            type: 'area',
+            name: 'P95',
+            data: [],
+            color: '#479F76',
+            areaOpacity: 0.25,
+            lineWidth: 2,
+            smooth: 0.25,
+            // 延迟超阈值时用红色告警线
+            markLine: undefined,
+          },
+        ],
+      });
+      // 三路联动：悬停 / 缩放 / 框选（按 x 数据值对齐，不是按像素）
+      const link = ICEChart.linkCharts([flow, latency], { axis: 'x', hover: true, zoom: true, brush: true });
+
+      // ---------------- 3) 仪表盘 ----------------
+      const gauge = ICEChart.createChart('gauge', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        gauge: {
+          min: 0,
+          max: 100,
+          splitNumber: 5,
+          lineWidth: 12,
+          axisLineColor: [
+            [0.6, '#479F76'],
+            [0.85, '#FFDA6A'],
+            [1, '#EA868F'],
+          ],
+          pointer: { show: true, width: 5, length: 0.7 },
+          detail: { formatter: (v) => `${v.toFixed(0)}%`, fontSize: 24 },
+          title: { show: false },
+        },
+        series: [{ id: 'g', type: 'gauge', name: '负载', data: [{ name: '负载', value: 0 }] }],
+      });
+
+      // ---------------- 4) 雷达：机房能力 ----------------
+      const radar = ICEChart.createChart('radar', {
+        ...BASE,
+        radar: {
+          indicators: [
+            { name: '算力', max: 100 },
+            { name: '存储', max: 100 },
+            { name: '带宽', max: 100 },
+            { name: '稳定', max: 100 },
+            { name: '成本', max: 100 },
+          ],
+          splitNumber: 4,
+        },
+        animation: { enter: { duration: 600 }, update: { duration: 300, easing: 'linear' } },
+        series: [
+          { id: 'east', type: 'radar', name: '华东', data: [82, 74, 88, 91, 66], color: '#4D94FF' },
+          { id: 'north', type: 'radar', name: '华北', data: [70, 88, 72, 84, 78], color: '#6EDFF6' },
+        ],
+      });
+
+      // ---------------- 5) 滚动热力图 ----------------
+      const heatMatrix = Array.from({ length: HEAT_COLS }, () => [40, 50, 30]);
+      const heatData = () => {
+        const out = [];
+        for (let col = 0; col < HEAT_COLS; col++) {
+          for (let row = 0; row < HEAT_ROWS.length; row++) out.push([`T${col}`, HEAT_ROWS[row], Number(heatMatrix[col][row].toFixed(1))]);
+        }
+        return out;
+      };
+      const heat = ICEChart.createChart('heat', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', data: Array.from({ length: HEAT_COLS }, (_, i) => `T${i}`) },
+        yAxis: { type: 'category' },
+        grid: { x: false, y: false },
+        animation: { enter: { duration: 400 }, update: { duration: 240, easing: 'linear' } },
+        series: [{ id: 'heat', type: 'heatmap', name: '负载', data: heatData(), heatmap: { minColor: '#12233d', maxColor: '#4D94FF' } }],
+      });
+
+      // ---------------- 6) 桑基：来源 → 转化（流动效果） ----------------
+      const sankey = ICEChart.createChart('sankey', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        sankey: {
+          nodes: [
+            { name: '自然搜索' },
+            { name: '信息流' },
+            { name: '社交媒体' },
+            { name: '首页' },
+            { name: '列表页' },
+            { name: '详情页' },
+            { name: '加购' },
+            { name: '下单' },
+            { name: '流失' },
+          ],
+          links: [
+            { source: '自然搜索', target: '首页', value: 420 },
+            { source: '自然搜索', target: '列表页', value: 260 },
+            { source: '信息流', target: '首页', value: 300 },
+            { source: '信息流', target: '详情页', value: 180 },
+            { source: '社交媒体', target: '首页', value: 220 },
+            { source: '社交媒体', target: '流失', value: 120 },
+            { source: '首页', target: '列表页', value: 520 },
+            { source: '首页', target: '流失', value: 420 },
+            { source: '列表页', target: '详情页', value: 560 },
+            { source: '列表页', target: '流失', value: 220 },
+            { source: '详情页', target: '加购', value: 420 },
+            { source: '详情页', target: '流失', value: 320 },
+            { source: '加购', target: '下单', value: 300 },
+            { source: '加购', target: '流失', value: 120 },
+          ],
+          nodeWidth: 14,
+          nodePadding: 10,
+          flow: true,
+          flowSpeed: 46,
+        },
+        series: [{ id: 'flowmap', type: 'sankey', name: '流量' }],
+      });
+
+      // ---------------- 7) 渠道占比（玫瑰图，实时重排） ----------------
+      const roseData = [
+        { name: '自然搜索', value: 420 },
+        { name: '信息流', value: 300 },
+        { name: '社交媒体', value: 220 },
+        { name: '直接访问', value: 160 },
+        { name: '联盟广告', value: 90 },
+      ];
+      const rose = ICEChart.createChart('rose', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        series: [{ id: 'ch', type: 'pie', name: '渠道', data: roseData, roseType: 'area', innerRadius: 0.35, label: { show: false } }],
+      });
+
+      // ---------------- 8) 服务拓扑（关系图，可拖节点） ----------------
+      const graph = ICEChart.createChart('graph', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        graph: {
+          categories: [
+            { name: '接入层', color: '#4D94FF' },
+            { name: '服务层', color: '#479F76' },
+            { name: '存储层', color: '#FFDA6A' },
+          ],
+          nodes: [
+            { id: 'gw', name: '网关', value: 14, category: '接入层' },
+            { id: 'bff', name: 'BFF', value: 12, category: '接入层' },
+            { id: 'order', name: '订单', value: 11, category: '服务层' },
+            { id: 'user', name: '用户', value: 10, category: '服务层' },
+            { id: 'pay', name: '支付', value: 9, category: '服务层' },
+            { id: 'mysql', name: 'MySQL', value: 8, category: '存储层' },
+            { id: 'redis', name: 'Redis', value: 6, category: '存储层' },
+          ],
+          links: [
+            { source: 'gw', target: 'bff', value: 6 },
+            { source: 'bff', target: 'order', value: 5 },
+            { source: 'bff', target: 'user', value: 4 },
+            { source: 'order', target: 'pay', value: 4 },
+            { source: 'order', target: 'mysql', value: 3 },
+            { source: 'user', target: 'redis', value: 3 },
+            { source: 'pay', target: 'mysql', value: 2 },
+          ],
+        },
+        series: [{ id: 'topo', type: 'graph', name: '拓扑' }],
+      });
+
+      // ---------------- 9) 资源构成（矩形树图，morph） ----------------
+      const tree = [
+        { name: '计算', children: [{ name: '订单服务', value: 320 }, { name: '用户服务', value: 260 }, { name: '支付服务', value: 180 }] },
+        { name: '存储', children: [{ name: 'MySQL', value: 280 }, { name: 'Redis', value: 140 }] },
+        { name: '网络', value: 160 },
+      ];
+      const treemap = ICEChart.createChart('treemap', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        animation: { enter: { duration: 600 }, update: { duration: 520, easing: 'easeOutCubic' } },
+        treemap: { gap: 2, minLabelRatio: 0.03, depthFade: 0.18 },
+        series: [{ id: 'res', type: 'treemap', name: '资源', data: tree }],
+      });
+
+      // ---------------- 10) 转化漏斗 ----------------
+      const funnelData = [
+        { name: '曝光', value: 12000 },
+        { name: '详情', value: 7400 },
+        { name: '加购', value: 3600 },
+        { name: '下单', value: 1480 },
+        { name: '支付', value: 1120 },
+      ];
+      const funnel = ICEChart.createChart('funnel', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        animation: { enter: { duration: 600 }, update: { duration: 420, easing: 'easeOutCubic' } },
+        series: [{ id: 'conv', type: 'funnel', name: '转化', data: funnelData, minSize: 0.16, gap: 2, label: { position: 'inside' } }],
+      });
+
+      // ---------------- 11) 实时 K 线 ----------------
+      const candles = [];
+      let building = null;
+      const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
+      const candleChart = ICEChart.createChart('candles', {
+        ...BASE,
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category' },
+        yAxis: { name: '负载', min: 0, max: 100 },
+        animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
+        series: [{ id: 'k', type: 'candlestick', name: '负载', data: [], barWidth: 0.5 }],
+      });
+
+      // ---------------- KPI ----------------
+      const prev = { qps: 0, users: 0, cpu: 0, latency: 0, errors: 0 };
+      const setKpi = (id, value, text, invert = false) => {
+        const box = $(id);
+        box.querySelector('.value').innerHTML = text;
+        const base = prev[id] || 0;
+        const delta = base ? ((value - base) / base) * 100 : 0;
+        prev[id] = value;
+        const trend = box.querySelector('.trend');
+        trend.textContent = `${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(1)}%`;
+        trend.classList.toggle('down', invert ? delta > 0 : delta < 0);
+        box.classList.toggle('alert', id === 'cpu' && value > 85);
+      };
+
+      // ---------------- 主循环 ----------------
+      let last = performance.now();
+      let budget = 0;
+      let frames = 0;
+      let fpsAt = performance.now();
+      const tick = () => {
+        state.t += 1;
+        if (state.spike > 0) {
+          state.cpuTarget = 93;
+          state.spike -= 1;
+          if (state.spike === 0) state.cpuTarget = 46;
+        } else if (Math.random() < 0.008) {
+          state.cpuTarget = 30 + Math.random() * 60;
+        }
+        state.cpu = clamp(state.drift(state.cpu, state.cpuTarget, 2.4), 3, 99);
+        state.qps = clamp(state.drift(state.qps, 1200 + Math.sin(state.t / 90) * 520, 70, 0.05), 200, 2600);
+        state.users = clamp(state.drift(state.users, 8600 + Math.sin(state.t / 140) * 2200, 45, 0.04), 1000, 15000);
+        state.latency = clamp(state.drift(state.latency, 180 + state.cpu * 1.9, 26, 0.12), 40, 600);
+        state.errors = clamp(state.drift(state.errors, 0.2 + Math.max(0, state.cpu - 70) / 40, 0.12, 0.1), 0, 9);
+
+        const t = state.t;
+        flow.appendData('qps', [[t, Math.round(state.qps)]], { maxPoints: WINDOW });
+        flow.appendData('p95', [[t, Math.round(state.latency)]], { maxPoints: WINDOW });
+        latency.appendData('lat', [[t, Math.round(state.latency)]], { maxPoints: WINDOW });
+
+        const load = state.cpu;
+        if (!building) building = { o: load, c: load, l: load, h: load };
+        building.c = load;
+        building.h = Math.max(building.h, load);
+        building.l = Math.min(building.l, load);
+        if (t % CANDLE_TICKS === 0) {
+          candles.push({ ...building });
+          if (candles.length > CANDLE_COUNT) candles.shift();
+          building = null;
+          candleChart.setData('k', candleData());
+        } else {
+          candleChart.setData('k', candleData().concat([[building.o, building.c, building.l, building.h]]));
+        }
+
+        if (t % 8 === 0) gauge.setData('g', [{ name: '负载', value: Number(state.cpu.toFixed(1)) }]);
+        if (t % 16 === 0) {
+          heatMatrix.shift();
+          heatMatrix.push([state.cpu, 30 + state.qps / 26, state.latency / 6]);
+          heat.setData('heat', heatData());
+        }
+        if (t % 30 === 0) {
+          radar.setData('east', [clamp(82 + (Math.random() - 0.5) * 10, 30, 100), clamp(74 + (Math.random() - 0.5) * 10, 30, 100), clamp(88 + (Math.random() - 0.5) * 8, 30, 100), clamp(91 - state.errors * 2, 30, 100), clamp(66 + (Math.random() - 0.5) * 8, 30, 100)]);
+          radar.setData('north', [clamp(70 + (Math.random() - 0.5) * 10, 30, 100), clamp(88 + (Math.random() - 0.5) * 6, 30, 100), clamp(72 + (Math.random() - 0.5) * 10, 30, 100), clamp(84 + (Math.random() - 0.5) * 6, 30, 100), clamp(78 + (Math.random() - 0.5) * 8, 30, 100)]);
+        }
+        // 结构性图表：低频重排（走更新动画，肉眼看到的是 morph / 扇形滑动）
+        if (t % 90 === 0) {
+          rose.setData('ch', roseData.map((d) => ({ ...d, value: Math.round(d.value * (0.82 + Math.random() * 0.36)) })));
+          funnel.setData('conv', funnelData.map((d, i) => ({ ...d, value: Math.round(d.value * (0.9 + Math.random() * 0.2 * (1 + i * 0.1))) })));
+          treemap.setData(
+            'res',
+            tree.map((node) => (node.children
+              ? { ...node, children: node.children.map((c) => ({ ...c, value: Math.round(c.value * (0.78 + Math.random() * 0.44)) })) }
+              : { ...node, value: Math.round(node.value * (0.78 + Math.random() * 0.44)) }))
+          );
+        }
+
+        const alerting = state.cpu > 85;
+        state.alerts = alerting ? 1 : 0;
+        document.querySelectorAll('.panel')[0].classList.toggle('alert', alerting);
+        $('pill-alert').textContent = alerting ? '告警 1' : '告警 0';
+        $('pill-alert').className = `pill ${alerting ? 'danger' : 'ok'}`;
+
+        setKpi('kpi-qps', state.qps, `${Math.round(state.qps)}<small>req/s</small>`);
+        setKpi('kpi-users', state.users, `${Math.round(state.users)}<small>人</small>`);
+        setKpi('kpi-cpu', state.cpu, `${state.cpu.toFixed(1)}<small>%</small>`);
+        setKpi('kpi-latency', state.latency, `${Math.round(state.latency)}<small>ms</small>`, true);
+        setKpi('kpi-errors', state.errors, `${state.errors.toFixed(2)}<small>%</small>`, true);
+      };
+
+      const loop = (now) => {
+        const delta = Math.min(100, now - last);
+        last = now;
+        frames += 1;
+        if (now - fpsAt >= 1000) {
+          $('pill-clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+          const up = Math.floor((Date.now() - state.startedAt) / 1000);
+          $('pill-uptime').textContent = `${String(Math.floor(up / 60)).padStart(2, '0')}:${String(up % 60).padStart(2, '0')}`;
+          fpsAt = now;
+          frames = 0;
+        }
+        if (state.running) {
+          budget += delta / 16.7;
+          let guard = 0;
+          while (budget >= 1 && guard < 6) {
+            tick();
+            budget -= 1;
+            guard += 1;
+          }
+        }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+
+      $('btn-toggle').addEventListener('click', (event) => {
+        state.running = !state.running;
+        event.target.textContent = state.running ? '暂停' : '继续';
+      });
+
+      window.__chart = flow;
+      window.__charts = { flow, latency, gauge, radar, heat, sankey, rose, graph, treemap, funnel, candles: candleChart };
+      window.__link = link;
+      window.__dashboardState = state;
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

@@ -32,6 +32,7 @@ const pages = [
   'sankey',
   'time-series',
   'live-stream',
+  'dashboard',
 ];
 
 fs.mkdirSync(outDir, { recursive: true });
@@ -149,10 +150,40 @@ for (const name of pages) {
       for (const probe of probes) {
         if (!probe) continue;
         const [sx, sy, target] = probe;
-        await page.mouse.move(sx, sy);
-        await page.waitForTimeout(340);
-        const result = await page.evaluate(
-          ({ i, s, target }) => {
+        // 数据流页面（大屏 / 实时流）的几何会在两次采样之间移动：
+        // 探针算好坐标、鼠标移过去时，图元可能已经缩小/滑走，指针真的不在它上面。
+        // 这不是交互缺陷，所以允许「重算坐标 + 重试一次」。
+        let result = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          let point = [sx, sy];
+          if (attempt > 0) {
+            const retry = await page.evaluate(
+              ({ i, s, t }) => {
+                const list = [];
+                const push = (c) => {
+                  if (c && c.norm && c.layout) list.push(c);
+                };
+                push(window.__chart);
+                if (window.__charts) for (const k of Object.keys(window.__charts)) push(window.__charts[k]);
+                const chart = list[i];
+                const comp = chart.seriesComponents[s];
+                const pixel = comp.pixelAt(t);
+                if (!pixel) return null;
+                const rect = chart.canvasElement.getBoundingClientRect();
+                const canvas = chart.layout.canvas;
+                return [
+                  rect.x + (comp.state.left + pixel[0]) * (rect.width / (canvas.width || 1)),
+                  rect.y + (comp.state.top + pixel[1]) * (rect.height / (canvas.height || 1)),
+                ];
+              },
+              { i: meta.index, s, t: target }
+            );
+            if (retry) point = retry;
+          }
+          await page.mouse.move(point[0], point[1]);
+          await page.waitForTimeout(340);
+          result = await page.evaluate(
+            ({ i, s, target }) => {
             const list = [];
             const push = (c) => {
               if (c && c.norm && c.layout) list.push(c);
@@ -181,9 +212,11 @@ for (const name of pages) {
               highlightOffPlot: highlight.filter((m) => !inside({ x: m.x - 6, y: m.y - 6, width: 12, height: 12 }, plot, 8)).length,
               seriesType: comp.seriesType,
             };
-          },
-          { i: meta.index, s, target }
-        );
+            },
+            { i: meta.index, s, target }
+          );
+          if (result.hoverIndex !== null || result.anyHover.length > 0) break;
+        }
         // 折线 / 面积是「轴触发」：命中的列由比例尺就近吸附，未必等于探测点的下标，
         // 所以这里断言「有悬停 + 动画到位」，下标差异只记录不判失败。
         const pass = result.anyHover.length > 0 && result.tooltipInside !== false && result.highlightOffPlot === 0;

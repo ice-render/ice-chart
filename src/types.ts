@@ -529,6 +529,13 @@ export interface ChartTheme {
   axisLineColor: string;
   axisLabelColor: string;
   splitLineColor: string;
+  /**
+   * 压在图形上的文字（桑基节点名 / 关系图节点名）的描边色。
+   *
+   * 浅色主题用白色描边、深色主题必须换成深色 —— 写死白色会在深色大屏里
+   * 变成一层白糊（实测桑基节点名完全不可读）。
+   */
+  labelHaloColor: string;
   fontFamily: string;
   fontSize: number;
   legend: { textColor: string; inactiveColor: string };

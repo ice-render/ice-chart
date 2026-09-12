@@ -126,6 +126,37 @@ describe('交互反馈动画', () => {
     expect(c.tooltip!.lastRect).not.toBeNull();
   });
 
+  it('非直角坐标场景数据更新也不丢悬停（雷达 / 饼图的 axis 悬停）', async () => {
+    const c = await mount({
+      legend: { show: false },
+      tooltip: { trigger: 'axis' }, // 显式 axis：雷达上「同一指标」的对比是有意义的
+      radar: {
+        indicators: [
+          { name: '算力', max: 100 },
+          { name: '存储', max: 100 },
+          { name: '带宽', max: 100 },
+        ],
+      },
+      series: [
+        { id: 'east', type: 'radar', name: '华东', data: [80, 70, 90] },
+        { id: 'north', type: 'radar', name: '华北', data: [60, 85, 75] },
+      ],
+    } as ChartOption);
+    const component: any = c.seriesComponents[0];
+    const pixel = component.pixelAt(0)!;
+    c.controller.handlePointerMove(component.state.left + pixel[0], component.state.top + pixel[1]);
+    await c.render();
+    expect(c.controller.hover).not.toBeNull();
+
+    c.setData('east', [55, 65, 75]);
+    await c.render();
+    const hover: any = c.controller.hover;
+    // 关键：数据更新后悬停仍在（以前非直角坐标会被直接清空），且拿到的是新值
+    expect(hover).not.toBeNull();
+    expect(hover.kind).toBe('axis');
+    expect(hover.column.items[0].point.y).toBe(55);
+  });
+
   it('提示框淡入出现、淡出后才清空内容（不是瞬间消失）', async () => {
     const c = await mount(BAR_OPTION);
     const tooltip = c.tooltip!;

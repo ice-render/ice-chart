@@ -188,6 +188,7 @@ export class GraphSeries extends SeriesBase {
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fillStyle = node.color;
       ctx.fill();
+      // 节点描边保持白色：它是图形的一部分，不是文字底衬（大屏深色主题下也要留白边）
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = unit * (this.hoverBoost(node.id, 0.28) > 1 ? 2 : 1);
       ctx.stroke();
@@ -202,7 +203,7 @@ export class GraphSeries extends SeriesBase {
       const [nx, ny] = positionOf(node);
       const x = nx - plot.x;
       const y = ny - plot.y + node.size / 2 + 9 * unit;
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.strokeStyle = theme.labelHaloColor;
       ctx.lineWidth = 3 * unit;
       ctx.strokeText(node.name, x, y);
       ctx.fillText(node.name, x, y);

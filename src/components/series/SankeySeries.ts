@@ -109,7 +109,9 @@ export class SankeySeries extends SeriesBase {
         ctx.moveTo(x0, (y0 + y1) / 2);
         ctx.bezierCurveTo(c0, (y0 + y1) / 2, c1, (y0 + y1) / 2, x1, (y0 + y1) / 2);
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(unit, link.width * 0.28);
+        // 上限 5 个设备像素：连线很粗时（大屏里动辄 40~60px）按比例放大会变成一串白珠子，
+        // 反而盖住节点名与连线本身
+        ctx.lineWidth = Math.max(unit, Math.min(5 * unit, link.width * 0.28));
         if (typeof ctx.setLineDash === 'function') {
           const dash = [6 * unit, 10 * unit];
           ctx.setLineDash(dash);
@@ -177,7 +179,7 @@ export class SankeySeries extends SeriesBase {
     const ctx = this.ctx;
     const theme = this.chartTheme;
     ctx.lineWidth = 3 * this.unit();
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.strokeStyle = (theme && theme.labelHaloColor) || 'rgba(255,255,255,0.85)';
     ctx.lineJoin = 'round';
     ctx.strokeText(text, x, y);
     ctx.fillStyle = (theme && theme.textColor) || '#212529';

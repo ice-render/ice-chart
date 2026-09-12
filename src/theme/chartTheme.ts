@@ -70,6 +70,8 @@ export const BOOTSTRAP_CHART_THEME: ChartTheme = {
   axisLineColor: B.gray[300],
   axisLabelColor: B.gray[600],
   splitLineColor: B.gray[200],
+  // 压在图形上的文字用白色描边（浅色主题）
+  labelHaloColor: 'rgba(255,255,255,0.85)',
   fontFamily: B.fontFamily,
   fontSize: 12,
   legend: { textColor: B.gray[700], inactiveColor: B.gray[400] },
@@ -107,6 +109,8 @@ export const BOOTSTRAP_DARK_CHART_THEME: ChartTheme = {
   axisLineColor: B.gray[700],
   axisLabelColor: B.gray[400],
   splitLineColor: B.gray[800],
+  // 深色主题必须用深色描边，否则桑基/关系图的节点名会糊成一团白
+  labelHaloColor: 'rgba(10,18,32,0.88)',
   fontFamily: B.fontFamily,
   fontSize: 12,
   legend: { textColor: B.gray[300], inactiveColor: B.gray[700] },

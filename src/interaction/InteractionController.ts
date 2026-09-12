@@ -227,13 +227,17 @@ export class InteractionController {
       this.setHover({ kind: 'item', item });
       return;
     }
-    if (norm.kind !== 'cartesian') {
+    const item = this.resolver.nearestByXValue(current.column.xValue);
+    const column = item ? this.resolver.pickColumn(item.pixel[0]) : null;
+    // 非直角坐标场景（雷达 / 饼图）也可能出现 axis 悬停 —— 它们的「列」不是一条竖线，
+    // 但同一列（同一个指标 / 同一个切片下标）的语义仍然成立，照旧重新解析即可。
+    // 以前这里对非直角坐标直接清空，于是**每次数据更新都会把悬停踢掉**
+    // （大屏上的雷达/玫瑰每 0.5s 更新一次，悬停反馈永远起不来，实测 highlightT 卡在 0.01）。
+    if (!column) {
       this.setHover(null);
       return;
     }
-    const item = this.resolver.nearestByXValue(current.column.xValue);
-    const column = item ? this.resolver.pickColumn(item.pixel[0]) : null;
-    if (!column || !this.resolver.isInsidePlot(column.pixelX, column.items[0].pixel[1])) {
+    if (norm.kind === 'cartesian' && !this.resolver.isInsidePlot(column.pixelX, column.items[0].pixel[1])) {
       this.setHover(null);
       return;
     }

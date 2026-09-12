@@ -258,6 +258,7 @@ export class PieSeries extends SeriesBase {
       ctx.fillStyle = color;
       ctx.fill();
       if (n > 1) {
+        // 扇形之间的白色分隔线：图形的一部分，不随主题变（深色底上它是切分依据）
         ctx.strokeStyle = 'rgba(255,255,255,0.85)';
         ctx.lineWidth = unit;
         ctx.stroke();
