@@ -18,7 +18,6 @@ export class LineSeries extends SeriesBase {
     const unit = this.unit();
     const lineWidth = this.lineWidthDevice() * unit;
     const symbol = option.symbol || 'circle';
-    const symbolSize = this.symbolSize();
     const showSymbol = option.showSymbol === true || this.seriesType === 'scatter';
     const ctx = this.ctx;
 
@@ -41,8 +40,9 @@ export class LineSeries extends SeriesBase {
     if (showSymbol && symbol !== 'none') {
       const fill = option.symbolFill || color;
       const stroke = option.symbolStroke || '#ffffff';
-      for (const [x, y] of pts) {
-        this.drawSymbol(x, y, symbol, symbolSize, fill, stroke);
+      for (let k = 0; k < pts.length; k++) {
+        const point = pts[k];
+        this.drawSymbol(point[0], point[1], symbol, this.symbolSizeAt(this.renderIndexAt(k)), fill, stroke);
       }
     }
     this.endDraw();
@@ -133,7 +133,7 @@ export class LineSeries extends SeriesBase {
     const n = this.pixels.length / 2;
     if (!n) return -1;
     const option = this.series.option;
-    const baseTolerance = option.hitRadius ? Number(option.hitRadius) : Math.max(8, this.symbolSize() / 2 + 4);
+    const baseTolerance = option.hitRadius ? Number(option.hitRadius) : Math.max(8, this.maxSymbolSize() / 2 + 4);
 
     // 大点数：先用二分找到最近的 x，只在其邻域里做精确判定
     if (n > 1024 && this.xMonotonic) {

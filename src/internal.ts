@@ -19,6 +19,8 @@ export interface DataPoint {
   name?: string;
   /** 该数据点自身的颜色（饼图的每个扇区各有一色）。 */
   color?: string;
+  /** 第三维数值（气泡图的尺寸）。 */
+  size?: number;
   /** K 线的 [open, close, low, high]。 */
   ohlc?: [number, number, number, number];
 }
@@ -60,6 +62,11 @@ export interface InternalAxis {
 export interface NormalizedOption {
   /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图 / 桑基图。 */
   kind: 'cartesian' | 'polar' | 'radar' | 'sankey';
+  /**
+   * 直角坐标的排布方向。
+   * vertical：类目在 x 轴（普通柱状/折线）；horizontal：类目在 y 轴（横向柱状，排行榜场景）。
+   */
+  orientation: 'vertical' | 'horizontal';
   /** 雷达图配置（存在雷达系列时非空）。 */
   radar: RadarOption | null;
   /** 桑基图配置（存在桑基系列时非空）。 */

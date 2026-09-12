@@ -6,8 +6,8 @@
  * 命中索引）都不放在这里。
  */
 
-/** 单条数据项：数字、[x, y] 元组、或对象。 */
-export type DataItem = number | null | [any, number | null] | Record<string, any>;
+/** 单条数据项：数字、[x, y]、[x, y, size]（气泡图）、或对象。 */
+export type DataItem = number | null | [any, number | null] | [any, number | null, number] | Record<string, any>;
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
@@ -62,6 +62,11 @@ export interface RadarOption {
 
 export interface AxisOption {
   type?: ScaleType;
+  /**
+   * 类目轴直接声明类目（ECharts 兼容）。
+   * 横向柱状图就靠它：`yAxis: { type: 'category', data: ['华东', '华北'] }` + `xAxis: { type: 'value' }`。
+   */
+  data?: any[];
   /** y 轴位置：left / right。默认第一个 y 轴在左，其余在右。 */
   position?: 'left' | 'right';
   /** 轴名称，绘制在轴线外侧。 */
@@ -108,7 +113,9 @@ export interface SeriesOption {
   /** 折线/散点：数据点标记形状。 */
   symbol?: 'circle' | 'rect' | 'none';
   /** 标记大小（直径，设备像素）。 */
-  symbolSize?: number;
+  symbolSize?: number | ((value: any, params: { dataIndex: number; data: any; seriesName: string }) => number);
+  /** 气泡图：数据项第三维映射到直径时的区间，默认 [8, 40]。 */
+  symbolSizeRange?: [number, number];
   /** 标记填充色，默认跟随系列色。 */
   symbolFill?: string;
   /** 标记描边色，默认白色。 */

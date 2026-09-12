@@ -18,6 +18,7 @@ const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
 const pages = [
   'basic-line',
   'bar-stack',
+  'horizontal-bubble',
   'multi-axis',
   'pie',
   'radar',

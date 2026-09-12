@@ -327,8 +327,9 @@ export class InteractionController {
     }
     const crosshair = this.host.crosshair;
     if (crosshair) {
-      if (this.host.norm.kind !== 'cartesian') {
+      if (this.host.norm.kind !== 'cartesian' || this.host.norm.orientation === 'horizontal') {
         // 极坐标没有直角准星的概念，直接收起
+        // 横向柱状图的类目在 y 轴、数值在 x 轴，十字准星同样没有意义（默认 item 触发器）
         crosshair.hide();
       } else {
         const axisMode = (this.host.norm.option.crosshair && this.host.norm.option.crosshair.axis) || 'x';
@@ -356,6 +357,17 @@ export class InteractionController {
   private buildTooltipContent(state: { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn }) {
     const items = state.kind === 'item' ? [state.item] : state.column.items;
     const anchorItem = items[0];
+    // 横向排布：标题是类目（y 轴），数值走 x 轴格式化
+    if (anchorItem && this.host.norm.orientation === 'horizontal') {
+      return {
+        title: this.host.formatAxisValue('y', anchorItem.point.xValue),
+        rows: items.map((item) => ({
+          name: item.series.name,
+          value: item.point.y === null ? '-' : this.host.formatAxisValue('x', item.point.y),
+          color: item.series.color,
+        })),
+      };
+    }
     // 饼图 / 玫瑰图：一张图一个系列，提示内容按扇区组织
     if (anchorItem && anchorItem.series.type === 'pie') {
       const series = anchorItem.series;

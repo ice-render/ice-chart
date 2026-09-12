@@ -107,8 +107,11 @@ describe('多 y 轴（引擎集成）', () => {
     const plotHeight = chart.layout.plot.height;
     const volume = chart.seriesComponents[0];
     const change = chart.seriesComponents[1];
-    // 成交量 1200（域 [0, 1500]）在画面上部；涨跌幅 -1.6（域约 [-2, 2.5]）贴近底部
-    expect(volume.pixelAt(0)![1]).toBeLessThan(plotHeight * 0.5);
+    // 柱形：检查真实几何（柱顶在画面上部、柱底落在 0 基线），而不是锚点位置
+    const rect = (volume as any).barRectAt(0)!;
+    expect(rect.y).toBeLessThan(plotHeight * 0.3);
+    expect(rect.y + rect.height).toBeCloseTo(plotHeight, 0);
+    // 折线：涨跌幅 -1.6（域约 [-2, 2.5]）贴近底部
     expect(change.pixelAt(3)![1]).toBeGreaterThan(plotHeight * 0.9);
     expect(chart.norm.yAxes[0].scale!.map(1200)).not.toBeCloseTo(chart.norm.yAxes[1].scale!.map(1200), 0);
   });

@@ -95,9 +95,8 @@ export class RadarSeries extends SeriesBase {
     ctx.stroke();
 
     // 顶点
-    const size = this.symbolSize();
     for (let i = 0; i < n; i++) {
-      this.drawSymbol(this.pixels[i * 2], this.pixels[i * 2 + 1], 'circle', size, color, '#ffffff');
+      this.drawSymbol(this.pixels[i * 2], this.pixels[i * 2 + 1], 'circle', this.symbolSizeAt(i), color, '#ffffff');
     }
     void cx;
     void cy;

@@ -15,7 +15,6 @@ export class ScatterSeries extends SeriesBase {
     const option = this.series.option;
     const color = this.pointColor(0);
     const shape = option.symbol || 'circle';
-    const size = this.symbolSize();
     const fill = option.symbolFill || color;
     const stroke = option.symbolStroke || '#ffffff';
     this.beginDraw();
@@ -23,7 +22,8 @@ export class ScatterSeries extends SeriesBase {
       const x = this.pixels[i * 2];
       const y = this.pixels[i * 2 + 1];
       if (!isFinite(x) || !isFinite(y)) continue;
-      this.drawSymbol(x, y, shape, size, fill, stroke);
+      // 气泡图：每个点用自己解析出来的尺寸
+      this.drawSymbol(x, y, shape, this.symbolSizeAt(i), fill, stroke);
     }
     this.endDraw();
   }
@@ -31,7 +31,7 @@ export class ScatterSeries extends SeriesBase {
   public hitTestIndex(localX: number, localY: number): number {
     this.rebuildPixels();
     const option = this.series.option;
-    const tolerance = option.hitRadius ? Number(option.hitRadius) : this.symbolSize() / 2 + 4;
+    const tolerance = option.hitRadius ? Number(option.hitRadius) : this.maxSymbolSize() / 2 + 4;
     const maxDist = tolerance * tolerance;
     let best = -1;
     let bestDist = maxDist;

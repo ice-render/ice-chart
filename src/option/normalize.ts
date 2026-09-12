@@ -108,19 +108,53 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     // 非直角坐标没有「数据列」的概念，默认按数据项触发提示
     merged.tooltip.trigger = 'item';
   }
-
   const xAxisOption: AxisOption = merged.xAxis;
-  const xType = resolveXAxisType(xAxisOption, series);
-  const { domain: rawXDomain, categories } = buildXDomain(xType, series, xAxisOption);
-  const xDomain = resolveXDomain(xType, rawXDomain, context.xDomain);
-
+  // ECharts 习惯用 type: 'value' 表示数值轴，这里统一成内部的 'linear'
+  if (xAxisOption.type === ('value' as any)) xAxisOption.type = 'linear';
   // 多 y 轴：option.yAxis 可以是单个对象或数组；每个系列用 yAxisIndex 绑定到其中一个
   const yAxisOptions: AxisOption[] = Array.isArray(option.yAxis) ? option.yAxis : [option.yAxis || {}];
   if (!yAxisOptions.length) yAxisOptions.push({});
+  for (const axis of yAxisOptions) {
+    if (axis.type === ('value' as any)) axis.type = 'linear';
+  }
   for (const s of series) {
     const raw = Number(s.option.yAxisIndex);
     s.axisIndex = isFinite(raw) ? Math.max(0, Math.min(yAxisOptions.length - 1, Math.floor(raw))) : 0;
   }
+
+  /**
+   * 排布方向：类目轴在 y 上就是横向柱状图（排行榜场景）。
+   * 判定依据与 ECharts 一致 —— 声明了类目 y 轴（type 或 data），且 x 轴不是类目轴。
+   */
+  const horizontal = isHorizontalLayout(xAxisOption, yAxisOptions[0]);
+  if (horizontal && (!option.tooltip || option.tooltip.trigger === undefined)) {
+    // 横向图的类目在 y 轴上，没有「按 x 取整列」的语义，默认按数据项触发
+    merged.tooltip.trigger = 'item';
+  }
+  // 轴声明了类目时，数据项按**下标**对齐到类目
+  //（ECharts 常见写法：series.data 只给数值，类目由 axis.data 提供）
+  applyAxisCategories(horizontal ? yAxisOptions[0] : xAxisOption, series);
+  const xType = horizontal
+    ? xAxisOption.type && xAxisOption.type !== 'category'
+      ? xAxisOption.type
+      : 'linear'
+    : resolveXAxisType(xAxisOption, series);
+  let rawXDomain: any[];
+  let categories: any[];
+  if (horizontal) {
+    // 横向：x 轴承载数值（用 y 轴那套值域算法），类目搬到 y 轴
+    rawXDomain = buildYDomain(series, 0, xAxisOption, xType) as any[];
+    categories = [];
+    // 类目轴上的类目：优先用 yAxis.data，其次从数据项的 name / xValue 推导
+    const yCategories = buildCategoryValues(yAxisOptions[0], series);
+    yAxisOptions[0] = { ...yAxisOptions[0], type: 'category' };
+    (yAxisOptions[0] as any).__categories = yCategories;
+  } else {
+    const built = buildXDomain(xType, series, xAxisOption);
+    rawXDomain = built.domain;
+    categories = built.categories;
+  }
+  const xDomain = resolveXDomain(xType, rawXDomain, context.xDomain);
 
   applyStacking(series);
 
@@ -134,6 +168,16 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   };
   const hasHeatmap = series.some((s) => s.type === 'heatmap');
   const yAxes: InternalAxis[] = yAxisOptions.map((option, index) => {
+    if (horizontal && index === 0) {
+      return {
+        option,
+        type: 'category' as const,
+        domain: ((option as any).__categories as any[]) || [],
+        scale: null,
+        index,
+        position: option.position || 'left',
+      };
+    }
     // 热力图需要「类目 y 轴」：y 方向也是离散类目
     if (hasHeatmap && (option.type === undefined || option.type === 'category')) {
       const seen: Record<string, boolean> = {};
@@ -166,6 +210,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
 
   return {
     kind,
+    orientation: horizontal ? 'horizontal' : 'vertical',
     radar,
     sankey,
     radarDomains,
@@ -360,10 +405,17 @@ function buildPoints(
     const item = raw[i];
     let xValue: any = i;
     let y: number | null = null;
+    /** 第三维（气泡尺寸）。 */
+    let size: number | undefined;
     let explicitX = false;
     if (Array.isArray(item)) {
       xValue = item[0];
       y = toNumber(item[1]);
+      // 气泡图：第三维是尺寸
+      if (item.length > 2) {
+        const parsed = toNumber(item[2]);
+        size = parsed === null ? undefined : parsed;
+      }
       explicitX = true;
     } else if (typeof item === 'number' || item === null) {
       y = toNumber(item);
@@ -383,6 +435,10 @@ function buildPoints(
       if (item[yField] !== undefined) y = toNumber(item[yField]);
       else if (item.y !== undefined) y = toNumber(item.y);
       else if (item.value !== undefined) y = toNumber(item.value);
+      if (item.size !== undefined) {
+        const parsed = toNumber(item.size);
+        size = parsed === null ? undefined : parsed;
+      }
     }
     if (explicitX) hasExplicitX = true;
     let name: string | undefined;
@@ -391,7 +447,7 @@ function buildPoints(
     } else if (option.type === 'pie' && Array.isArray(item) && typeof item[0] === 'string') {
       name = item[0];
     }
-    points.push({ index: i, xValue, y, raw: item, base: 0, top: y === null ? 0 : y, name });
+    points.push({ index: i, xValue, y, raw: item, base: 0, top: y === null ? 0 : y, name, size });
   }
   return { points, hasExplicitX };
 }
@@ -422,12 +478,64 @@ function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear
   return 'linear';
 }
 
+/** 是否为横向排布：声明了类目 y 轴（type: 'category' 或给了 data），而 x 轴不是类目轴。 */
+export function isHorizontalLayout(xAxis: AxisOption, yAxis: AxisOption): boolean {
+  const yIsCategory = yAxis.type === 'category' || (Array.isArray(yAxis.data) && yAxis.data.length > 0);
+  if (!yIsCategory) return false;
+  if (xAxis.type === 'category' || (Array.isArray(xAxis.data) && xAxis.data.length > 0)) return false;
+  return true;
+}
+
+/**
+ * 类目轴上的类目列表：
+ * 1. 轴自己声明的 data（ECharts 写法，横向柱状图常用）；
+ * 2. 否则从数据项推导 —— 对象数据的 name、或 xValue（我们内部统一用 xValue 存「类目」这一维）。
+ */
+export function buildCategoryValues(option: AxisOption, series: InternalSeries[]): any[] {
+  if (Array.isArray(option.data) && option.data.length) return option.data.slice();
+  const seen: Record<string, boolean> = {};
+  const out: any[] = [];
+  for (const s of series) {
+    for (const point of s.points) {
+      const value = point.name === undefined ? point.xValue : point.name;
+      const key = String(value);
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(value);
+    }
+  }
+  return out;
+}
+
+/**
+ * 把轴上声明的类目按**下标**回填到数据点。
+ *
+ * 只在「数据点没有自带类目」时回填（默认 xValue === index），
+ * 这样 `{name:'A', value:1}` 这类自带类目的数据不会被覆盖。
+ */
+export function applyAxisCategories(axis: AxisOption, series: InternalSeries[]): void {
+  if (!axis || !Array.isArray(axis.data) || !axis.data.length) return;
+  const data = axis.data;
+  for (const s of series) {
+    for (const point of s.points) {
+      if (point.xValue !== point.index) continue;
+      if (data[point.index] === undefined) continue;
+      point.xValue = data[point.index];
+      if (point.name === undefined) point.name = String(data[point.index]);
+    }
+  }
+}
+
 function buildXDomain(
   type: string,
   series: InternalSeries[],
   option: AxisOption
 ): { domain: any[]; categories: any[] } {
   if (type === 'category') {
+    // 轴自己声明了类目就用它（顺序即轴的顺序），否则从数据里聚合
+    if (Array.isArray(option.data) && option.data.length) {
+      return { domain: option.data.slice(), categories: option.data.slice() };
+    }
     const seen: Record<string, boolean> = {};
     const categories: any[] = [];
     for (const s of series) {

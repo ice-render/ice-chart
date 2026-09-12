@@ -52,6 +52,8 @@ export abstract class SeriesBase extends ChartComponent {
   protected renderIndices: number[] | null = null;
   /** 像素 x 是否单调递增（降采样与二分查找的前提）。 */
   protected xMonotonic = true;
+  /** 第三维（气泡尺寸）的取值范围，映射到 symbolSizeRange。 */
+  protected sizeExtent: [number, number] = [0, 1];
   private cacheKey = '';
   /** 散点等「每个点都必须画」的系列不参与降采样。 */
   protected supportsSampling = true;
@@ -83,8 +85,49 @@ export abstract class SeriesBase extends ChartComponent {
 
   protected paintPad(): number {
     const option = this.series.option;
-    const symbol = option.showSymbol === false ? 0 : (option.symbolSize || 8) / 2 + 4;
+    const symbol = option.showSymbol === false ? 0 : this.maxSymbolSize() / 2 + 4;
     return Math.max(symbol, (option.lineWidth || 2) + 4, 6);
+  }
+
+  /**
+   * 数据点尺寸：三种来源按优先级解析。
+   * 1. `symbolSize` 是函数 → 交给调用方决定；
+   * 2. 数据项带第三维（气泡图的 `[x, y, size]`）→ 按 series 内的取值范围映射到 `symbolSizeRange`；
+   * 3. 固定数值 `symbolSize`。
+   */
+  public symbolSizeAt(index: number): number {
+    const option = this.series.option;
+    const point = this.series.points[index];
+    const size = option.symbolSize;
+    if (typeof size === 'function') {
+      const value = point ? point.y : null;
+      let out = NaN;
+      try {
+        out = Number(size(value, { dataIndex: index, data: point ? point.raw : undefined, seriesName: this.series.name }));
+      } catch (err) {
+        out = NaN;
+      }
+      return isFinite(out) && out > 0 ? out : 8;
+    }
+    if (point && typeof point.size === 'number' && isFinite(point.size)) {
+      const range = Array.isArray(option.symbolSizeRange) ? option.symbolSizeRange : [8, 40];
+      const [min, max] = this.sizeExtent;
+      const t = max > min ? (point.size - min) / (max - min) : 0.5;
+      return range[0] + (range[1] - range[0]) * Math.max(0, Math.min(1, t));
+    }
+    const numeric = Number(size);
+    return isFinite(numeric) && numeric > 0 ? numeric : 8;
+  }
+
+  /** 本系列的最大标记尺寸（脏矩形留白与命中容差要用）。 */
+  protected maxSymbolSize(): number {
+    const option = this.series.option;
+    if (typeof option.symbolSize === 'function' || this.series.points.some((p) => typeof p.size === 'number')) {
+      const range = Array.isArray(option.symbolSizeRange) ? option.symbolSizeRange : [8, 40];
+      return Math.max(8, Number(range[1]) || 40);
+    }
+    const numeric = Number(option.symbolSize);
+    return isFinite(numeric) && numeric > 0 ? numeric : 8;
   }
 
   public setCoord(coord: SeriesCoord): this {
@@ -192,6 +235,7 @@ export abstract class SeriesBase extends ChartComponent {
       }
     }
     this.xMonotonic = monotonic;
+    this.sizeExtent = computeSizeExtent(points);
     this.renderIndices = this.buildRenderIndices(n, coord.plot.width);
     this.cacheKey = key;
   }
@@ -300,11 +344,6 @@ export abstract class SeriesBase extends ChartComponent {
 
   protected pointColor(_index: number): string {
     return this.series.option.color || this.series.color;
-  }
-
-  protected symbolSize(): number {
-    const size = this.series.option.symbolSize;
-    return isFinite(size as number) ? (size as number) : 8;
   }
 
   protected lineWidthDevice(): number {
@@ -423,4 +462,18 @@ export function lttbIndices(pixels: Float64Array, n: number, threshold: number):
   }
   sampled.push(n - 1);
   return sampled;
+}
+
+/** 数据点第三维的取值范围（气泡尺寸映射用）。 */
+export function computeSizeExtent(points: DataPoint[]): [number, number] {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const point of points) {
+    if (typeof point.size !== 'number' || !isFinite(point.size)) continue;
+    if (point.size < min) min = point.size;
+    if (point.size > max) max = point.size;
+  }
+  if (!isFinite(min)) return [0, 1];
+  if (min === max) return [min, min + 1];
+  return [min, max];
 }

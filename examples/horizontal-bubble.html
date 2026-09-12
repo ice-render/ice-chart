@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 横向柱状图 / 气泡图</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>横向柱状图 / 气泡图</h1>
+    <p class="lead">
+      左图是排行榜：<code>yAxis: { type: 'category', data: [...] }</code> + <code>xAxis: { type: 'value' }</code>
+      就自动变成横向柱状图（类目在 y 轴、数值在 x 轴，和 ECharts 写法一致）；类目也可以直接写在数据的
+      <code>name</code> 上。右图是气泡图：数据项 <code>[x, y, size]</code> 的第三维经
+      <code>symbolSizeRange</code> 映射成直径。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="ranking" width="620" height="420"></canvas></div>
+      <div class="card"><canvas id="bubble" width="620" height="420"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      // ---- 横向柱状图（排行榜）
+      const regions = ['华东', '华北', '华南', '西南', '西北', '东北'];
+      const sales = [1320, 1180, 1520, 860, 540, 720];
+      const ranking = ICEChart.createChart('ranking', {
+        title: { text: '各区域销售额（横向柱状图）' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { type: 'value', name: '万元' },
+        yAxis: { type: 'category', data: regions },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+        series: [{ id: 'sales', type: 'bar', name: '销售额', data: sales, barWidth: 0.55 }],
+      });
+
+      // ---- 气泡图
+      const cities = [
+        { x: 2200, y: 44000, size: 2200, name: '上海' },
+        { x: 2180, y: 40200, size: 2180, name: '北京' },
+        { x: 1870, y: 28800, size: 1870, name: '广州' },
+        { x: 1760, y: 30700, size: 1760, name: '深圳' },
+        { x: 1240, y: 14800, size: 1240, name: '成都' },
+        { x: 1290, y: 12000, size: 1290, name: '武汉' },
+        { x: 1030, y: 10500, size: 1030, name: '西安' },
+        { x: 950, y: 9600, size: 950, name: '郑州' },
+      ];
+      const bubble = ICEChart.createChart('bubble', {
+        title: { text: '城市人口与 GDP（气泡大小 = 人口）' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { type: 'value', name: '常住人口(万人)' },
+        yAxis: { type: 'value', name: 'GDP(亿元)' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+        series: [
+          {
+            id: 'city',
+            type: 'scatter',
+            name: '城市',
+            symbolSizeRange: [12, 54],
+            symbolSize: 12,
+            data: cities.map((c) => [c.x, c.y, c.size]),
+          },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      ranking.on('item:hover', (p) => write(`横向柱 hover  ${p.xValue} = ${p.value}`));
+      ranking.on('item:click', (p) => write(`横向柱 click  ${p.xValue} = ${p.value}`));
+      bubble.on('item:hover', (p) => write(`气泡 hover  第 ${p.dataIndex} 个点 = (${p.data[0]}, ${p.data[1]}, 尺寸 ${p.data[2]})`));
+
+      window.__charts = { ranking, bubble };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>
