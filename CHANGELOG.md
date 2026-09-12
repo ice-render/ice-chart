@@ -4,6 +4,11 @@
 
 ### 发布到 npm（首个公开发布版本）
 
+- **包名必须带作用域**：无作用域名 `ice-chart` 会被 npm 的「相似名保护」直接拒发
+  （`E403 Package name too similar to existing package icechart`）——
+  同名检查只查「包是否已存在」，相似名检查在发布时才触发，`npm view` 是看不出来的。
+  本包因此统一发布在 `@ice-render` 作用域下（与仓库 / 组织同名）。
+  想换回无作用域名，只能换一个差异更大的名字（例如加限定词），不能再用 `ice-chart`。
 - 版本号从 `0.1.0` 对齐到 **`0.17.0`** —— 之前只发仓库、没发 npm，`package.json` 一直没跟着
   CHANGELOG 走，这次把两边并成一条线。
 - 补齐发布元数据：`license: MIT`、`homepage`、`bugs`、描述与关键词（原先只有 `files: dist`）。
