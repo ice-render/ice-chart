@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 实时数据流</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      .live-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        align-items: center;
+        font-size: 0.8125rem;
+      }
+      .live-bar .btn {
+        font: inherit;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.6rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.25rem;
+        background: #fff;
+        cursor: pointer;
+      }
+      .live-bar .btn:hover {
+        border-color: var(--bs-primary);
+        color: var(--bs-primary);
+      }
+      .live-bar .btn.active {
+        border-color: var(--bs-primary);
+        background: rgba(13, 110, 253, 0.08);
+        color: var(--bs-primary);
+      }
+      .live-stat {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--bs-secondary-color);
+      }
+      .live-stat b {
+        color: var(--bs-body-color);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>实时数据流</h1>
+    <p class="lead">
+      数据每 16ms 追加一次，图形跟着数据一起动：折线是滑动窗口（新点从右边进来、旧点从左边滑走），
+      仪表盘指针用弹簧补间追最新值，热力图每 250ms 左移一列（颜色平滑过渡），
+      K 线的最后一根随数据实时跳动。走的是 <code>chart.appendData(id, items, { maxPoints })</code> ——
+      滑动窗口式追加，不做值插值（窗口滑动会让下标整体前移，插值会把每个点拖向邻居的值）。
+    </p>
+
+    <div class="card">
+      <div class="live-bar">
+        <button class="btn" id="btn-toggle">暂停</button>
+        <span>速度</span>
+        <button class="btn active" data-speed="1">1×</button>
+        <button class="btn" data-speed="2">2×</button>
+        <button class="btn" data-speed="4">4×</button>
+        <button class="btn" id="btn-spike">注入尖峰</button>
+        <button class="btn" id="btn-reset">清空重来</button>
+        <span class="live-stat">已推送 <b id="stat-pushed">0</b> 点</span>
+        <span class="live-stat">渲染 <b id="stat-fps">0</b> fps</span>
+        <span class="live-stat">CPU <b id="stat-cpu">0</b>% · 内存 <b id="stat-mem">0</b>%</span>
+      </div>
+    </div>
+
+    <div class="card"><canvas id="stream" width="960" height="380"></canvas></div>
+
+    <div class="row">
+      <div class="card"><canvas id="gauge" width="420" height="300"></canvas></div>
+      <div class="card"><canvas id="heat" width="420" height="300"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="snapshot-head">
+        <span class="snapshot-title">实时 K 线（每 8 个采样聚合成一根）</span>
+        <span class="spacer"></span>
+        <span class="snapshot-meta">最后一根随数据跳动 —— 走的是更新动画（OHLC 插值）</span>
+      </div>
+      <canvas id="candles" width="960" height="320"></canvas>
+    </div>
+
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+
+      const WINDOW = 180; // 折线滑动窗口
+      const CANDLE_TICKS = 8; // 多少个采样聚合成一根蜡烛
+      // 30 根：x 轴类目标签刚好不挤（类目轴不做抽稀，标签太密会糊成一片）
+      const CANDLE_COUNT = 30;
+      const HEAT_COLS = 24;
+      const METRICS = ['CPU', '内存', 'IO'];
+
+      // ---- 数据发生器：带惯性的随机游走 + 偶发尖峰（模拟真实监控信号）
+      const metric = (value, target, volatility, drift = 0.08) => {
+        const next = value + (target - value) * drift + (Math.random() - 0.5) * volatility;
+        return Math.max(2, Math.min(99, next));
+      };
+
+      const state = {
+        running: true,
+        speed: 1,
+        tick: 0,
+        pushed: 0,
+        cpu: 42,
+        mem: 58,
+        io: 22,
+        cpuTarget: 42,
+        memTarget: 58,
+        ioTarget: 22,
+        spike: 0,
+        frames: 0,
+        fpsAt: performance.now(),
+        fps: 0,
+      };
+
+      // ---- 折线：滑动窗口
+      const stream = ICEChart.createChart('stream', {
+        title: { text: '服务负载（实时）', subtext: '滑动窗口 · 新点从右侧进入' },
+        legend: { show: true },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        xAxis: { type: 'value', name: 't' },
+        yAxis: { name: '%', min: 0, max: 100 },
+        animation: { enter: { duration: 500, easing: 'easeOutCubic' } },
+        series: [
+          { id: 'cpu', type: 'area', name: 'CPU', data: [], color: '#0d6efd', areaOpacity: 0.18, lineWidth: 2, smooth: 0.25 },
+          { id: 'mem', type: 'line', name: '内存', data: [], color: '#198754', lineWidth: 2, smooth: 0.25 },
+        ],
+      });
+
+      // ---- 仪表盘：指针用弹簧补间
+      const gauge = ICEChart.createChart('gauge', {
+        title: { text: 'CPU 当前值', subtext: '指针弹簧跟随' },
+        tooltip: { trigger: 'item' },
+        gauge: {
+          min: 0,
+          max: 100,
+          splitNumber: 5,
+          lineWidth: 14,
+          axisLineColor: [
+            [0.6, '#198754'],
+            [0.85, '#ffc107'],
+            [1, '#dc3545'],
+          ],
+          pointer: { show: true, width: 6, length: 0.72 },
+          detail: { formatter: (v) => `${v.toFixed(0)}%`, fontSize: 28 },
+          title: { show: false },
+        },
+        series: [{ id: 'g', type: 'gauge', name: 'CPU', data: [{ name: 'CPU', value: 0 }] }],
+      });
+
+      // ---- 滚动热力图：每 250ms 左移一列
+      const heatData = () => {
+        const out = [];
+        for (let col = 0; col < HEAT_COLS; col++) {
+          for (let row = 0; row < METRICS.length; row++) {
+            const value = heatMatrix[col][row];
+            out.push([`T${col}`, METRICS[row], Number(value.toFixed(1))]);
+          }
+        }
+        return out;
+      };
+      const heatMatrix = Array.from({ length: HEAT_COLS }, () => [30, 50, 20]);
+      const heat = ICEChart.createChart('heat', {
+        title: { text: '最近 24 个时间片', subtext: '每 250ms 左移一列' },
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', data: Array.from({ length: HEAT_COLS }, (_, i) => `T${i}`) },
+        yAxis: { type: 'category' },
+        animation: { enter: { duration: 400 }, update: { duration: 240, easing: 'linear' } },
+        grid: { x: false, y: false },
+        series: [{ id: 'heat', type: 'heatmap', name: '负载', data: heatData() }],
+      });
+
+      // ---- 实时 K 线：每 8 个采样聚合成一根
+      const candles = [];
+      let building = null;
+      const candleChart = ICEChart.createChart('candles', {
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category' },
+        yAxis: { name: '综合负载', min: 0, max: 100 },
+        animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
+        series: [{ id: 'k', type: 'candlestick', name: '负载', data: [], barWidth: 0.55 }],
+      });
+      const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
+
+      // ---- 主循环：每帧推 1 个（速度倍率决定每帧推几个）
+      const pushTick = () => {
+        state.tick += 1;
+        if (state.spike > 0) {
+          state.cpuTarget = 92;
+          state.spike -= 1;
+          if (state.spike === 0) state.cpuTarget = 45;
+        } else if (Math.random() < 0.01) {
+          state.cpuTarget = 20 + Math.random() * 75;
+        }
+        state.cpu = metric(state.cpu, state.cpuTarget, 2.6 + (state.spike > 0 ? 6 : 0));
+        state.mem = metric(state.mem, state.memTarget, 1.4);
+        state.io = metric(state.io, state.ioTarget, 4.5);
+        if (Math.random() < 0.005) state.memTarget = 30 + Math.random() * 60;
+        if (Math.random() < 0.01) state.ioTarget = 10 + Math.random() * 70;
+
+        const t = state.tick;
+        stream.appendData('cpu', [[t, Number(state.cpu.toFixed(2))]], { maxPoints: WINDOW });
+        stream.appendData('mem', [[t, Number(state.mem.toFixed(2))]], { maxPoints: WINDOW });
+        state.pushed += 2;
+
+        // 蜡烛聚合：最后一根随数据实时跳动
+        const load = (state.cpu + state.mem + state.io) / 3;
+        if (!building) building = { o: load, c: load, l: load, h: load };
+        building.c = load;
+        building.h = Math.max(building.h, load);
+        building.l = Math.min(building.l, load);
+        if (t % CANDLE_TICKS === 0) {
+          candles.push({ ...building });
+          if (candles.length > CANDLE_COUNT) candles.shift();
+          building = null;
+          candleChart.setData('k', candleData());
+        } else {
+          candleChart.setData('k', candleData().concat([[building.o, building.c, building.l, building.h]]));
+        }
+
+        // 热力图：每 250ms 左移一列
+        if (t % 16 === 0) {
+          heatMatrix.shift();
+          heatMatrix.push([state.cpu, state.mem, state.io]);
+          heat.setData('heat', heatData());
+        }
+        // 仪表盘：每 8 帧更新一次（弹簧补间看得出来）
+        if (t % 8 === 0) gauge.setData('g', [{ name: 'CPU', value: Number(state.cpu.toFixed(1)) }]);
+      };
+
+      let lastFrame = performance.now();
+      let budget = 0;
+      let stopped = false;
+      const frame = (now) => {
+        if (stopped) return;
+        const delta = Math.min(100, now - lastFrame);
+        lastFrame = now;
+        state.frames += 1;
+        if (now - state.fpsAt >= 500) {
+          state.fps = Math.round((state.frames / (now - state.fpsAt)) * 1000);
+          state.frames = 0;
+          state.fpsAt = now;
+          document.getElementById('stat-fps').textContent = String(state.fps);
+        }
+        if (state.running) {
+          budget += (delta / 16.7) * state.speed;
+          let guard = 0;
+          while (budget >= 1 && guard < 8) {
+            pushTick();
+            budget -= 1;
+            guard += 1;
+          }
+          document.getElementById('stat-pushed').textContent = String(state.pushed);
+          document.getElementById('stat-cpu').textContent = state.cpu.toFixed(1);
+          document.getElementById('stat-mem').textContent = state.mem.toFixed(1);
+        }
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+
+      // ---- 控件
+      document.getElementById('btn-toggle').addEventListener('click', (event) => {
+        state.running = !state.running;
+        event.target.textContent = state.running ? '暂停' : '继续';
+        write(state.running ? '继续推送' : '暂停推送');
+      });
+      document.querySelectorAll('[data-speed]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.speed = Number(btn.dataset.speed);
+          document.querySelectorAll('[data-speed]').forEach((b) => b.classList.toggle('active', b === btn));
+          write(`推送速度 ${state.speed}×`);
+        });
+      });
+      document.getElementById('btn-spike').addEventListener('click', () => {
+        state.spike = 24;
+        write('注入尖峰：CPU 冲向 92%');
+      });
+      document.getElementById('btn-reset').addEventListener('click', () => {
+        candles.length = 0;
+        building = null;
+        state.tick = 0;
+        state.pushed = 0;
+        for (let i = 0; i < HEAT_COLS; i++) heatMatrix[i] = [30, 50, 20];
+        stream.setData('cpu', []);
+        stream.setData('mem', []);
+        candleChart.setData('k', []);
+        heat.setData('heat', heatData());
+        write('已清空，重新开始');
+      });
+
+      stream.on('item:hover', (p) => write(`负载 hover  t=${Number(p.xValue).toFixed(0)}  ${p.seriesName}=${Number(p.value).toFixed(1)}%`));
+
+      window.__chart = stream;
+      window.__charts = { stream, gauge, heat, candles: candleChart };
+      window.__liveState = state;
+      mountSnapshotPanel();
+      write('数据流已启动');
+    </script>
+  </body>
+</html>

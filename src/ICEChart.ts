@@ -300,6 +300,44 @@ export class ICEChart {
     return this;
   }
 
+  /**
+   * **追加**数据（实时数据流专用）：把新点接到系列末尾，超出 `maxPoints` 时从头裁掉，
+   * 形成滑动窗口。相对 `setData` 的两点差别：
+   *
+   * 1. **不做值插值**（`animate` 默认 false）：窗口滑动会让下标整体前移，
+   *    插值会把「这一点」插向「下一点的值」，看起来像被拖住。
+   *    流畅度由推送频率决定（60Hz 推送就是 60fps 的平滑滚动）；
+   * 2. 只重算被追加的系列所在的那条链路（走 `applyOption` 的常规更新路径，`preserveView` 保持缩放窗口）。
+   *
+   * ```ts
+   * chart.appendData('cpu', [[t, value]], { maxPoints: 180 });
+   * ```
+   */
+  public appendData(
+    seriesIdOrIndex: string | number,
+    items: DataItem[],
+    options: { maxPoints?: number; animate?: boolean } = {}
+  ): this {
+    // 传 undefined 会「碰巧」命中第一个没有 id 的系列（真踩过），直接拦掉
+    if (seriesIdOrIndex === undefined || seriesIdOrIndex === null) {
+      throw new Error('[ice-chart] appendData 需要系列 id / name / 下标。');
+    }
+    const list = (this.option.series || []).map((item, index) => ({ item, index }));
+    const target = list.find((s) =>
+      typeof seriesIdOrIndex === 'number' ? s.index === seriesIdOrIndex : s.item.id === seriesIdOrIndex || s.item.name === seriesIdOrIndex
+    );
+    if (!target) throw new Error(`[ice-chart] 找不到系列：${seriesIdOrIndex}`);
+    const appended = Array.isArray(items) ? items : [];
+    if (!appended.length) return this;
+    const next = (target.item.data || []).concat(appended);
+    const maxPoints = Number(options.maxPoints);
+    target.item.data =
+      isFinite(maxPoints) && maxPoints > 0 && next.length > maxPoints ? next.slice(next.length - maxPoints) : next;
+    this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
+    this.emit('data:change', { seriesId: target.item.id, seriesIndex: target.index });
+    return this;
+  }
+
   /** 设置数据域（缩放 / 联动入口）。 */
   public setDomain(axis: 'x' | 'y', domain: any[], source = 'api'): this {
     if (this.destroyed) return this;
@@ -1174,16 +1212,19 @@ export class ICEChart {
       return;
     }
     seriesComponent.setAnimationStage(stage);
-    const animations: any = {
-      progress: {
-        from: 0,
-        to: 1,
-        duration: Math.max(1, Number(stage.duration) || 480),
-        delay: Number(stage.delay) || 0,
-        easing: stage.easing || 'easeOutCubic',
-        startTime: undefined,
-        finished: false,
-      },
+    // 必须**合并**而不是整体替换：组件上可能还跑着别的补间
+    // （悬停反馈 highlightT、扫动的 __tick）。整体替换会把它们悄悄冲掉 ——
+    // 数据流场景最明显：每帧 setData/appendData 都会重播 update 阶段，
+    // 悬停反馈被反复清空，highlightT 永远到不了 1（实测卡在 0.16）。
+    const animations: any = { ...((seriesComponent.props as any).animations || {}) };
+    animations.progress = {
+      from: 0,
+      to: 1,
+      duration: Math.max(1, Number(stage.duration) || 480),
+      delay: Number(stage.delay) || 0,
+      easing: stage.easing || 'easeOutCubic',
+      startTime: undefined,
+      finished: false,
     };
     (seriesComponent.props as any).animations = animations;
     seriesComponent.setState({ progress: 0 });

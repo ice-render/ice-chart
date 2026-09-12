@@ -33,6 +33,7 @@ const pages = [
   'serialize',
   'interactions',
   'time-series',
+  'live-stream',
   'large-data',
   'a11y',
   'linked-charts',

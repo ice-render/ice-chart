@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.14.0
+
+### 新增
+
+- **`chart.appendData(id, items, { maxPoints, animate })`**：实时数据流的追加通道。
+  追加到末尾、超过 `maxPoints` 从头裁掉（滑动窗口），x 轴窗口自动右移；
+  走常规更新路径 + `preserveView`，派发 `data:change`。
+  **默认不做值插值**：窗口滑动会让下标整体前移，插值会把每个点拖向邻居的值（像被拖住）；
+  流畅度交给推送频率（60Hz 推送 = 60fps 平滑滚动）。
+  传 `undefined` 会「碰巧」命中第一个没有 id 的系列，已显式拦掉。
+- `examples/live-stream.html`：四条曲线共用一个数据发生器 ——
+  滑动窗口折线（CPU/内存）+ 弹簧指针仪表盘 + 每 250ms 左移一列的滚动热力图 +
+  最后一根实时跳动的 K 线；带暂停 / 1×2×4× 速度 / 注入尖峰 / fps 与已推送点数统计。
+- `tests/chart/stream.test.ts`（9 例）：窗口裁剪、x 窗口右移、默认不插值、显式开插值、
+  `preserveView` 与 `data:change`、参数校验、连续推 200 次的冒烟与末点命中、多系列互不干扰。
+
+### 修复
+
+- **数据更新会把正在跑的悬停反馈动画冲掉**：`playStage` 用**整体替换**写
+  `component.props.animations`，把 `highlightT`（悬停反馈）与 `__tick`（参数扫动）一起清掉 ——
+  数据流场景最明显：每帧 `appendData` 都重播 update 阶段，悬停反馈被反复清空，
+  `highlightT` 永远到不了 1（实测卡在 0.16，悬停探针因此判失败）。改成**合并**写法，
+  与 `setHoverIndex` / `keepAnimating` / `syncTicks` 的写法一致，并补了回归用例。
+
+### 实测
+
+2 系列、每 tick 各追加 1 点：窗口 120 点 **1.6ms/tick**（p95 2.4ms）、600 点 4.9ms、1500 点 11ms。
+
 ## 0.13.0
 
 补齐 mini MATLAB 的第三种经典图：**极坐标 r(θ)**（MATLAB 的 `polarplot`）。

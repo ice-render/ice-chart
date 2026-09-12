@@ -31,6 +31,7 @@ const pages = [
   'finance',
   'sankey',
   'time-series',
+  'live-stream',
 ];
 
 fs.mkdirSync(outDir, { recursive: true });

@@ -160,6 +160,26 @@ npm install ice-chart ice-render
 | `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
 | `parametric`（极坐标） | `polarExpression: 'cos(3*t)'` + `polarGrid: true` | 极坐标 `r(θ)`（玫瑰线 / 心形线 / 螺线），配 `aspect: 'equal'` 出 MATLAB `polarplot` 观感 |
 
+### 实时数据流
+
+数据不断进来、图形跟着动（监控大屏 / 交易终端那类）走 `appendData`：
+
+```ts
+chart.appendData('cpu', [[t, value]], { maxPoints: 180 }); // 追加 + 滑动窗口
+chart.appendData('cpu', [[t, v1], [t2, v2]], { maxPoints: 180, animate: true }); // 需要值插值时才开
+```
+
+- **滑动窗口**：追加到末尾，超过 `maxPoints` 从头裁掉；x 轴窗口自动跟着右移，不需要手动 `setDomain`；
+- **默认不做值插值**：窗口滑动会让下标整体前移，插值会把每个点拖向「邻居的值」（看起来像被拖住）。
+  流畅度由推送频率决定——60Hz 推送就是 60fps 的平滑滚动；
+- 走常规更新路径 + `preserveView`（当前缩放窗口不受影响），并派发 `data:change`；
+- 实测（2 系列、每 tick 各追加 1 点）：窗口 120 点 **1.6ms/tick**、600 点 4.9ms、1500 点 11ms
+  —— 监控场景用 120~300 点的窗口最划算。
+
+配套示例 [examples/live-stream.html](./examples/live-stream.html)：四条曲线共用一个数据发生器 ——
+滑动窗口折线 / 弹簧指针仪表盘 / 每 250ms 左移一列的滚动热力图 / 最后一根实时跳动的 K 线，
+外加暂停、1×/2×/4× 速度、注入尖峰与 fps 统计。
+
 ## 函数绘图（迷你 MATLAB）
 
 ```ts

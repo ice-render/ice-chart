@@ -173,6 +173,21 @@ npm run audit:interactions -- ./.audit
   新类型的显隐重排要按同一节奏接上（饼图用 `sliceFrom`、漏斗用 `stageFrom`，都按数据下标对齐）。
 - **`finishAnimations()` 要收尾所有补间组件**（系列 / 坐标轴 / 网格 / 准星 / 提示框）：
   只收系列的话，截图与「动效偏好 = instant」会拍到半路状态。
+- **写 `props.animations` 一律「复制 + 合并」**：组件上可能同时跑着多个补间
+  （系列 `progress` / 悬停 `highlightT` / 扫动 `__tick`）。`playStage` 曾用整体替换，
+  把悬停反馈悄悄冲掉 —— 数据流场景（每帧 appendData 重播 update）里 `highlightT` 永远到不了 1，
+  实测卡在 0.16，悬停探针判失败。序列化那条铁律（冻结对象不能原地改）要求复制，
+  这条要求**合并**，两条都要满足。
+
+## 实时数据流（改 `appendData` 前必读）
+
+- **滑动窗口的下标会整体前移**，所以追加路径**默认不做值插值**（`animate: false`）：
+  插值会把每个点插向「邻居的值」。要插值就显式 `animate: true`（窗口不滑动时才有意义）。
+- 推送频率就是流畅度：60Hz 推送 = 60fps 滚动。实测成本（2 系列 / 每次各追加 1 点）：
+  120 点窗口 **1.6ms/tick**、600 点 4.9ms、1500 点 11ms（成本随窗口近似线性，因为每 tick 都会
+  归一化 + 布局 + 重建像素）。监控类示例用 120~300 点窗口最划算。
+- `appendData`/`setData` 会**就地改传入的 option**（`series[i].data = ...`），
+  测试与调用方要传自己的副本，否则模块级常量会在用例之间互相污染（踩过）。
 - **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。
   `ICEChart.domainTransition` + `stepDomainTransition()` 每帧按系列进度插值数据域；
   过渡期间同步组件必须传 `preserveAnimation=true`（只换 series 引用，不清 `fromEffective`），
