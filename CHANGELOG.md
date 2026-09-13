@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+> 暂无（下一个版本发布前在这里累积）。
+
+## 0.19.0
+
 ### 新增
 
 - **`option.labels`：内置文案可覆盖**（2026-09-13）：图表包自己不吐文案，但无障碍数据表的
@@ -10,6 +14,14 @@
   不传时仍是中文默认值。图表包**不内置 i18n 运行时**：应用层用任意 i18n 库把最终字符串传进来
   （或用 `tooltip.formatter` 完全接管提示框）。契约见 ice-render
   `docs/architecture/17-i18n-boundary.md`。
+
+### 测试
+
+- **示例页冒烟回归**（2026-09-13）：`e2e/examples-smoke.spec.ts` 用真实浏览器逐页走
+  28 个示例页，断言「无 pageerror / console error」+「每张 canvas 的内容像素占比 > 0.5%」
+  （不是"有任意不透明像素"——只刷一层底色的空页也会骗过旧判据），并确认
+  `window.ICE` / `window.ICEChart` 都已加载。`npm run test:e2e` 一把过，
+  `npm run verify:full` = verify + test:e2e。反向验证过：移走 vendor 里的 UMD 时对应页面如期失败。
 
 ## 0.18.0
 
