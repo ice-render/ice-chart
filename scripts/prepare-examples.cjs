@@ -32,4 +32,17 @@ if (fs.existsSync(chartUmd)) {
   console.warn('[prepare-examples] 尚未构建 ice-chart（dist/index.umd.js 不存在），示例将加载失败：npm run build');
 }
 
+// 同族的 DSL 包（`examples/dsl-vs-option.html` 用）：可选依赖，没装也只是少一个示例页
+try {
+  const dslDir = path.dirname(require.resolve('@damoqiongqiu/ice-chart-dsl/package.json'));
+  const dslUmd = path.join(dslDir, 'dist', 'index.umd.js');
+  if (fs.existsSync(dslUmd)) {
+    copy(dslUmd, path.join(vendorDir, 'ice-chart-dsl.umd.js'));
+  } else {
+    console.warn('[prepare-examples] ice-chart-dsl 还没构建（dist/index.umd.js 不存在），dsl-vs-option 示例会加载失败');
+  }
+} catch (err) {
+  console.warn('[prepare-examples] 未安装 @damoqiongqiu/ice-chart-dsl，跳过 DSL 示例的 vendor');
+}
+
 console.log('[prepare-examples] vendor 目录已就绪：' + path.relative(root, vendorDir));

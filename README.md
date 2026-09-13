@@ -494,6 +494,10 @@ renderChartDsl('canvas-id', {
 
 它的技能已发布到 skills-hub：`skill-installer install ice-chart-dsl`（<https://skills-hub.ai/skills/ice-chart-dsl>）。
 
+示例页 [examples/dsl-vs-option.html](./examples/dsl-vs-option.html) 用**同一份表**把两种写法并排画出来，
+并做逐像素自检（绘图区 / x 域 / y 域 / 每个数据点的坐标必须完全一致）——
+两种写法只是作者体验不同，画出来的图必须一模一样。
+
 引擎按 **npm 依赖**装（`peerDependencies` + `devDependencies` 都是 `ice-render@^1.4.7`），
 `npm install` 即可跑测试和示例。要连着改引擎源码时，把 `devDependencies` 那条临时改成
 `file:../ice-render`（引擎仓库放同级目录）再 `npm install`。

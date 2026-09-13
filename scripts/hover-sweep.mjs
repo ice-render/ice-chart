@@ -28,6 +28,7 @@ const pages = [
   'treemap',
   'graph',
   'mini-matlab',
+  'dsl-vs-option',
   'finance',
   'sankey',
   'time-series',
@@ -245,7 +246,13 @@ for (const name of pages) {
                 if (window.__charts) for (const k of Object.keys(window.__charts)) push(window.__charts[k]);
                 const chart = list[i];
                 const comp = chart.seriesComponents[s];
-                const pixel = comp.pixelAt(t);
+                // 流式图表的窗口会滑动：原下标可能已经被挤出窗口（或点位整段换了一批），
+                // 这时退到「当前存在的最近点」再探一次 —— 断言只要求有悬停反馈，
+                // 下标差异本来就只记录不判失败（实测 dashboard-logistics 的散点会这样偶发落空）。
+                const count = comp.series.points.length;
+                if (!count) return null;
+                const clamped = Math.min(Math.max(0, t), count - 1);
+                const pixel = comp.pixelAt(t) || comp.pixelAt(clamped) || comp.pixelAt(count - 1) || comp.pixelAt(0);
                 if (!pixel) return null;
                 const rect = chart.canvasElement.getBoundingClientRect();
                 const canvas = chart.layout.canvas;

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 手写 option vs DSL</title>
+    <!--
+      同一份数据、同一套交互，两种写法并排：
+      - 左边：手写 ChartOption（series[].data 自己拍平）
+      - 右边：ice-chart-dsl（一张表 + encoding，编译成 ChartOption）
+      页面底部同时给出 DSL 文档、编译产物、以及 DSL 的校验诊断，方便直观对比。
+    -->
+    <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      .pair {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        gap: 1.25rem;
+        align-items: start;
+      }
+      .pair .card {
+        margin-bottom: 1.25rem;
+      }
+      .pair canvas {
+        max-width: 100%;
+        margin: 0 auto;
+      }
+      pre.code {
+        margin: 0;
+        padding: 0.6rem 0.75rem;
+        max-height: 18rem;
+        overflow: auto;
+        border: 1px solid var(--bs-border-color);
+        border-radius: var(--bs-border-radius);
+        background: #f8f9fa;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .badge {
+        display: inline-block;
+        padding: 0.1rem 0.45rem;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(13, 110, 253, 0.1);
+        color: var(--bs-primary);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>手写 option vs DSL</h1>
+    <p class="lead">
+      同一份表（月份 / 销量 / 渠道）、同一类交互。左边按 <code>ChartOption</code> 手写：
+      自己把行拍成 <code>series[].data</code>、自己写类目轴。右边交给
+      <code>@damoqiongqiu/ice-chart-dsl</code>：一张表 + <code>encoding</code>，
+      编译出来的<strong>就是左边的那个 option</strong> —— 交互、动画、序列化没有任何区别。
+    </p>
+
+    <div class="pair">
+      <div class="card">
+        <span class="badge">手写 ChartOption</span>
+        <canvas id="by-option" width="620" height="320"></canvas>
+        <pre class="code" id="option-code"></pre>
+      </div>
+      <div class="card">
+        <span class="badge">ice-chart-dsl</span>
+        <canvas id="by-dsl" width="620" height="320"></canvas>
+        <pre class="code" id="dsl-code"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>DSL 校验诊断</strong>
+      <pre class="code" id="dsl-diagnostics">…</pre>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./vendor/ice-chart-dsl.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      // 一份普通业务表：三个人、两个渠道、四个月
+      const TABLE = {
+        columns: ['月份', '销量', '渠道'],
+        rows: [
+          ['1月', 120, '线上'],
+          ['1月', 86, '线下'],
+          ['2月', 142, '线上'],
+          ['2月', 92, '线下'],
+          ['3月', 168, '线上'],
+          ['3月', 78, '线下'],
+          ['4月', 154, '线上'],
+          ['4月', 110, '线下'],
+        ],
+      };
+      const MONTHS = ['1月', '2月', '3月', '4月'];
+      // 两份配置除了「怎么写出来的」，**所有影响视觉的参数必须一致**：
+      // 轴名会占掉绘图区高度（DSL 编译出来带 xAxis.name），手写这份也要写上，
+      // 否则同一份数据会被画进不同高度的绘图区 —— 看起来就像"两种写法画出来的形态不一样"。
+      const AXIS = { x: { type: 'category', name: '月份', data: MONTHS }, y: { name: '销量' } };
+      const INTERACTION = {
+        hover: { enabled: true, dimOthers: true },
+        zoom: { enabled: true, axes: 'x', wheel: true },
+        pan: { enabled: true, axes: 'x' },
+        brush: { enabled: true, axes: 'x', mode: 'zoom' },
+        keyboard: true,
+      };
+
+      // ---------- 左：手写 option（数据行 → series[].data 全部自己拍） ----------
+      const pick = (channel) =>
+        MONTHS.map((month) => {
+          const hit = TABLE.rows.find((row) => row[0] === month && row[2] === channel);
+          return hit ? hit[1] : null;
+        });
+      const option = {
+        theme: 'light',
+        title: { text: '月度销量（手写 option）' },
+        legend: { show: true },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        interaction: INTERACTION,
+        xAxis: { ...AXIS.x },
+        yAxis: { ...AXIS.y },
+        series: [
+          { id: 'online', type: 'line', name: '线上', data: pick('线上') },
+          { id: 'offline', type: 'line', name: '线下', data: pick('线下') },
+        ],
+      };
+      const byOption = ICEChart.createChart('by-option', option);
+      document.getElementById('option-code').textContent = JSON.stringify(
+        { xAxis: option.xAxis, series: option.series },
+        null,
+        2
+      );
+
+      // ---------- 右：DSL（同一份数据，只写"列绑到哪个通道"） ----------
+      const dsl = {
+        schemaVersion: 1,
+        kind: 'line',
+        title: '月度销量（DSL 编译）',
+        data: TABLE,
+        encoding: { x: '月份', y: '销量', series: '渠道' },
+        options: { interaction: INTERACTION },
+      };
+      const diagnostics = ICEChartDSL.validateChartDsl(dsl);
+      const compiled = ICEChartDSL.compileChartDsl(dsl);
+      const byDsl = ICEChart.createChart('by-dsl', compiled);
+
+      document.getElementById('dsl-code').textContent = JSON.stringify(dsl, null, 2);
+      document.getElementById('dsl-diagnostics').textContent =
+        ICEChartDSL.formatDiagnostics(diagnostics) +
+        '\n\n编译产物（与左边手写的结构一致）：\n' +
+        JSON.stringify({ xAxis: compiled.xAxis, series: compiled.series }, null, 2) +
+        '\n\n' +
+        geometryCheck(byOption, byDsl);
+
+      /**
+       * 几何自检：两张图必须**逐像素一致**。只要有一处不同就红字报出来，
+       * 免得示例悄悄漂移成"两种写法画出来的图不一样"。
+       */
+      function geometryCheck(a, b) {
+        const round = (rect) => [rect.x, rect.y, rect.width, rect.height].map((v) => Math.round(v)).join(',');
+        const problems = [];
+        if (round(a.layout.plot) !== round(b.layout.plot)) {
+          problems.push(`绘图区不同：${round(a.layout.plot)} vs ${round(b.layout.plot)}`);
+        }
+        const ax = JSON.stringify(a.norm.xAxis.domain);
+        const bx = JSON.stringify(b.norm.xAxis.domain);
+        if (ax !== bx) problems.push(`x 域不同：${ax} vs ${bx}`);
+        const ay = JSON.stringify(a.norm.yAxis.domain.map((v) => Number(v.toFixed(3))));
+        const by = JSON.stringify(b.norm.yAxis.domain.map((v) => Number(v.toFixed(3))));
+        if (ay !== by) problems.push(`y 域不同：${ay} vs ${by}`);
+        for (let s = 0; s < a.seriesComponents.length; s++) {
+          const ca = a.seriesComponents[s];
+          const cb = b.seriesComponents[s];
+          if (!cb) {
+            problems.push(`右侧缺少系列 ${ca.series.name}`);
+            continue;
+          }
+          if (ca.series.name !== cb.series.name) problems.push(`系列顺序不同：${ca.series.name} vs ${cb.series.name}`);
+          for (let i = 0; i < ca.series.points.length; i++) {
+            const pa = ca.pixelAt(i);
+            const pb = cb.pixelAt(i);
+            if (!pa || !pb || Math.abs(pa[0] - pb[0]) > 0.5 || Math.abs(pa[1] - pb[1]) > 0.5) {
+              problems.push(`${ca.series.name} 第 ${i + 1} 点像素不同：${pa} vs ${pb}`);
+            }
+          }
+        }
+        return problems.length
+          ? '✗ 两图几何不一致：\n- ' + problems.join('\n- ')
+          : '✓ 两图几何完全一致（绘图区 / x 域 / y 域 / 每个数据点的像素坐标都逐一对齐）';
+      }
+
+      window.__charts = { byOption, byDsl };
+      window.__chart = byDsl;
+      if (window.mountSnapshotPanel) window.mountSnapshotPanel();
+      const log = document.getElementById('log');
+      ['item:hover', 'brush:end', 'zoom:change'].forEach((name) => {
+        byDsl.on(name, (params) => {
+          const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+          log.textContent = `${time}  ${name}  ${JSON.stringify(params).slice(0, 80)}`;
+        });
+      });
+    </script>
+  </body>
+</html>

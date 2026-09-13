@@ -38,6 +38,7 @@ const pages = [
   'treemap',
   'graph',
   'mini-matlab',
+  'dsl-vs-option',
   'animation',
   'finance',
   'sankey',
