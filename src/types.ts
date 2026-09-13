@@ -512,9 +512,40 @@ export interface AnimationOption {
   stagger?: number;
 }
 
+/**
+ * 图表内置文案（全部可选）。默认值是中文；应用层按自己的语言传入即可，
+ * 不需要图表包内置任何 i18n 运行时（契约见 ice-render `docs/architecture/17-i18n-boundary.md`）。
+ */
+export interface ChartLabels {
+  /** 无障碍标题的兜底文案（`option.title.text` 优先）。默认 `图表`。 */
+  chart?: string;
+  /** 饼图数据表的「扇区」列。默认 `扇区`。 */
+  sector?: string;
+  /** 数据表的「数值」列。默认 `数值`。 */
+  value?: string;
+  /** 数据表的「占比」列。默认 `占比`。 */
+  ratio?: string;
+  /** 雷达图的「指标」列。默认 `指标`。 */
+  indicator?: string;
+  /** 函数绘图 tooltip 里的「坐标」。默认 `坐标`。 */
+  coordinate?: string;
+  /** 水位图 tooltip 里的「水位」。默认 `水位`。 */
+  liquid?: string;
+  /** 饼图扇区的兜底名字前缀（`切片 N`）。默认 `切片`。 */
+  slice?: string;
+}
+
 export interface ChartOption {
   /** 'light' | 'dark' | 'auto'（跟随 ice-render 实例主题）| 自定义主题片段。 */
   theme?: 'light' | 'dark' | 'auto' | Partial<ChartTheme>;
+  /**
+   * 内置文案（**组件层文案可配**，见 ice-render `docs/architecture/17-i18n-boundary.md`）。
+   *
+   * 只影响那几处「图表包自己吐出来的字」：无障碍数据表的表头/标题、默认 tooltip 里
+   * 「坐标 / 水位」这类标签。不传时是中文字面量；**应用层应当按自己的语言传入**，
+   * 或者用 `tooltip.formatter` 完全接管提示框（那样这些标签就不会出现）。
+   */
+  labels?: ChartLabels;
   title?: TitleOption;
   xAxis?: AxisOption;
   /** 单个 y 轴，或 y 轴数组（多轴叠加：涨跌幅用右轴、成交量用左轴之类）。 */

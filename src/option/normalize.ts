@@ -272,6 +272,17 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   applyEqualAspect(option, kind, xAxis, yAxes);
 
   return {
+    labels: {
+      chart: '图表',
+      sector: '扇区',
+      value: '数值',
+      ratio: '占比',
+      indicator: '指标',
+      coordinate: '坐标',
+      liquid: '水位',
+      slice: '切片',
+      ...(option.labels || {}),
+    },
     kind,
     orientation: horizontal ? 'horizontal' : 'vertical',
     radar,

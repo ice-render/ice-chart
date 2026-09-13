@@ -123,6 +123,23 @@ describe('无障碍（数据表 / 节点树）', () => {
     expect(tree[0].label).toBe('近 3 天访问量');
   });
 
+  // 组件层文案可配（契约：ice-render docs/architecture/17-i18n-boundary.md）：
+  // 图表包不内置 i18n 运行时，但自己吐出来的那几处文案必须能由调用方覆盖。
+  it('option.labels 覆盖内置文案（默认仍是中文）', async () => {
+    const zh = await mount({ series: [{ id: 'pie', type: 'pie', data: [{ name: 'A', value: 3 }, { name: 'B', value: 7 }] }], xAxis: undefined } as any);
+    expect(zh.norm.labels).toMatchObject({ chart: '图表', sector: '扇区', value: '数值', ratio: '占比' });
+    expect(zh.getDataTable().columns).toEqual(['扇区', '数值', '占比']);
+    zh.destroy();
+
+    const en = await mount({
+      labels: { chart: 'Chart', sector: 'Slice', value: 'Value', ratio: 'Share', indicator: 'Metric', coordinate: 'Point', liquid: 'Level', slice: 'Slice' },
+      series: [{ id: 'pie', type: 'pie', data: [{ name: 'A', value: 3 }, { name: 'B', value: 7 }] }],
+      xAxis: undefined,
+    } as any);
+    expect(chartTitle(en.norm)).toBe('Chart');
+    expect(en.getDataTable().columns).toEqual(['Slice', 'Value', 'Share']);
+  });
+
   it('attaches a visually hidden table and wires aria-describedby', async () => {
     const c = await mount();
     expect(c.attachA11yMirror()).toBe(true);

@@ -14,6 +14,7 @@ import type {
   ChartTheme,
 } from './types';
 import type { Scale } from './scale';
+import type { ChartLabels } from './types';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
 export interface DataPoint {
@@ -106,6 +107,11 @@ export interface NormalizedOption {
    * vertical：类目在 x 轴（普通柱状/折线）；horizontal：类目在 y 轴（横向柱状，排行榜场景）。
    */
   orientation: 'vertical' | 'horizontal';
+  /**
+   * 内置文案（已合并默认值）：无障碍数据表表头、默认 tooltip 标签。
+   * 应用层通过 `option.labels` 覆盖，图表包本身不做 i18n 运行时。
+   */
+  labels: Required<ChartLabels>;
   /** 雷达图配置（存在雷达系列时非空）。 */
   radar: RadarOption | null;
   /** 桑基图配置（存在桑基系列时非空）。 */

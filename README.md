@@ -130,6 +130,12 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 主题 | light / dark / 自定义片段 | 默认色板取自 ice-render 的设计 token |
 | 大数据 | LTTB 降采样 + 二分命中 | 5 万点 × 3 系列构建 35ms，每条曲线只绘制约 2 点/像素 |
 | 无障碍 | 数据表镜像 + aria-live 播报 | `attachA11yMirror()` / `getDataTable()` / `getA11yTree()` |
+
+> **内置文案可配**：无障碍数据表的表头与默认 tooltip 标签可以用 `option.labels` 覆盖
+> （`{ chart, sector, value, ratio, indicator, coordinate, liquid, slice }`，不传是中文默认值）。
+> 图表包**不做 i18n 运行时** —— 词条与 `Intl` 格式化归应用层，`tooltip.formatter` 可以完全接管提示框；
+> 断行与文字方向（`direction` / `textAlign: 'start' | 'end'`）由引擎负责。
+> 边界契约见 ice-render 的 `docs/architecture/17-i18n-boundary.md`。
 | 序列化 | `toJSON` / `fromJSONString` | 配置 + 缩放窗口 + 图例显隐状态 |
 
 ## 事件
