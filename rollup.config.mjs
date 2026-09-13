@@ -31,6 +31,7 @@ const CommonPlugins = [
   commonjs(),
   babel({
     extensions,
+    babelHelpers: 'bundled',
     include: ['src/**/*'],
   }),
   env === 'production' &&
