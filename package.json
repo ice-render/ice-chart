@@ -63,7 +63,9 @@
     "audit:interactions": "node scripts/audit-interactions.mjs",
     "audit:hover": "node scripts/hover-sweep.mjs",
     "prepublishOnly": "npm run verify",
-    "verify": "npm run lint && npm run types:check && npm run build && npm test -- --runInBand"
+    "verify": "npm run lint && npm run types:check && npm run build && npm test -- --runInBand",
+    "test:e2e": "npm run build && npm run examples:prepare && playwright test",
+    "verify:full": "npm run verify && npm run test:e2e"
   },
   "peerDependencies": {
     "ice-render": "^2.0.0"
@@ -73,6 +75,7 @@
     "@babel/preset-env": "7.28.5",
     "@babel/preset-typescript": "7.28.5",
     "@damoqiongqiu/ice-chart-dsl": "^0.1.0",
+    "@playwright/test": "^1.63.0",
     "@rollup/plugin-babel": "6.1.0",
     "@rollup/plugin-commonjs": "28.0.1",
     "@rollup/plugin-json": "6.1.0",
