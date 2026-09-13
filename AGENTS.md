@@ -74,6 +74,14 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
 - `chart.layout.*` 与 `series.pixelAt()` 返回的都是**图表坐标系（画布左上角为原点）**，
   对外事件里的 `screen` 才经过 `ice.worldToScreen()`。
 
+## 分支与发版约定（家族铁律，2026-09-13 确立）
+
+- **开发**：在临时分支（或 `dev`）上做；`main` 只做集成与发版。
+- **发版前**：必须先把开发分支合并进 `main`，**再从 `main` 发版**（跑门禁 → `npm publish`）。
+- **禁止**：直接在 `main` 上写实现；也禁止只把改动留在临时分支 / `dev` 而让 `main` 停在旧版本。
+- **远端默认分支**必须指向 `main`，且发版后它与开发主线内容一致（否则仓库首页显示旧代码）。
+- 本仓主线名：`main`（Gitee `origin` + GitHub `github-origin`，两处都要推）。
+
 ## 测试约定
 
 - `npm test` 跑 jest（jsdom + `tests/setup/canvas-env.ts` 提供的 Canvas 2D 桩）。
