@@ -475,6 +475,25 @@ K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件
 
 ## 开发
 
+### 给 agent 用的 DSL（同族包）
+
+想让模型直接产出图表（而不是手写 `ChartOption`），用 [`@damoqiongqiu/ice-chart-dsl`](https://github.com/ice-render/ice-chart-dsl)：
+给一张表 + `encoding`（把列绑到 x / y / series / size / name / value），编译成正常的 `ChartOption` ——
+交互、动画、序列化全部照旧。它比手写 option 多的三件事：**数据绑定**、**意图级默认**、
+以及**结构化诊断**（列不存在会列出可用列名、非数值列给出数字占比、公式错误带字符位置、整段画不出来也会报）。
+
+```ts
+import { renderChartDsl } from '@damoqiongqiu/ice-chart-dsl';
+
+renderChartDsl('canvas-id', {
+  kind: 'line',
+  data: { columns: ['月份', '销量', '渠道'], rows: [['1月', 120, '线上'], ['1月', 86, '线下']] },
+  encoding: { x: '月份', y: '销量', series: '渠道' },
+});
+```
+
+它的技能已发布到 skills-hub：`skill-installer install ice-chart-dsl`（<https://skills-hub.ai/skills/ice-chart-dsl>）。
+
 引擎按 **npm 依赖**装（`peerDependencies` + `devDependencies` 都是 `ice-render@^1.4.7`），
 `npm install` 即可跑测试和示例。要连着改引擎源码时，把 `devDependencies` 那条临时改成
 `file:../ice-render`（引擎仓库放同级目录）再 `npm install`。
