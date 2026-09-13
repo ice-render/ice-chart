@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### 新增
+
+- **`option.labels`：内置文案可覆盖**（2026-09-13）：图表包自己不吐文案，但无障碍数据表的
+  表头 / 标题、默认 tooltip 里「坐标 / 水位」这类标签是它渲染的 —— 现在这些都能由调用方覆盖
+  （`labels: { chart, sector, value, ratio, indicator, coordinate, liquid, slice }`），
+  不传时仍是中文默认值。图表包**不内置 i18n 运行时**：应用层用任意 i18n 库把最终字符串传进来
+  （或用 `tooltip.formatter` 完全接管提示框）。契约见 ice-render
+  `docs/architecture/17-i18n-boundary.md`。
+
 ## 0.18.0
 
 ### 变更（破坏性：快照里的 typeId 换了名字）

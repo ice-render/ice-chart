@@ -399,7 +399,7 @@ export class InteractionController {
         title: series.name,
         rows: [
           {
-            name: point.name || `切片 ${point.index + 1}`,
+            name: point.name || `${this.host.norm.labels.slice} ${point.index + 1}`,
             value: `${percent.toFixed(1)}%`,
             color: point.color || series.color,
           },
@@ -449,7 +449,7 @@ export class InteractionController {
         title: point.name || series.name,
         rows: [
           { name: series.name, value: `${value}${option.unit === undefined ? '%' : option.unit}`, color: series.color },
-          { name: '水位', value: `${(ratio * 100).toFixed(1)}%`, color: this.host.norm.theme.subTextColor },
+          { name: this.host.norm.labels.liquid, value: `${(ratio * 100).toFixed(1)}%`, color: this.host.norm.theme.subTextColor },
         ],
       };
     }
@@ -472,10 +472,10 @@ export class InteractionController {
         rows: isFunction
           ? [
               { name: series.name, value: fmt(y), color: series.color },
-              { name: '坐标', value: `(${fmt(x)}, ${fmt(y)})`, color: this.host.norm.theme.subTextColor },
+              { name: this.host.norm.labels.coordinate, value: `(${fmt(x)}, ${fmt(y)})`, color: this.host.norm.theme.subTextColor },
             ]
           : [
-              { name: '坐标', value: `(${fmt(x)}, ${fmt(y)})`, color: series.color },
+              { name: this.host.norm.labels.coordinate, value: `(${fmt(x)}, ${fmt(y)})`, color: series.color },
               { name: 'y', value: fmt(y), color: this.host.norm.theme.subTextColor },
             ],
       };

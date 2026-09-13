@@ -39,7 +39,7 @@ export interface A11yTreeOptions {
 /** 图表标题（无障碍名也用它）。 */
 export function chartTitle(norm: NormalizedOption): string {
   const title = norm.option.title && norm.option.title.text;
-  return title ? String(title) : '图表';
+  return title ? String(title) : norm.labels.chart;
 }
 
 /**
@@ -58,12 +58,12 @@ export function buildDataTable(chart: A11yChartLike): DataTable {
 
   if (norm.kind === 'polar') {
     const pie = norm.series.find((s) => s.type === 'pie');
-    if (!pie) return { caption, columns: ['扇区', '数值', '占比'], rows: [] };
+    if (!pie) return { caption, columns: [norm.labels.sector, norm.labels.value, norm.labels.ratio], rows: [] };
     const visible = pie.points.filter((p) => !norm.hiddenSlices[`${pie.id}#${p.index}`]);
     const total = visible.reduce((sum, p) => sum + (p.y || 0), 0);
     return {
       caption,
-      columns: ['扇区', '数值', '占比'],
+      columns: [norm.labels.sector, norm.labels.value, norm.labels.ratio],
       rows: visible.map((point) => [
         point.name || `${pie.name} ${point.index + 1}`,
         point.y === null ? '' : String(point.y),
