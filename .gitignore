@@ -8,3 +8,5 @@ coverage
 .vscode
 examples/vendor
 .audit
+test-results
+playwright-report

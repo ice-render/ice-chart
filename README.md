@@ -524,6 +524,13 @@ npm run audit:interactions -- ./.audit      # 27 页 × 11 步交互，逐步截
 npm run audit:hover -- ./.hover-sweep       # 18 种图表逐个数据点悬停：反馈动画 + 像素缓存新鲜度
 ```
 
+示例页冒烟（真实浏览器，**28 页**，秒级；改完示例页/引擎后先跑这条）：
+
+```bash
+npm run test:e2e        # build → examples:prepare → playwright：逐页断言「无 console/pageerror + 画布有输出」
+npm run verify:full     # verify + test:e2e（发版前的一把过）
+```
+
 审计会检查每一步之后：提示框是否越出画布、是否压住坐标轴数值标签或图例、
 高亮标记是否落在绘图区内、有没有饱和色墨迹跑到坐标轴带上；任何一条不满足就以非 0 退出码结束，可用于 CI。
 （图例带例外：图例色块本来就是饱和色、又画在绘图区外面，居中的图例落在等比坐标的轴带里不算越界。）
