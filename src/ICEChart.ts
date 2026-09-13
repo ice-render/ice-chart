@@ -1346,22 +1346,18 @@ export class ICEChart {
 
   private registerTypes(): void {
     const types: Array<[string, any]> = [
-      ['ice-plot-area', PlotArea],
-      ['ice-grid-lines', GridLines],
-      ['ice-axis', Axis],
-      ['ice-legend', Legend],
-      ['ice-title', Title],
-      ['ice-tooltip', Tooltip],
-      ['ice-crosshair', Crosshair],
-      ['ice-highlight', Highlight],
-      ['ice-brush', Brush],
+      ['ice-chart:PlotArea', PlotArea],
+      ['ice-chart:GridLines', GridLines],
+      ['ice-chart:Axis', Axis],
+      ['ice-chart:Legend', Legend],
+      ['ice-chart:Title', Title],
+      ['ice-chart:Tooltip', Tooltip],
+      ['ice-chart:Crosshair', Crosshair],
+      ['ice-chart:Highlight', Highlight],
+      ['ice-chart:Brush', Brush],
     ];
-    for (const [name, ctor] of types) {
-      try {
-        this.ice.registerType(name, ctor);
-      } catch (err) {
-        // 重复注册同名类型不影响使用
-      }
+    for (const [typeId, ctor] of types) {
+      this.ice.registerType(typeId, ctor);
     }
   }
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0
+
+### 变更（破坏性：快照里的 typeId 换了名字）
+
+- **图元类型标识统一为 `namespace:Type`**（2026-09-13）：9 个图表内部图元的注册名从
+  旧 kebab 形式（`ice-plot-area`、`ice-axis`…）改为 canonical typeId
+  （`ice-chart:PlotArea`、`ice-chart:Axis`、`ice-chart:GridLines`、`ice-chart:Legend`、
+  `ice-chart:Title`、`ice-chart:Tooltip`、`ice-chart:Crosshair`、`ice-chart:Highlight`、
+  `ice-chart:Brush`），与引擎内置的 `ice-render:*` 分属不同命名空间。
+  同步升级到 **ice-render 2.0.0**（`registerType` 只接受 `namespace:Type`）。
+- **不再吞掉重复注册**：旧实现用 `try/catch` 把重复注册的异常吞了；现在重复注册（同一 typeId
+  注册不同构造函数）会明确抛错，不会被静默覆盖。
+- 旧快照里的旧 kebab 名不再被识别（引擎侧不再兼容无 namespace 的旧名），需要的话按上表改名。
+
 ## 0.17.2
 
 ### 修复：有些图表没把横向空间用起来（用户反馈「右侧浪费太多」）
