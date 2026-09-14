@@ -236,7 +236,8 @@ function buildAxisLayout(
     const axisLength = range && range.length >= 2 ? Math.abs(range[1] - range[0]) : 0;
     if (axisLength > 0) {
       const spacing = axisLength / (ticks.length - 1 || 1);
-      const minGap = maxLabelWidth + 10;
+      // 经验值 64px：低于这个间隔数字标签即使不重叠也「吵」（30 个刻度会挤成一片编号）
+      const minGap = Math.max(maxLabelWidth + 10, 64);
       if (spacing < minGap) {
         const keepEvery = Math.ceil(minGap / spacing);
         for (let i = 0; i < labels.length; i++) {

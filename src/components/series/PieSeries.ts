@@ -274,6 +274,17 @@ export class PieSeries extends SeriesBase {
       // 内部标签的防重叠：相邻角度太近就沿半径逐级外推（玫瑰图的小扇区尤其需要）
       let lastAngle = NaN;
       let stackLevel = 0;
+      // 外侧标签先收集、后统一布局（同侧按 y 推开），避免小扇区的标签叠在一起
+      const outerLabels: Array<{
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        x3: number;
+        y3: number;
+        text: string;
+        right: boolean;
+      }> = [];
       for (let i = 0; i < n; i++) {
         const a0 = this.slices[i * 4];
         const a1 = this.slices[i * 4 + 1];
@@ -322,25 +333,45 @@ export class PieSeries extends SeriesBase {
         }
         const elbow = radius + 8;
         const end = radius + 26;
-        const x1 = cx + Math.cos(mid) * outer;
-        const y1 = cy + Math.sin(mid) * outer;
-        const x2 = cx + Math.cos(mid) * elbow;
-        const y2 = cy + Math.sin(mid) * elbow;
         const right = Math.cos(mid) >= 0;
-        const x3 = cx + Math.cos(mid) * end + (right ? 8 : -8);
-        const y3 = cy + Math.sin(mid) * end;
-        ctx.strokeStyle = 'rgba(148,163,184,0.9)';
-        ctx.lineWidth = unit;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.lineTo(x3, y3);
-        ctx.stroke();
-        ctx.textAlign = right ? 'left' : 'right';
-        ctx.textBaseline = 'middle';
-        // 文字用主题的坐标轴标签色（保证浅底/深底都可读）；与扇区的关联由引线承担
-        ctx.fillStyle = (this.chartTheme && this.chartTheme.axisLabelColor) || '#475569';
-        ctx.fillText(text, x3 + (right ? 4 : -4) * unit, y3);
+        outerLabels.push({
+          x1: cx + Math.cos(mid) * outer,
+          y1: cy + Math.sin(mid) * outer,
+          x2: cx + Math.cos(mid) * elbow,
+          y2: cy + Math.sin(mid) * elbow,
+          x3: cx + Math.cos(mid) * end + (right ? 8 : -8),
+          y3: cy + Math.sin(mid) * end,
+          text,
+          right,
+        });
+      }
+
+      // 外侧标签统一布局：同侧按 y 排序后互相推开；底部越界就整列上移
+      const labelGap = this.fontSize() * 1.45;
+      for (const side of [true, false]) {
+        const col = outerLabels.filter((l) => l.right === side).sort((a, b) => a.y3 - b.y3);
+        for (let i = 1; i < col.length; i++) {
+          if (col[i].y3 - col[i - 1].y3 < labelGap) col[i].y3 = col[i - 1].y3 + labelGap;
+        }
+        if (col.length) {
+          const overflow = col[col.length - 1].y3 - (cy + coord.polar.radius + labelGap * 2);
+          if (overflow > 0) for (const l of col) l.y3 -= overflow;
+        }
+        for (const l of col) {
+          ctx.strokeStyle = 'rgba(148,163,184,0.9)';
+          ctx.lineWidth = unit;
+          ctx.beginPath();
+          ctx.moveTo(l.x1, l.y1);
+          ctx.lineTo(l.x2, l.y2);
+          ctx.lineTo(l.x2, l.y3);
+          ctx.lineTo(l.x3, l.y3);
+          ctx.stroke();
+          ctx.textAlign = l.right ? 'left' : 'right';
+          ctx.textBaseline = 'middle';
+          // 文字用主题的坐标轴标签色（保证浅底/深底都可读）；与扇区的关联由引线承担
+          ctx.fillStyle = (this.chartTheme && this.chartTheme.axisLabelColor) || '#475569';
+          ctx.fillText(l.text, l.x3 + (l.right ? 4 : -4) * unit, l.y3);
+        }
       }
     }
     this.endDraw();
