@@ -75,6 +75,8 @@ export {
   BOOTSTRAP_TOKENS,
   resolveChartTheme,
 } from './theme/chartTheme';
+// 图表主题 → 引擎主题（引擎 2.4 起）：图表实例里引擎自己画的那层跟着图表主题走
+export { chartThemeToEnginePatch, applyChartThemeToEngine } from './theme/chartEngineBridge';
 
 // 比例尺
 export { createScale, formatTick, formatNumberTick, LinearScale, BandScale, TimeScale, LogScale } from './scale';

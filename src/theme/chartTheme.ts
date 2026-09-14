@@ -152,11 +152,18 @@ export const LIGHT_CHART_THEME = BOOTSTRAP_CHART_THEME;
 /** 兼容旧名字：dark 主题。 */
 export const DARK_CHART_THEME = BOOTSTRAP_DARK_CHART_THEME;
 
-/** 解析主题：'light'（默认，Bootstrap）/ 'dark' / 'auto' / 自定义片段（浅合并到亮色主题）。 */
+/**
+ * 解析主题：`'light'`（默认，Bootstrap）/ `'dark'` / `'auto'` / 自定义片段（浅合并到亮色主题）。
+ *
+ * `'auto'` = **跟随引擎实例主题**：`preferDark` 由调用方（`ICEChart`）按 `ice.getTheme()` 的明暗算出。
+ * 以前 `'auto'` 实际上被当成 `'light'`（函数里只判断了 `'dark'`），与文档承诺不一致 —— 现已改正。
+ */
 export function resolveChartTheme(
-  theme: ChartTheme | 'light' | 'dark' | 'auto' | Partial<ChartTheme> | undefined
+  theme: ChartTheme | 'light' | 'dark' | 'auto' | Partial<ChartTheme> | undefined,
+  options: { preferDark?: boolean } = {}
 ): ChartTheme {
-  const base = theme === 'dark' ? BOOTSTRAP_DARK_CHART_THEME : BOOTSTRAP_CHART_THEME;
+  const base =
+    theme === 'dark' || (theme === 'auto' && options.preferDark) ? BOOTSTRAP_DARK_CHART_THEME : BOOTSTRAP_CHART_THEME;
   if (!theme || typeof theme === 'string') return base;
   return {
     ...base,
