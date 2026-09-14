@@ -74,6 +74,15 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
 - `chart.layout.*` 与 `series.pixelAt()` 返回的都是**图表坐标系（画布左上角为原点）**，
   对外事件里的 `screen` 才经过 `ice.worldToScreen()`。
 
+- **引擎图元的 `left/top` 就是绘制盒的左上角**，`origin` 只影响**变换枢轴**（旋转/缩放的锚点），
+  引擎内部用 `localOrigin` 在矩阵里补掉了偏移。给图元摆位时**不要**再按 `origin` 做中心换算 ——
+  实测那样会把整块带状图元推出绘图区（画到画布外，审计报 91 像素越界）。
+- **引擎图元的 `style` 键名是 ctx 属性名**（`fillStyle` / `strokeStyle` / `lineWidth`），
+  `fill` / `stroke` 是「要不要填充 / 描边」的布尔。写成 `style: { fill: '#f00' }` 会把 ctx 上的
+  `fill()` 方法覆盖成字符串，运行时抛 `this.ctx.fill is not a function`（踩过）。
+- **交互要给图元让路**：`InteractionController` 的按下处理必须在命中图元时提前返回，
+  否则「拖注释」会变成「拖画布」（框选 / 平移抢走拖拽）。
+
 ## 分支与发版约定（家族铁律，2026-09-13 确立）
 
 - **开发**：在临时分支（或 `dev`）上做；`main` 只做集成与发版。

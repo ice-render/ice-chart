@@ -133,7 +133,17 @@ export { layoutSankey, sampleLinkPath } from './layout/sankey';
 export type { SankeyNodeLayout, SankeyLinkLayout, SankeyLayoutResult } from './layout/sankey';
 export { RadarGrid } from './components/RadarGrid';
 export type { RadarGridCoord } from './components/RadarGrid';
-export { createSeriesComponent } from './components/series/createSeries';
+// 系列类型注册表：图表不是封闭渲染器，任何 SeriesBase 子类都能作为一等系列接进来
+export {
+  createSeriesComponent,
+  registerSeriesType,
+  unregisterSeriesType,
+  getSeriesTypeFactory,
+  listSeriesTypes,
+  isBuiltinSeriesType,
+  clearCustomSeriesTypes,
+} from './components/series/createSeries';
+export type { SeriesFactory, SeriesComponentProps } from './components/series/createSeries';
 
 // 交互
 export { InteractionController } from './interaction/InteractionController';

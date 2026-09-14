@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+### 新增：图表不再是封闭渲染器（三条能力）
+
+**1. 自定义系列类型 `registerSeriesType(type, factory)`**
+任何继承 `SeriesBase` 的子类都能接入成一等系列：拿到归一化后的数据点与直角坐标比例尺，
+命中判定 / 悬停高亮 / 提示框 / 图例 / 无障碍 / 快照序列化自动生效。
+内置类型不允许覆盖（会破坏 option 的跨端可复现性），未注册类型兜底按折线渲染（不会整张图空白）。
+`SeriesType` 也放宽成 `BuiltinSeriesType | (string & Record<never, never>)`，写自定义类型有类型支持。
+
+**2. 数据坐标图元 `chart.addMark()`**
+把**引擎图元**挂到数据坐标上：`point` / `xLine` / `yLine` / `xBand` / `yBand`。
+组件由调用方创建，所以它天然参与引擎的命中测试、事件与动画；chart 负责按数据坐标摆位、
+填充线 / 带的尺寸、越界自动隐藏，并且跟着缩放 / 平移 / 数据更新走（不脱锚）。
+配套 `getMark / getMarks / removeMark / clearMarks / isMarkComponent`。
+
+**3. 图元的拖拽语义**
+可拖的图元拖完会反解成数据坐标写回锚点，抛 `mark:drag`（实时）与 `mark:dragend`（收尾），
+也可以给 `spec.onDrag` 回调。图表层的交互会给图元让路：按在注释 / 阈值线上不会触发框选或平移。
+
+示例：[examples/editable-chart.html](./examples/editable-chart.html)（火花条自定义系列 + 可拖阈值线 + 预测带 + 峰值注释卡片）。
+
+### 已知缺口：SVG 导出
+
+引擎有 `exportSvg()`，但它对**图表**只导得出 13 个 `<rect>`（实测 1400 字节、没有曲线、没有文字）——
+因为引擎的导出器基于「路径命令流」（`ICEComponent` 的 Path2D 记录），而图表的系列 / 坐标轴 /
+文字都是直接用 ctx 画的。要真正支持 `chart.toSVG()`，需要补一层 **canvas→SVG 记录层**
+（把 ctx 的调用翻译成 SVG 元素），或者让所有系列改走记录式路径 API。这条单独立项。
+
+### 已知问题（显式登记，别静默绕过）
+
+**1. 标记层在「布局变化 + 局部重绘」下会残留 ~9px 的线段**
+缩放后 y 轴标签可能变宽（`plot.x` / `plot.width` 跟着变），此时标记层在**旧绘图区位置**上留下的
+暗红线段不会被脏矩形清掉（实测审计探针报 112 像素越界）。已把图元位置改走引擎的 `setPosition`
+（会同时标脏旧位置），绝大多数情况已消失；但「布局变化」这一组合还没根治 ——
+试过用引擎的 `renderer.__forceFullRender` 单帧强刷，在这条路径上没生效，所以没有把它留在代码里。
+`scripts/audit-interactions.mjs` 用 `KNOWN_ISSUES` 显式登记了这一条（截图照拍、其他断言照跑），
+待办是给图表层补一条正规的「布局变化 → 整帧重绘」路径。
+
+**2. SVG 导出对图表还是空的**（见下）
+
+### 测试
+
+- `tests/chart/series-registry.test.ts`（9 条）：注册 / 校验 / 覆盖保护 / 注销兜底 / 自定义系列的命中与悬停 / 序列化往返
+- `tests/chart/marks.test.ts`（7 条）：四种图元的摆位与尺寸 / 缩放跟随 / 越界隐藏 / 拖拽回写与事件 / 生命周期
+- 实测：38 套件 / **353 用例**
+
+
 ### 新增：数据域留白（绘图区的「padding」）
 
 用户反馈：「图表绘制时要注意绘图区的边界，可绘图区域应该留下适当的空白空间，类似于 CSS 里 padding 的概念。」

@@ -11,7 +11,8 @@ export type DataItem = number | null | [any, number | null] | [any, number | nul
 
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
-export type SeriesType =
+/** 内置系列类型。 */
+export type BuiltinSeriesType =
   | 'line'
   | 'bar'
   | 'area'
@@ -30,6 +31,12 @@ export type SeriesType =
   | 'function'
   | 'parametric'
   | 'liquid';
+
+/**
+ * 系列类型。**允许自定义字符串**：用 `registerSeriesType('sparkline', factory)` 注册后，
+ * `series[].type` 就能写这个类型（`(string & {})` 既保留内置类型的自动补全，又不封死扩展）。
+ */
+export type SeriesType = BuiltinSeriesType | (string & Record<never, never>);
 
 /** 力导向关系图的节点。 */
 export interface GraphNodeOption {
@@ -627,6 +634,79 @@ export interface ChartTheme {
   crosshair: { lineColor: string; labelBackground: string; labelColor: string };
   brush: { fill: string; stroke: string };
   selection: { stroke: string; dimOpacity: number };
+}
+
+/**
+ * 数据坐标图元（mark）的形状。
+ *
+ * - `point`：锚在一个数据点上（注释卡片 / 标记 / 徽标）
+ * - `xLine` / `yLine`：贴着某个数据值的整条线（阈值线 / 目标线）
+ * - `xBand` / `yBand`：一段数据区间（预测带 / 高亮区间 / 参考区间）
+ */
+export type ChartMarkKind = 'point' | 'xLine' | 'yLine' | 'xBand' | 'yBand';
+
+/** 图元被拖动后回传的数据坐标。 */
+export interface ChartMarkData {
+  id: string;
+  /** 横轴数据值（类目轴就是类目名）。 */
+  xValue?: any;
+  /** 纵轴数据值（point 才有；线 / 带是 undefined）。 */
+  yValue?: number;
+  /** 当前像素位置（图表坐标系）。 */
+  pixel: [number, number];
+}
+
+/**
+ * 数据坐标图元：把**任意引擎图元**挂到数据坐标上，并跟着缩放 / 平移 / 数据更新走。
+ *
+ * 组件由调用方创建（所以它天然参与引擎的命中测试、事件、动画与序列化），
+ * chart 只负责「摆位置 / 定尺寸 / 越界隐藏 / 拖拽回传」。
+ *
+ * ```ts
+ * chart.addMark({
+ *   type: 'point',
+ *   x: '3月', y: 168,
+ *   component: new ICEStar({ radius: 10, fill: '#dc3545' }),
+ * });
+ * ```
+ */
+export interface ChartMarkSpec {
+  /** 不传自动生成。 */
+  id?: string;
+  type?: ChartMarkKind;
+  /** point：数据坐标（x 可为类目名 / 数值 / 时间戳）。 */
+  x?: any;
+  y?: any;
+  /** xBand：区间端点；yBand 同理由 y0 / y1 给出。 */
+  x0?: any;
+  x1?: any;
+  y0?: any;
+  y1?: any;
+  /** 多 y 轴时指定用哪个系列的轴（默认主轴）。 */
+  seriesId?: string;
+  /** 像素微调（point 用；线 / 带也会叠加）。 */
+  dx?: number;
+  dy?: number;
+  /** 引擎图元实例。 */
+  component: any;
+  /** 拖动后自动把新的数据坐标写回 spec，并抛出 `mark:drag`。 */
+  draggable?: boolean;
+  /** 数据点跑到可视区之外时自动隐藏（默认 true）。 */
+  hideWhenOutOfView?: boolean;
+  /** 拖动回调（与 `chart.on('mark:drag')` 二选一或一起用）。 */
+  onDrag?: (data: ChartMarkData) => void;
+}
+
+/** `addMark` 返回的句柄。 */
+export interface ChartMarkHandle {
+  id: string;
+  spec: ChartMarkSpec;
+  component: any;
+  /** 局部更新（重新摆位、改数据锚点）。 */
+  update(patch: Partial<ChartMarkSpec>): ChartMarkHandle;
+  /** 当前锚点的数据坐标。 */
+  toData(): ChartMarkData;
+  remove(): void;
 }
 
 /** 悬停/点击时对外抛出的数据项描述。 */

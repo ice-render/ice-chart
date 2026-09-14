@@ -137,6 +137,8 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 > 断行与文字方向（`direction` / `textAlign: 'start' | 'end'`）由引擎负责。
 > 边界契约见 ice-render 的 `docs/architecture/17-i18n-boundary.md`。
 | 序列化 | `toJSON` / `fromJSONString` | 配置 + 缩放窗口 + 图例显隐状态 |
+| 自定义系列 | `registerSeriesType(type, factory)` | 任何 `SeriesBase` 子类接入成一等系列：命中 / 悬停 / 提示框 / 图例 / 序列化全部自动生效 |
+| 数据坐标图元 | `addMark()` | 注释卡片 / 阈值线 / 目标线 / 预测带挂在**数据坐标**上，缩放平移与数据更新后不脱锚；组件就是引擎图元（带命中、事件、动画） |
 
 ## 事件
 
@@ -153,6 +155,8 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `select:change` | `DataPointParams[]` | 选中集合变化 |
 | `brush:change` | `BrushRange \| null` | 框选拖动中（实时） |
 | `brush:end` | `BrushRange \| null` | 框选结束 |
+| `mark:drag` | `ChartMarkData` | 数据坐标图元被拖动（阈值线 / 注释被拖时实时抛） |
+| `mark:dragend` | `ChartMarkData` | 图元拖动结束（此时锚点已写回数据坐标） |
 | `zoom:change` | `ZoomRange` | 缩放 / 框选缩放的窗口变化 |
 | `pan:change` | `ZoomRange` | 拖拽平移 |
 | `legend:toggle` | `LegendToggleParams` | 图例切换系列 |
@@ -372,6 +376,57 @@ animation: {
   连续滚轮缩放时从当前渲染位置接着走，不会每次都从旧位置重跳。
 - **图例切换重排**：隐藏一个饼图扇区 / 漏斗阶段时，其余几何平滑挪位、被隐藏的那个收拢再消失；
   切换系列显隐时数值域与其它系列一起过渡。
+
+## 可编辑图表：数据坐标图元 + 自定义系列
+
+图表不是封闭渲染器 —— `chart.ice`（引擎实例）与 `chart.root`（组件树根）都是公开的，
+所以**任何引擎图元都能直接当图表的一部分**，并参与同一套命中测试、事件与动画。
+
+### 数据坐标图元（注释 / 阈值线 / 预测带）
+
+```ts
+import { ICEStar } from 'ice-render';
+
+// 钉在数据点上的注释卡片（组件是引擎图元：注意 style 的键名是 ctx 属性名）
+chart.addMark({
+  type: 'point',
+  x: '7月', y: 210, dy: -34,
+  component: new ICEStar({ radius: 9, spikes: 5, fill: true, style: { fillStyle: '#dc3545' } }),
+});
+
+// 可拖的阈值线：拖完把新的数据值写回锚点，并抛 mark:drag
+chart.addMark({
+  type: 'yLine', y: 150, draggable: true,
+  component: new ICERect({ width: 1, height: 3, fill: true, draggable: true, style: { fillStyle: '#dc3545' } }),
+});
+
+// 预测带 / 参考区间
+chart.addMark({
+  type: 'yBand', y0: 150, y1: 200,
+  component: new ICERect({ width: 1, height: 1, fill: true, style: { fillStyle: 'rgba(13,110,253,0.10)' } }),
+});
+
+chart.on('mark:dragend', ({ id, yValue }) => console.log(id, yValue)); // 拖完拿到数据值
+```
+
+- `type`：`point` / `xLine` / `yLine` / `xBand` / `yBand`
+- 位置按**数据坐标**给（类目名 / 数值 / 时间戳都行），缩放、平移、数据更新后自动跟随；
+- 数据点跑到可视区之外时自动隐藏（`hideWhenOutOfView: false` 可关）；
+- 因为组件是引擎图元，它同时拥有**命中测试**（`chart.ice.hitTest()` 能点到它）、
+  关键帧动画与引擎级序列化 —— 而图表层的交互不会抢走它的拖拽（按在图元上不会触发框选 / 平移）。
+
+### 自定义系列类型
+
+```ts
+registerSeriesType('sparkline', (series, props) => new SparkSeries(series, props));
+chart.setOption({ series: [{ id: 's', type: 'sparkline', data: [3, 6, 2, 8] }] });
+```
+
+继承 `SeriesBase`、实现 `doRender()` 与 `hitTestIndex()` 即可：数据点由通用归一化给定
+（支持数字数组 / `[x, y]` / 对象），悬停高亮、提示框、图例、无障碍与快照序列化全部自动生效。
+内置类型不允许覆盖（会让同一份 option 在不同环境画出不同的图），未注册的类型兜底按折线渲染。
+
+完整示例见 [examples/editable-chart.html](./examples/editable-chart.html)。
 
 ## 主要 API
 
