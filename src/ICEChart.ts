@@ -341,7 +341,14 @@ export class ICEChart {
   /** 设置数据域（缩放 / 联动入口）。 */
   public setDomain(axis: 'x' | 'y', domain: any[], source = 'api'): this {
     if (this.destroyed) return this;
-    const clamped = this.clampDomain(axis, domain);
+    // 用户手势（滚轮 / 滑块 / 框选）产生的窗口要过一遍「至少盖住 2 个数据点」的兜底：
+    // 否则窗口可能只剩一个点，曲线退化成一个小圆点 —— 看起来就是「缩成一团」。
+    // 程序化调用（api）与联动（link）保持精确：联动要的是两张图窗口严格一致。
+    const guarded =
+      axis === 'x' && (source === 'zoom' || source === 'brush')
+        ? this.guardInteractiveXWindow(domain)
+        : domain;
+    const clamped = this.clampDomain(axis, guarded);
     if (!clamped) return this;
     if (axis === 'x') this.viewState.x = clamped as [any, any];
     else this.viewState.y = clamped as [any, any];
@@ -349,6 +356,68 @@ export class ICEChart {
     const range = this.currentRange();
     this.emit(source === 'pan' ? 'pan:change' : 'zoom:change', range);
     return this;
+  }
+
+  /** 数值轴的数据点 x 值（升序去重），给「窗口至少盖住 2 个点」的兜底用。 */
+  private numericXValues(): number[] {
+    const set = new Set<number>();
+    for (const series of this.norm.series) {
+      for (const point of series.points) {
+        const value = Number(point.xValue);
+        if (isFinite(value)) set.add(value);
+      }
+    }
+    return [...set].sort((a, b) => a - b);
+  }
+
+  /**
+   * 交互产生的新窗口兜底。
+   *
+   * - 类目轴：窗口至少要包含 **2 个类目**（一个类目画不出线段，柱子会占满整个绘图区）；
+   * - 数值 / 时间轴：窗口至少要盖住 **2 个数据点**，不够就朝最近的一侧扩。
+   *
+   * 起因是实测：dataZoom 滑块拖到最右（窗口 [0.98, 1]）时，30 天逐日的数据只剩一个点，
+   * 整条曲线变成一个小圆点（墨迹 0×0）。滚轮缩放有 `minSpan` 兜着，滑块这条路径当时没有。
+   */
+  private guardInteractiveXWindow(domain: any[]): any[] {
+    if (this.norm.xAxis.type === 'category') {
+      const full = this.fullXDomain as any[];
+      if (full.length < 2) return domain;
+      let from = full.indexOf(domain[0]);
+      let to = full.indexOf(domain[1]);
+      if (from < 0 && to < 0) return domain;
+      if (from < 0) from = 0;
+      if (to < 0) to = full.length - 1;
+      if (to - from >= 1) return domain;
+      // 只剩一个类目：优先往「还有类目」的一侧扩一格
+      if (from > 0) from -= 1;
+      else if (to < full.length - 1) to += 1;
+      return [full[from], full[to]];
+    }
+    const xs = this.numericXValues();
+    if (xs.length < 2) return domain;
+    // 数据只有两个点时，"至少 2 个点"等于禁止缩放（本来就画不出线段），放宽到 1 个点
+    const need = xs.length >= 3 ? 2 : 1;
+    let lo = Number(domain[0]);
+    let hi = Number(domain[1]);
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return domain;
+    let inside = xs.filter((v) => v >= lo && v <= hi).length;
+    let guard = 0;
+    while (inside < need && guard < 4) {
+      guard += 1;
+      const left = [...xs].reverse().find((v) => v < lo);
+      const right = xs.find((v) => v > hi);
+      if (left === undefined && right === undefined) break;
+      const dLeft = left === undefined ? Infinity : lo - left;
+      const dRight = right === undefined ? Infinity : right - hi;
+      if (dLeft <= dRight) {
+        lo = left as number;
+      } else {
+        hi = right as number;
+      }
+      inside = xs.filter((v) => v >= lo && v <= hi).length;
+    }
+    return inside >= need ? [lo, hi] : domain;
   }
 
   /** 恢复完整数据域。 */
@@ -1047,8 +1116,13 @@ export class ICEChart {
     return [(Number(domain[0]) - f0) / span, (Number(domain[1]) - f0) / span];
   }
 
-  /** 由 dataZoom 滑块的比例窗口反推数据域。 */
-  public setDomainFromFractions(start: number, end: number, source = 'slider'): this {
+  /**
+   * 由 dataZoom 滑块的比例窗口反推数据域。
+   *
+   * `guard = true` 时套用「窗口至少盖住 2 个数据点」的兜底（滑块的交互路径走这个）；
+   * 默认 false 表示**纯映射** —— 比例窗口 → 数据域是确定性的，程序化调用不受影响。
+   */
+  public setDomainFromFractions(start: number, end: number, source = 'slider', guard = false): this {
     if (this.norm.kind !== 'cartesian') return this;
     const [currentStart, currentEnd] = this.domainFractions();
     if (Math.abs(currentStart - start) < 1e-4 && Math.abs(currentEnd - end) < 1e-4) return this;
@@ -1061,12 +1135,14 @@ export class ICEChart {
       from = Math.max(0, Math.min(n - 1, from));
       to = Math.max(0, Math.min(n - 1, to));
       if (to <= from) to = Math.min(n - 1, from + 1);
-      return this.setDomain('x', [full[from], full[to]], source);
+      const range = [full[from], full[to]];
+      return this.setDomain('x', guard ? this.guardInteractiveXWindow(range) : range, source);
     }
     const f0 = Number(full[0]);
     const f1 = Number(full[1]);
     const span = f1 - f0;
-    return this.setDomain('x', [f0 + span * start, f0 + span * end], source);
+    const range = [f0 + span * start, f0 + span * end];
+    return this.setDomain('x', guard ? this.guardInteractiveXWindow(range) : range, source);
   }
 
   /** 让 y 轴组件数量 / 位置与 norm.yAxes 保持一致（轴数量变化时增删组件）。 */

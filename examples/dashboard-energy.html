@@ -292,7 +292,7 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         xAxis: { type: 'category', data: ['#1', '#2', '#3', '#4', '#5', '#6'] },
-        yAxis: { name: 'MW', min: 20, max: 100 },
+        yAxis: { name: 'MW', min: 20, max: 105 },
         animation: { enter: { duration: 600 }, update: { duration: 400, easing: 'easeOutCubic' } },
         series: [{ id: 'o', type: 'boxplot', name: '出力', data: outputSamples() }],
       });
@@ -314,7 +314,7 @@
         ...BASE,
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'value', name: '相位', min: -3, max: 3 },
-        yAxis: { name: '幅值', min: -1.6, max: 1.6 },
+        yAxis: { name: '幅值', min: -1.8, max: 1.8 },
         series: [
           { id: 'fund', type: 'function', name: '基波', expression: 'sin(pi*x)', domain: [-3, 3], lineWidth: 1.5, color: '#6b76a6' },
           {

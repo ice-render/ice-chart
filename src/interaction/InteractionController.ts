@@ -26,7 +26,7 @@ export interface InteractionHost extends HitHost {
   /** dataZoom 滑块（未启用时为 null）。 */
   dataZoomSlider: DataZoomSlider | null;
   /** 由滑块的 0~1 比例窗口反推数据域。 */
-  setDomainFromFractions(start: number, end: number, source?: string): void;
+  setDomainFromFractions(start: number, end: number, source?: string, guard?: boolean): void;
   formatAxisValue(axis: 'x' | 'y', value: any): string;
   /** 未经缩放的完整数据域（缩放约束用）。 */
   fullDomain(axis: 'x' | 'y'): any[];
@@ -763,7 +763,7 @@ export class InteractionController {
           // 点击轨道：把窗口平移到点击处
           const span = slider.end - slider.start;
           const start = clamp(fraction - span / 2, 0, 1 - span);
-          this.host.setDomainFromFractions(start, start + span, 'slider');
+          this.host.setDomainFromFractions(start, start + span, 'slider', true);
           slider.setActive('window');
           this.drag.part = 'window';
           this.drag.originStart = start;
@@ -908,7 +908,7 @@ export class InteractionController {
         start = clamp(drag.originStart + shift, 0, 1 - span);
         end = start + span;
       }
-      this.host.setDomainFromFractions(start, end, 'slider');
+      this.host.setDomainFromFractions(start, end, 'slider', true);
       return;
     }
 

@@ -206,6 +206,12 @@ export interface AxisOption {
   max?: number | 'dataMax';
   /** 是否把数据域扩展到「整齐」的刻度上，默认 true。 */
   nice?: boolean;
+  /**
+   * 数据域的**留白**（CSS padding 的意思）：把数据范围按比例外扩，曲线就不会贴着绘图区边缘。
+   * 默认 `0.05`（上下各留 5%），`0` 表示不留。显式写了 `min` / `max` 的那一侧不受影响，
+   * 柱形 / 面积被强制包含 0 的那一侧也不受影响（基线要贴在轴上）。
+   */
+  padding?: number;
   /** 期望的刻度数量，默认 5。 */
   tickCount?: number;
   /** 刻度文本格式化。 */

@@ -182,7 +182,8 @@
         ...BASE,
         legend: { show: true },
         xAxis: { type: 'value', name: 'x', min: -10, max: 10 },
-        yAxis: { name: 'y', min: -1.6, max: 1.6 },
+        // 曲线峰值会到 2（x·sin(x)/4 那一支），声明的范围必须留出余量，否则会被裁掉
+        yAxis: { name: 'y', min: -2.2, max: 2.2 },
         series: [
           { id: 'sinc', type: 'function', name: 'sin(x)/x', expression: 'sin(x)/x', domain: [-10, 10], lineWidth: 2, color: IDENTITY.accent },
           { id: 'gauss', type: 'function', name: 'e^(−x²/6)', expression: 'exp(-x^2/6)', domain: [-10, 10], lineWidth: 2, color: '#38bdf8' },
@@ -197,7 +198,7 @@
         // nice: false —— 轴范围就是要它写的那两个数，别被「取整到好看的刻度」放大（放大后曲线会顶到边）
         xAxis: { type: 'value', name: 'x', min: -2, max: 14, nice: false },
         // 幅度 a 最大 2.2：留足余量，曲线任何时刻都不顶到画布边上（顶到边 = 看起来像越界）
-        yAxis: { name: 'y', min: -3.4, max: 3.4 },
+        yAxis: { name: 'y', min: -3.8, max: 3.8 },
         series: [
           {
             id: 'damp',

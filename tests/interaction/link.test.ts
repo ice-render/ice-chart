@@ -57,9 +57,11 @@ describe('linkCharts（跨图联动）', () => {
 
   it('stops mirroring after unlink', async () => {
     const [a, b] = await twoCharts();
+    const before = b.getDomain('x').map(Number);
     const handle = linkCharts([a, b], { hover: true, zoom: true, brush: false });
     handle.unlink();
     a.setDomain('x', [1, 2]);
-    expect(Number(b.getDomain('x')[0])).toBeCloseTo(0, 6);
+    // 断言「b 的窗口没被带着动」（而不是写死 0）：轴的域含留白，起点不一定是 0
+    expect(b.getDomain('x').map(Number)).toEqual(before);
   });
 });
