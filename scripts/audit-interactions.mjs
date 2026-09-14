@@ -173,7 +173,7 @@ for (const name of pages) {
   await page.waitForTimeout(900);
 
   /** 一次「交互 + 断言 + 截图」。 */
-  const step = async (label, action) => {
+  const step = async (label, action, extra) => {
     if (action) await action();
     await page.waitForTimeout(220);
     const geometry = await page.evaluate(collectGeometry);
@@ -194,6 +194,9 @@ for (const name of pages) {
         // 圆环允许贴边（半个标记可探出）；柱形高亮必须整块在绘图区内
         if (!inside(mark, g.plot, mark.slack)) issues.push('highlight-out-of-plot');
       }
+    }
+    if (extra) {
+      for (const item of await extra()) issues.push(item);
     }
     await page.screenshot({ path: path.join(outDir, `${name}-${label}.png`) });
     report.push({ page: name, step: label, charts: geometry.length, issues });
@@ -272,6 +275,57 @@ for (const name of pages) {
     const [x, y] = await target(0.5, 0.5);
     await page.mouse.move(x, y, { steps: 3 });
   });
+
+  // 11. dataZoom 滑块拖到极限：窗口不能塌缩成「一个点」或「什么都没画」。
+  //     实测过：time-series 拖到最右时窗口落进取整出来的空白区 → 可视点 0 个、整条曲线消失。
+  const slider = await page.evaluate(() => {
+    const charts = [];
+    if (window.__chart) charts.push(window.__chart);
+    if (window.__charts) for (const k of Object.keys(window.__charts)) charts.push(window.__charts[k]);
+    const chart = charts.find((c) => c && c.layout && c.layout.slider);
+    if (!chart) return null;
+    window.__sliderChart = chart;
+    const rect = chart.ice.canvasEl.getBoundingClientRect();
+    const s = chart.layout.slider;
+    const dpr = chart.ice.dpr || 1;
+    const [f0, f1] = chart.domainFractions();
+    const toView = (fx) => rect.left + (s.x + s.width * fx) / dpr;
+    return { endX: toView(f1), startX: toView(f0), y: rect.top + (s.y + s.height / 2) / dpr, trackStart: toView(0.02) };
+  });
+  if (slider) {
+    await step(
+      '11-slider-extreme',
+      async () => {
+        await page.mouse.move(slider.endX, slider.y);
+        await page.mouse.down();
+        await page.mouse.move(slider.trackStart, slider.y, { steps: 14 });
+        await page.mouse.up();
+        await page.waitForTimeout(300);
+      },
+      async () =>
+        page.evaluate(() => {
+          const chart = window.__sliderChart;
+          const issues = [];
+          const dom = chart.norm.xAxis.domain;
+          const numeric = typeof dom[0] === 'number';
+          const lo = numeric ? dom[0] : 0;
+          const hi = numeric ? dom[dom.length - 1] : dom.length - 1;
+          for (const comp of chart.seriesComponents) {
+            if (comp.state.display === false) continue;
+            const total = comp.series.points.length;
+            if (!total) continue;
+            const visible = comp.series.points.filter((p, i) => {
+              if (!numeric) return true;
+              const v = Number(p.xValue);
+              return isFinite(v) ? v >= lo && v <= hi : true;
+            }).length;
+            const need = total >= 3 ? 2 : 1;
+            if (visible < need) issues.push(`slider-window-collapsed(${comp.series.name}:${visible}/${total})`);
+          }
+          return issues;
+        })
+    );
+  }
 
   // 序列化 JSON 面板：必须存在、内容是可解析的真实快照、且带版本号
   const panel = await page.evaluate(() => {

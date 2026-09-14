@@ -114,7 +114,7 @@
       // ---------------- 面板 ----------------
       const orders = ICEChart.createChart('orders', {
         ...BASE,
-        yAxis: { name: '单/分钟', min: 200, max: 1800 },
+        yAxis: { name: '单/分钟', min: 200, max: 2000 },
         series: [
           { id: 'o', type: 'area', name: '揽收', data: [], color: IDENTITY.accent, areaOpacity: 0.24, lineWidth: 2, smooth: 0.25 },
           { id: 'd', type: 'line', name: '签收', data: [], color: '#fac858', lineWidth: 1.5, smooth: 0.25 },
@@ -173,7 +173,7 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         xAxis: { type: 'category' },
-        yAxis: { name: '元', min: -420, max: 200 },
+        yAxis: { name: '元', min: -500, max: 240 },
         animation: { enter: { duration: 600 }, update: { duration: 420, easing: 'easeOutCubic' } },
         series: [{ id: 'c', type: 'waterfall', name: '成本', barWidth: 0.55, data: costBase.concat([{ name: '单票毛利', value: 0, total: true }]) }],
       });
@@ -307,7 +307,7 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         xAxis: { type: 'value', name: '时间' },
-        yAxis: { name: '件', min: 0, max: 60 },
+        yAxis: { name: '件', min: 0, max: 70 },
         series: [
           { id: 'ex', type: 'scatter', name: '破损', data: [], symbolSize: 8, color: '#f472b6' },
           { id: 'ex2', type: 'scatter', name: '延误', data: [], symbolSize: 8, color: '#fac858' },

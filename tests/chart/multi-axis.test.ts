@@ -111,8 +111,8 @@ describe('多 y 轴（引擎集成）', () => {
     const rect = (volume as any).barRectAt(0)!;
     expect(rect.y).toBeLessThan(plotHeight * 0.3);
     expect(rect.y + rect.height).toBeCloseTo(plotHeight, 0);
-    // 折线：涨跌幅 -1.6（域约 [-2, 2.5]）贴近底部
-    expect(change.pixelAt(3)![1]).toBeGreaterThan(plotHeight * 0.9);
+    // 折线：涨跌幅 -1.6 贴近底部（域含 5% 留白，所以不是「贴到边上」而是「压在下部」）
+    expect(change.pixelAt(3)![1]).toBeGreaterThan(plotHeight * 0.85);
     expect(chart.norm.yAxes[0].scale!.map(1200)).not.toBeCloseTo(chart.norm.yAxes[1].scale!.map(1200), 0);
   });
 

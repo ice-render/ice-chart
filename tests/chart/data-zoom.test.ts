@@ -132,9 +132,14 @@ describe('dataZoom 滑块（引擎集成）', () => {
       series: [{ id: 'a', type: 'line', data: [[0, 1], [100, 2]] }],
     });
     c.setDomainFromFractions(0.25, 0.75, 'slider');
-    const domain = c.getDomain('x');
-    expect(Number(domain[0])).toBeCloseTo(25, 0);
-    expect(Number(domain[1])).toBeCloseTo(75, 0);
+    // 断言往返一致（而不是写死 25/75）：轴的完整域含留白，比例 → 域的换算要跟着它走
+    const [start, end] = c.domainFractions();
+    expect(start).toBeCloseTo(0.25, 2);
+    expect(end).toBeCloseTo(0.75, 2);
+    const domain = c.getDomain('x').map(Number);
+    const full = c.fullXDomain.map(Number);
+    expect(domain[0]).toBeCloseTo(full[0] + (full[1] - full[0]) * 0.25, 0);
+    expect(domain[1]).toBeCloseTo(full[0] + (full[1] - full[0]) * 0.75, 0);
   });
 
   it('hides the slider when the option switches to polar', async () => {

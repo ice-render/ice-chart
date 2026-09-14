@@ -113,15 +113,64 @@ for (const name of pages) {
         const H = Math.round(cv.height);
         let left = W;
         let right = -1;
+        let top = H;
+        let bottom = -1;
         const data = ctx.getImageData(0, 0, W, H).data;
         for (let y = 0; y < H; y++) {
           for (let x = 0; x < W; x++) {
             if (data[(y * W + x) * 4 + 3] <= 8) continue;
+            // 只看绘图区附近（图例色块 / 标题都不算「系列墨迹」）
+            const plot = c.layout.plot;
+            if (x < (plot.x - 8) * dpr || x > (plot.x + plot.width + 8) * dpr) continue;
+            if (y < (plot.y - 8) * dpr || y > (plot.y + plot.height + 8) * dpr) continue;
             if (x < left) left = x;
             if (x > right) right = x;
+            if (y < top) top = y;
+            if (y > bottom) bottom = y;
           }
         }
         const opt = c.norm.option || {};
+        const yOpt = (c.norm.yAxes[0] && c.norm.yAxes[0].option) || {};
+        const xOpt = c.norm.xAxis.option || {};
+        const plot = c.layout.plot;
+        // 系列几何包围盒：直接取数据点的像素位置（组件本地坐标 + 组件盒偏移）。
+        // 不用扫像素 —— 深色主题的坐标轴线本身是彩色，会被「饱和墨迹」当成系列墨迹（实测假阳性一堆）。
+        let sx0 = Infinity;
+        let sy0 = Infinity;
+        let sx1 = -Infinity;
+        let sy1 = -Infinity;
+        if (c.norm.kind === 'cartesian' && c.norm.orientation !== 'horizontal') {
+          for (const comp of c.seriesComponents) {
+            if (!comp || comp.state.display === false) continue;
+            const total = comp.series.points.length;
+            for (let i = 0; i < total; i++) {
+              const pixel = comp.pixelAt(i);
+              if (!pixel || !isFinite(pixel[0]) || !isFinite(pixel[1])) continue;
+              const chartX = comp.state.left + pixel[0];
+              const chartY = comp.state.top + pixel[1];
+              if (chartX < sx0) sx0 = chartX;
+              if (chartX > sx1) sx1 = chartX;
+              if (chartY < sy0) sy0 = chartY;
+              if (chartY > sy1) sy1 = chartY;
+            }
+          }
+        }
+        const seriesBox = sx1 >= sx0 ? { left: sx0, right: sx1, top: sy0, bottom: sy1 } : null;
+        const domains = c.norm.xAxis.domain;
+        const xType = c.norm.xAxis.type;
+        const xCount = Array.isArray(c.norm.xAxis.domain) ? c.norm.xAxis.domain.length : 0;
+        const visiblePoints = c.norm.series.reduce((sum, s) => {
+          return (
+            sum +
+            s.points.filter((p) => {
+              const v = typeof p.xValue === 'number' ? p.xValue : null;
+              if (v === null) return true;
+              const lo = typeof domains[0] === 'number' ? domains[0] : -Infinity;
+              const hi = typeof domains[domains.length - 1] === 'number' ? domains[domains.length - 1] : Infinity;
+              return v >= lo && v <= hi;
+            }).length
+          );
+        }, 0);
         return {
           key,
           kind: c.norm.kind,
@@ -129,7 +178,29 @@ for (const name of pages) {
           rigidCircle: false,
           series: c.norm.series.map((s) => ({ type: s.type, roseType: s.option && s.option.roseType })),
           canvas: [c.layout.canvas.width, c.layout.canvas.height],
-          ink: right < 0 ? null : { left: left / dpr, right: right / dpr, width: (right - left) / dpr },
+          plot: [Math.round(plot.x), Math.round(plot.y), Math.round(plot.width), Math.round(plot.height)],
+          ink:
+            right < 0
+              ? null
+              : {
+                  left: left / dpr,
+                  right: right / dpr,
+                  top: top / dpr,
+                  bottom: bottom / dpr,
+                  width: (right - left) / dpr,
+                },
+          seriesBox,
+          declared: {
+            xMin: xOpt.min !== undefined,
+            xMax: xOpt.max !== undefined,
+            yMin: yOpt.min !== undefined,
+            yMax: yOpt.max !== undefined,
+          },
+          xType,
+          xCount,
+          hasSlider: !!c.layout.slider,
+          viewActive: !!(c.viewState && c.viewState.x),
+          visiblePoints,
           radius: c.layout.polar ? c.layout.polar.radius : null,
         };
       });
@@ -140,21 +211,65 @@ for (const name of pages) {
     const fillRatio = item.radius ? (item.ink ? item.ink.width / (2 * item.radius) : 0) : null;
     const rigid = isRigidCircle(item.kind, item.series.map((s) => ({ type: s.type, option: { roseType: s.roseType } })));
     const checks = [];
-    if (item.kind === 'cartesian' && item.aspect !== 'equal' && inkRatio < 0.85) {
-      checks.push(`横向利用率 ${(inkRatio * 100).toFixed(0)}% < 85%`);
+    // 绘图区留白：自动算出来的数据域不许让曲线贴边（显式写的 min/max 是用户的选择，只提醒不判失败）
+    const advisories = [];
+    // 系列在「绘图区」里的占比（比画布占比更能说明"有没有用满"）：
+    // - 数值 / 时间轴：应该接近 100%（只有留白）
+    // - 类目轴：band 天然内缩半个带宽，上限是 1 - 1/n
+    // - 等比坐标：绘图区是正方形，曲线应该填满这个正方形
+    const [plotX, plotY, plotW, plotH] = item.plot || [0, 0, 0, 0];
+    const seriesW = item.seriesBox ? item.seriesBox.right - item.seriesBox.left : null;
+    const plotRatio = seriesW !== null && plotW > 0 ? seriesW / plotW : null;
+    const canvasRatio = seriesW !== null && item.canvas[0] > 0 ? seriesW / item.canvas[0] : null;
+    if (item.kind === 'cartesian' && item.seriesBox && item.plot) {
+      const [px, py, pw, ph] = item.plot;
+      const baseline = item.series.some((s) => ['area', 'bar', 'waterfall', 'candlestick', 'boxplot', 'heatmap'].includes(s.type));
+      const gaps = {
+        top: item.seriesBox.top - py,
+        bottom: py + ph - item.seriesBox.bottom,
+        left: item.seriesBox.left - px,
+        right: px + pw - item.seriesBox.right,
+      };
+      // 函数 / 参数曲线：按「可视区间」重采样，天然铺满左右（MATLAB 的 fplot 也是这样），
+      // 左右不算贴边；上下靠自动贴合 + 留白，仍然要检查。
+      const curveKind = item.series.some((s) => s.type === 'function' || s.type === 'parametric');
+      const sides = [
+        { side: 'top', gap: gaps.top, declared: item.declared.yMax },
+        { side: 'bottom', gap: gaps.bottom, declared: item.declared.yMin },
+        { side: 'left', gap: gaps.left, declared: item.declared.xMin, window: curveKind || item.hasSlider || item.viewActive },
+        { side: 'right', gap: gaps.right, declared: item.declared.xMax, window: curveKind || item.hasSlider || item.viewActive },
+      ];
+      for (const s of sides) {
+        if (s.gap >= 2) continue;
+        if (s.side === 'bottom' && baseline) continue; // 柱形 / 面积的基线本来就贴轴
+        if (s.window) continue; // 缩放 / 滑块 / 流式窗口的边界就是数据边界
+        const label = `${s.side === 'top' || s.side === 'bottom' ? '上下' : '左右'}边留白 ${s.gap.toFixed(0)}px`;
+        if (s.declared) advisories.push(`显式范围让图形贴到${label}`);
+        else checks.push(`自动域仍贴${label}`);
+      }
+    }
+    if (item.kind === 'cartesian' && item.aspect !== 'equal' && plotRatio !== null) {
+      // 类目轴：band 内缩半个带宽，上限就是 1 - 1/n（8 个类目最多 87.5%）
+      const expected = item.xType === 'category' && item.xCount > 1 ? 1 - 1 / item.xCount : 1;
+      const floor = Math.max(0.6, expected - 0.08);
+      if (plotRatio < floor) {
+        // 数据只占轴范围的一部分（流式窗口还没填满 / 数据集中在中间）—— 是数据的问题，不是渲染缺陷
+        advisories.push(`数据只占绘图区宽度的 ${(plotRatio * 100).toFixed(0)}%（${item.xType === 'category' ? '类目轴' : '数值轴'}）`);
+      }
     }
     if (rigid && fillRatio !== null && fillRatio < 0.9) {
       checks.push(`图形只吃满可用直径的 ${(fillRatio * 100).toFixed(0)}%（应 ≥ 90%）`);
     }
-    if (item.kind === 'cartesian' && item.aspect === 'equal' && inkRatio < 0.45) {
-      checks.push(`等比坐标横向利用率 ${(inkRatio * 100).toFixed(0)}% < 45%`);
+    if (item.kind === 'cartesian' && item.aspect === 'equal' && plotRatio !== null && plotRatio < 0.6) {
+      checks.push(`等比坐标曲线只占正方形绘图区的 ${(plotRatio * 100).toFixed(0)}% < 60%`);
     }
     // 面板形状提醒（不算失败）：圆形的图放进明显过宽的卡片，两侧必然大片空
+    const squareish = CIRCULAR.has(item.kind) || item.aspect === 'equal';
     const advisory =
-      CIRCULAR.has(item.kind) && cw / ch > 2.6 && inkRatio < 0.4
-        ? `卡片 ${cw}×${ch}（宽高比 ${(cw / ch).toFixed(1)}）对圆形图偏宽：圆只占 ${(inkRatio * 100).toFixed(0)}% 宽`
+      squareish && cw / ch > 2.6 && canvasRatio !== null && canvasRatio < 0.4
+        ? `卡片 ${cw}×${ch}（宽高比 ${(cw / ch).toFixed(1)}）对「方」的图形偏宽：图形只占 ${(canvasRatio * 100).toFixed(0)}% 宽`
         : null;
-    rows.push({ page: name, ...item, cw, ch, inkRatio, fillRatio, rigid, checks, advisory });
+    rows.push({ page: name, ...item, cw, ch, inkRatio, fillRatio, rigid, checks, advisory, advisories });
   }
   await page.close();
 }
@@ -163,6 +278,7 @@ await browser.close();
 
 const failures = rows.filter((r) => r.checks.length);
 const advisories = rows.filter((r) => r.advisory);
+const paddingAdvisories = rows.filter((r) => r.advisories && r.advisories.length);
 const avg = (list) => (list.length ? (list.reduce((a, r) => a + r.inkRatio, 0) / list.length) * 100 : 0);
 const cartesian = rows.filter((r) => r.kind === 'cartesian' && r.aspect !== 'equal');
 const equalAspect = rows.filter((r) => r.kind === 'cartesian' && r.aspect === 'equal');
@@ -180,7 +296,11 @@ if (advisories.length) {
   console.log('\n面板形状提醒（不算失败，供排版时取舍）：');
   for (const r of advisories) console.log(`  ${r.page} · ${r.key}：${r.advisory}`);
 }
-console.log(`\n失败 ${failures.length} 项，提醒 ${advisories.length} 项`);
+if (paddingAdvisories.length) {
+  console.log('\n留白提醒（显式写死的范围让图形贴边，改范围或交给自动域都行）：');
+  for (const r of paddingAdvisories) console.log(`  ${r.page} · ${r.key}：${r.advisories.join('；')}`);
+}
+console.log(`\n失败 ${failures.length} 项，提醒 ${advisories.length + paddingAdvisories.length} 项`);
 fs.writeFileSync(outFile, JSON.stringify({ rows, failures: failures.map((r) => `${r.page}·${r.key}`) }, null, 1));
 console.log(`明细：${outFile}`);
 process.exit(failures.length ? 1 : 0);

@@ -9,6 +9,30 @@ import { diagnoseExpression } from '../expr/diagnostics';
 import { robustRange } from '../expr/sample';
 
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 12, left: 12 };
+/** 数据域默认留白比例（数据跨度的 5%）：曲线不贴边，见 `AxisOption.padding`。 */
+const DEFAULT_DOMAIN_PADDING = 0.05;
+
+/**
+ * 给数据域留白：把 [min, max] 按跨度的比例外扩。
+ *
+ * - 显式写了 `min` / `max` 的一侧不动（用户说了算）；
+ * - 柱形 / 面积被强制包含 0 的那一侧不动（基线要贴在轴上，抬起来是错的）；
+ * - `padding: 0` 或 log 轴不做（log 的外扩要按对数比例，不做隐式处理）。
+ */
+function padDomain(
+  min: number,
+  max: number,
+  option: { padding?: number },
+  skipMin: boolean,
+  skipMax: boolean
+): [number, number] {
+  const raw = option && option.padding !== undefined ? Number(option.padding) : DEFAULT_DOMAIN_PADDING;
+  if (!isFinite(raw) || raw <= 0) return [min, max];
+  const span = max - min;
+  if (!isFinite(span) || span <= 0) return [min, max];
+  const pad = span * Math.min(0.5, raw);
+  return [skipMin ? min : min - pad, skipMax ? max : max + pad];
+}
 
 /** 入场 / 更新 / 交互反馈三段动画的默认值。 */
 export const DEFAULT_ANIMATION_STAGES = {
@@ -938,9 +962,16 @@ function buildXDomain(
     }
   }
   let [min, max] = extent(values);
-  if (isFiniteNumber(option.min as number)) min = option.min as number;
-  if (isFiniteNumber(option.max as number)) max = option.max as number;
+  const minFixed = isFiniteNumber(option.min as number);
+  const maxFixed = isFiniteNumber(option.max as number);
+  if (minFixed) min = option.min as number;
+  if (maxFixed) max = option.max as number;
   if (option.nice !== false) [min, max] = niceDomain([min, max], option.tickCount || 5);
+  if (type !== 'log') {
+    // 留白放在取整**之后**：先留白会把 40 抬到 42，再取整变成 50（白多一整格）；
+    // 先取整再留白，得到的就是「整刻度 + 5% 余量」，刻度值也不受影响。
+    [min, max] = padDomain(min, max, option, minFixed, maxFixed);
+  }
   return { domain: [min, max], categories: [] };
 }
 
@@ -1036,10 +1067,18 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     min = Math.min(min, 0);
     max = Math.max(max, 0);
   }
-  if (isFiniteNumber(option.min as number)) min = option.min as number;
-  if (isFiniteNumber(option.max as number)) max = option.max as number;
+  const minFixed = isFiniteNumber(option.min as number);
+  const maxFixed = isFiniteNumber(option.max as number);
+  if (minFixed) min = option.min as number;
+  if (maxFixed) max = option.max as number;
   if (option.nice !== false && type !== 'log') {
     [min, max] = niceDomain([min, max], option.tickCount || 5);
+  }
+  if (type !== 'log') {
+    // 留白放在取整之后（同上）；柱子 / 面积的基线（被 includeZero 拉到 0 的那一侧）保持贴在轴上
+    const baselineMin = includeZero && !minFixed && Math.abs(min) < 1e-12;
+    const baselineMax = includeZero && !maxFixed && Math.abs(max) < 1e-12;
+    [min, max] = padDomain(min, max, option, minFixed || baselineMin, maxFixed || baselineMax);
   }
   if (type === 'log') {
     const positive = values.filter((v) => v > 0);
