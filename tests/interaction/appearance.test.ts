@@ -110,7 +110,7 @@ describe('交互外观审计', () => {
       }
       // 高亮环必须落在绘图区内
       for (const mark of c.highlight!.hoverItems) {
-        // x/y 是标记中心；贴边的点允许半个标记探出绘图区（与 ECharts 一致）
+        // x/y 是标记中心；贴边的点允许半个标记探出绘图区（与主流写法一致）
         const half = Math.max(mark.size || 0, mark.width || 0, mark.height || 0) / 2;
         const box = { x: mark.x - half, y: mark.y - half, width: half * 2, height: half * 2 };
         expect(inside(box, c.layout.plot, half + 1)).toBe(true);

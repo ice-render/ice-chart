@@ -118,7 +118,7 @@ export interface FunnelOption {
   minSize?: number;
   /** 标签位置：inside（默认，居中）| right（右侧外置）。 */
   labelPosition?: 'inside' | 'right';
-  /** 顶部扇形是否收窄成三角形（默认 true，ECharts 的 funnel 形态）。 */
+  /** 顶部扇形是否收窄成三角形（默认 true，漏斗形态）。 */
   trapezoid?: boolean;
 }
 
@@ -199,7 +199,7 @@ export interface RadarOption {
 export interface AxisOption {
   type?: ScaleType;
   /**
-   * 类目轴直接声明类目（ECharts 兼容）。
+   * 类目轴直接声明类目。
    * 横向柱状图就靠它：`yAxis: { type: 'category', data: ['华东', '华北'] }` + `xAxis: { type: 'value' }`。
    */
   data?: any[];

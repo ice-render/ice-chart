@@ -284,7 +284,7 @@ export class InteractionController {
     const inside = this.resolver.isInsidePlot(target.chart[0], target.chart[1]);
 
     // axis 触发器优先：即使指针正好落在某条折线上，也展示整列的多个系列值
-    //（与 ECharts 的 axis tooltip 语义一致）。item 触发器才只认命中的那一个数据点。
+    //（与主流 axis tooltip 语义一致）。item 触发器才只认命中的那一个数据点。
     if (inside && trigger === 'axis') {
       const column = this.resolver.pickColumn(target.chart[0]);
       if (column) {

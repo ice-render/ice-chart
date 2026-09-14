@@ -194,7 +194,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     merged.tooltip.trigger = 'item';
   }
   const xAxisOption: AxisOption = merged.xAxis;
-  // ECharts 习惯用 type: 'value' 表示数值轴，这里统一成内部的 'linear'
+  // 主流习惯用 type: 'value' 表示数值轴，这里统一成内部的 'linear'
   if (xAxisOption.type === ('value' as any)) xAxisOption.type = 'linear';
   // 多 y 轴：option.yAxis 可以是单个对象或数组；每个系列用 yAxisIndex 绑定到其中一个
   const yAxisOptions: AxisOption[] = Array.isArray(option.yAxis) ? option.yAxis : [option.yAxis || {}];
@@ -209,7 +209,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
 
   /**
    * 排布方向：类目轴在 y 上就是横向柱状图（排行榜场景）。
-   * 判定依据与 ECharts 一致 —— 声明了类目 y 轴（type 或 data），且 x 轴不是类目轴。
+   * 判定依据与主流写法一致 —— 声明了类目 y 轴（type 或 data），且 x 轴不是类目轴。
    */
   const horizontal = isHorizontalLayout(xAxisOption, yAxisOptions[0]);
   if (horizontal && (!option.tooltip || option.tooltip.trigger === undefined)) {
@@ -217,7 +217,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     merged.tooltip.trigger = 'item';
   }
   // 轴声明了类目时，数据项按**下标**对齐到类目
-  //（ECharts 常见写法：series.data 只给数值，类目由 axis.data 提供）
+  //（常见写法：series.data 只给数值，类目由 axis.data 提供）
   applyAxisCategories(horizontal ? yAxisOptions[0] : xAxisOption, series);
   const xType = horizontal
     ? xAxisOption.type && xAxisOption.type !== 'category'
@@ -731,7 +731,7 @@ export function isHorizontalLayout(xAxis: AxisOption, yAxis: AxisOption): boolea
 
 /**
  * 类目轴上的类目列表：
- * 1. 轴自己声明的 data（ECharts 写法，横向柱状图常用）；
+ * 1. 轴自己声明的 data（横向柱状图常用写法）；
  * 2. 否则从数据项推导 —— 对象数据的 name、或 xValue（我们内部统一用 xValue 存「类目」这一维）。
  */
 export function buildCategoryValues(option: AxisOption, series: InternalSeries[]): any[] {

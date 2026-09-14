@@ -116,7 +116,7 @@ describe('横向柱状图（引擎集成）', () => {
     const bars: any = c.seriesComponents[0];
     const first = bars.barRectAt(0)!;
     const last = bars.barRectAt(4)!;
-    // 类目轴和数值轴一样「向上生长」：第一个类目在最下方（与 ECharts 一致）
+    // 类目轴和数值轴一样「向上生长」：第一个类目在最下方（与主流写法一致）
     expect(first.y).toBeGreaterThan(last.y);
     // 长度随数值：390 > 320
     expect(last.width).toBeGreaterThan(first.width);
