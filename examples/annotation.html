@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 标注（目标线 / 异常点 / 目标区间）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>标注：目标线 / 阈值线 / 异常点 / 目标区间</h1>
+    <p class="lead">
+      业务里最高频的「目标线、SLA 阈值、告警线、达标区」是一类<strong>标注</strong>，不是新的图表类型：
+      它挂在坐标轴上（定位走比例尺），因此<strong>随缩放、平移、跨图联动一起动</strong>，也不进图例、不占数据下标。
+      <br />
+      下面每个按钮都只改 <code>option.annotation</code> 这一段；右边实时显示
+      <code>chart.annotationDiagnostics()</code> —— 值越界时线不画，但原因会写在这里。
+      <br />
+      与「数据坐标图元」（<a href="./editable-chart.html">可编辑图表</a>）的分工：那个是调用方
+      <strong>自己创建引擎图元</strong>（可拖、可命中、带事件）；这里是<strong>声明式配置</strong>，
+      纯数据、可序列化、默认不参与命中 —— 表单里填个数就能出一条目标线。
+    </p>
+    <div class="card">
+      <div class="snapshot-head">
+        <span class="snapshot-title">控制</span>
+        <span class="snapshot-actions">
+          <button type="button" id="toggle-target" data-flag="target">目标线 3200</button>
+          <button type="button" id="toggle-sla" data-flag="sla">阈值线 1500（红）</button>
+          <button type="button" id="toggle-area" data-flag="area">达标区 0 ~ 1000</button>
+          <button type="button" id="toggle-point" data-flag="point">异常点 6-14</button>
+          <button type="button" id="toggle-bad" data-flag="bad">故意写一个越界的值</button>
+          <button type="button" id="zoom-in">缩放到窗口外</button>
+          <button type="button" id="reset">复位</button>
+        </span>
+      </div>
+    </div>
+    <div class="card">
+      <canvas id="chart" width="960" height="420"></canvas>
+    </div>
+    <div class="card">
+      <h2>标注诊断</h2>
+      <div class="log" id="diagnostics">—</div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const days = [];
+      for (let i = 1; i <= 30; i++) days.push(`6-${String(i).padStart(2, '0')}`);
+
+      const throughput = [820, 932, 901, 1290, 1330, 1320, 1450, 1560, 1420, 1380, 1290, 1480, 1720, 640, 2010, 1980, 2150, 2320, 2210, 2080, 2350, 2480, 2610, 2540, 2700, 2880, 2750, 2910, 3120, 3280];
+
+      /** 标注的开关状态：每个按钮只切自己那一条，方便逐个看效果。 */
+      const flags = { target: true, sla: true, area: true, point: true, bad: false };
+
+      /** 基准 option：除 annotation 之外的一切都由它决定。 */
+      const baseOption = () => ({
+        title: { text: '日吞吐量', subtext: '滚轮缩放 · 拖拽平移，标注跟着坐标系走' },
+        theme: 'light',
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, type: 'line', axis: 'x', showAxisLabel: true },
+        animation: { enabled: true, duration: 520, easing: 'easeOutCubic' },
+        xAxis: { type: 'category', data: days, name: '日期' },
+        yAxis: { min: 0, max: 3600, name: '单量' },
+        series: [
+          { id: 'orders', type: 'line', name: '吞吐量', data: throughput, smooth: true, lineWidth: 2 },
+        ],
+      });
+
+      /** 标注图层：目标线 / 阈值线 / 达标区 / 异常点。 */
+      const annotationOption = () => {
+        const annotation = { lines: [], areas: [], points: [] };
+        if (flags.target) {
+          annotation.lines.push({ axis: 'y', value: 3200, text: '目标 3200', color: '#0d6efd', textPosition: 'end' });
+        }
+        if (flags.sla) {
+          annotation.lines.push({ axis: 'y', value: 1500, text: '告警阈值 1500', color: '#dc3545', lineWidth: 1, textPosition: 'start' });
+        }
+        if (flags.bad) {
+          // 值在数据域之外：这条线不会画出来，但诊断里会说清楚为什么
+          annotation.lines.push({ axis: 'y', value: 9000, text: '越界的目标线', color: '#0d6efd' });
+        }
+        if (flags.area) {
+          annotation.areas.push({ axis: 'y', from: 0, to: 1000, color: 'rgba(25,135,84,0.10)', text: '达标区', textPosition: 'start' });
+        }
+        if (flags.point) {
+          annotation.points.push({ x: '6-14', y: 640, text: '异常点 640', color: '#dc3545', symbol: 'diamond', symbolSize: 10 });
+        }
+        return Object.keys(annotation).every((key) => !annotation[key].length) ? null : annotation;
+      };
+
+      const option = () => {
+        const base = baseOption();
+        const annotation = annotationOption();
+        return annotation ? { ...base, annotation } : base;
+      };
+
+      const chart = ICEChart.createChart('chart', option());
+      window.__chart = chart;
+
+      const diagnosticsEl = document.getElementById('diagnostics');
+      const paintDiagnostics = () => {
+        const list = chart.annotationDiagnostics();
+        diagnosticsEl.textContent = list.length
+          ? list.map((item) => `[${item.severity}] ${item.code}  ${item.message}`).join('\n')
+          : '—（没有诊断：每条标注都画得出来）';
+        document.querySelectorAll('.snapshot-actions button[data-flag]').forEach((btn) => {
+          btn.classList.toggle('active', flags[btn.dataset.flag]);
+        });
+      };
+
+      const apply = (animate) => {
+        chart.setOption(option(), { animate: animate !== false });
+        paintDiagnostics();
+      };
+
+      document.querySelectorAll('.snapshot-actions button[data-flag]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const flag = btn.dataset.flag;
+          flags[flag] = !flags[flag];
+          apply();
+        });
+      });
+
+      document.getElementById('zoom-in').addEventListener('click', () => {
+        chart.setDomain('x', ['6-10', '6-20'], 'api');
+        paintDiagnostics();
+      });
+      document.getElementById('reset').addEventListener('click', () => {
+        chart.setOption(option(), { animate: false, preserveView: false });
+        chart.resetZoom();
+        paintDiagnostics();
+      });
+      chart.on('zoom:change', paintDiagnostics);
+      paintDiagnostics();
+
+      /**
+       * 给端到端回归用的探针：把「有标注 / 无标注」两张图逐像素比一遍。
+       *
+       * 判据是设计稿里的第 4 条验收：**除标注覆盖的区域外不得有任何差异** ——
+       * 这条能挡住「画标注时把别的图层带歪」（坐标系、系列、坐标轴被顺手改坏）。
+       * 探针只在页面里跑（浏览器里才有真实光栅化），仓库里只留这一个入口。
+       */
+      const grab = () => {
+        const canvas = chart.ice.canvasEl;
+        const ctx = canvas.getContext('2d');
+        return ctx.getImageData(0, 0, canvas.width, canvas.height);
+      };
+
+      window.__annotationDemo = {
+        async render(animate) {
+          chart.setOption(option(), { animate: animate !== false, preserveView: animate !== false });
+          paintDiagnostics();
+          await chart.render();
+        },
+        /** 有标注 → 记录墨迹盒 → 关掉标注 → 对比，返回「标注区域之外的差异像素」。 */
+        async compare() {
+          const saved = { ...flags };
+          flags.bad = false;
+          const annotation = annotationOption();
+          chart.setOption({ ...baseOption(), annotation }, { animate: false, preserveView: false });
+          await chart.render();
+          const ink = chart.annotation.ink.map((box) => ({ ...box }));
+          const withAnnotation = grab();
+          chart.setOption(baseOption(), { animate: false, preserveView: false });
+          await chart.render();
+          const without = grab();
+          Object.assign(flags, saved);
+
+          const { width, height } = withAnnotation;
+          let diff = 0;
+          let outside = 0;
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+          const samples = [];
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const i = (y * width + x) * 4;
+              if (
+                withAnnotation.data[i] === without.data[i] &&
+                withAnnotation.data[i + 1] === without.data[i + 1] &&
+                withAnnotation.data[i + 2] === without.data[i + 2] &&
+                withAnnotation.data[i + 3] === without.data[i + 3]
+              ) {
+                continue;
+              }
+              diff++;
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x);
+              maxY = Math.max(maxY, y);
+              // 3px 是文字描边 / 线宽的上限余量
+              const covered = ink.some(
+                (box) => x >= box.x - 3 && x <= box.x + box.width + 3 && y >= box.y - 3 && y <= box.y + box.height + 3
+              );
+              if (!covered) {
+                outside++;
+                if (samples.length < 8) samples.push({ x, y });
+              }
+            }
+          }
+          return {
+            canvas: { width, height },
+            ink,
+            diff,
+            outside,
+            samples,
+            bbox: isFinite(minX) ? { minX, minY, maxX, maxY } : null,
+          };
+        },
+        /** 存盘 → 载入 → 再出图：标注必须进快照，且还原后**逐像素一致**。 */
+        async roundTrip() {
+          chart.setOption(option(), { animate: false, preserveView: false });
+          // 比像素前先把两边都收尾到终态：页面刚加载时还在播入场动画，
+          // 拍到半路状态会得到「本来就不该相等」的差异（与动效偏好 = instant 同一回事）
+          chart.finishAnimations();
+          await chart.render();
+          const before = grab();
+          const json = chart.toJSONString();
+
+          const holder = document.createElement('div');
+          holder.style.cssText = 'position:absolute;left:-9999px;top:0';
+          const canvas = document.createElement('canvas');
+          canvas.width = chart.ice.canvasEl.width;
+          canvas.height = chart.ice.canvasEl.height;
+          canvas.style.width = `${chart.ice.canvasEl.getBoundingClientRect().width}px`;
+          canvas.style.height = `${chart.ice.canvasEl.getBoundingClientRect().height}px`;
+          holder.appendChild(canvas);
+          document.body.appendChild(holder);
+
+          const restored = ICEChart.createChart(canvas, json);
+          // restore 会先建一张空图再载入快照，于是坐标轴有一次「从空态滑过来」的过渡 ——
+          // 比像素之前必须先把它收尾，否则拍到的是半路状态（与「动效偏好 = instant」同一回事）
+          restored.finishAnimations();
+          await restored.render();
+          const ctx = canvas.getContext('2d');
+          const compared = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          let diff = 0;
+          for (let i = 0; i < compared.data.length; i += 4) {
+            if (
+              compared.data[i] !== before.data[i] ||
+              compared.data[i + 1] !== before.data[i + 1] ||
+              compared.data[i + 2] !== before.data[i + 2] ||
+              compared.data[i + 3] !== before.data[i + 3]
+            ) {
+              diff++;
+            }
+          }
+          const result = {
+            hasAnnotation: json.indexOf('"annotation"') >= 0,
+            idempotent: restored.toJSONString() === json,
+            diff,
+            lines: restored.annotation.resolved.lines.length,
+            points: restored.annotation.resolved.points.length,
+            areas: restored.annotation.resolved.areas.length,
+          };
+          restored.destroy();
+          holder.remove();
+          return result;
+        },
+      };
+
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

@@ -8,5 +8,6 @@ coverage
 .vscode
 examples/vendor
 .audit
+.hover-sweep
 test-results
 playwright-report

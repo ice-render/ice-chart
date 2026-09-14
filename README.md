@@ -139,6 +139,10 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 序列化 | `toJSON` / `fromJSONString` | 配置 + 缩放窗口 + 图例显隐状态 |
 | 自定义系列 | `registerSeriesType(type, factory)` | 任何 `SeriesBase` 子类接入成一等系列：命中 / 悬停 / 提示框 / 图例 / 序列化全部自动生效 |
 | 数据坐标图元 | `addMark()` | 注释卡片 / 阈值线 / 目标线 / 预测带挂在**数据坐标**上，缩放平移与数据更新后不脱锚；组件就是引擎图元（带命中、事件、动画） |
+| 标注 | `option.annotation` | 目标线 / 阈值线、异常点、目标区间。**声明式、纯数据可序列化**，定位走坐标轴比例尺（随缩放 / 平移 / 联动走），默认不吃命中；越界不画但给结构化诊断（`annotationDiagnostics()`） |
+
+> 「标注」与「数据坐标图元」是同一件事的两种形态，按场景选：
+> 表单里填个数就出一条目标线 → `option.annotation`；需要拖动 / 点击 / 挂在图上做交互的注释卡片 → `addMark()`。
 
 ## 事件
 
@@ -376,6 +380,38 @@ animation: {
   连续滚轮缩放时从当前渲染位置接着走，不会每次都从旧位置重跳。
 - **图例切换重排**：隐藏一个饼图扇区 / 漏斗阶段时，其余几何平滑挪位、被隐藏的那个收拢再消失；
   切换系列显隐时数值域与其它系列一起过渡。
+
+## 标注：目标线 / 异常点 / 目标区间
+
+业务里最高频的「目标线、SLA 阈值、告警线、达标区」是一类**标注**，不是新的图表类型：
+数据来自 option、几何来自坐标轴的比例尺，所以它随缩放 / 平移 / 联动一起动，
+也**不进图例、不占数据下标**（不会污染堆叠与提示框的数据行）。
+
+```ts
+chart.setOption({
+  xAxis: { type: 'category', data: days },
+  yAxis: { min: 0, max: 3600 },
+  series: [{ type: 'line', data: throughput }],
+  annotation: {
+    lines: [
+      { axis: 'y', value: 3200, text: '目标 3200' },                        // 水平目标线
+      { axis: 'y', value: 1500, text: '告警阈值', color: '#dc3545' },        // 阈值线
+      { axis: 'x', value: '6-18', text: '上线' },                            // 垂直线（类目 / 下标 / 时间都可）
+    ],
+    points: [{ x: '6-14', y: 640, text: '异常点', color: '#dc3545', symbol: 'diamond' }],
+    areas: [{ axis: 'y', from: 0, to: 1000, text: '达标区', color: 'rgba(25,135,84,0.10)' }],
+  },
+});
+
+chart.annotationDiagnostics(); // [{ code: 'annotation:out-of-range', severity: 'warning', kind: 'line', index: 2, message: '…' }]
+```
+
+- **越界不画**（而不是裁成半条），原因进 `annotationDiagnostics()`；值写错是 `error`（表单标红）、
+  越界是 `warning`（缩放或数据更新后它可能又会出现）。坏标注不影响其它标注，也不让图表崩。
+- **默认不参与命中**：标注是「说明」，压在数据点上时点到的仍然是数据。
+- 纯数据、可序列化 —— 跟着 `toJSON()` 快照一起存盘还原。
+
+完整示例见 [examples/annotation.html](./examples/annotation.html)。
 
 ## 可编辑图表：数据坐标图元 + 自定义系列
 
@@ -616,14 +652,17 @@ node scripts/audit-space.mjs         # 104 张示例图：直角坐标占宽 ≥
 ## 路线图
 
 已落地：极坐标（饼图 / 玫瑰图）、雷达图、多 y 轴、dataZoom 滑块、LTTB 降采样与二分命中、
-无障碍（数据表镜像 + 播报）、K 线、热力图、桑基图。
+无障碍（数据表镜像 + 播报）、K 线、热力图、桑基图、标注（目标线 / 异常点 / 目标区间）。
 
 后续候选：
 
 - 桑基节点拖拽重排与折叠（布局已与渲染解耦，扩展成本低）
 - 数据 append 的增量绘制（当前是全量重建像素缓存）
 - y 轴方向的 dataZoom 滑块（`setAxisDomain` 已可用，缺 UI）
-- 地图 / 力导向关系图（属于另一类布局族）
+- 标注的第二梯队：树图 / 日历热力（层级与时间热力的标配）、趋势线与误差棒（按需；
+  冷门形态走自定义系列注册口）
+- 地图**明确不做**（地理数据 + 投影 + 交互是另一个体量；关系数据用力导向关系图表达，
+  需要地图的应用走自定义系列注册口）
 
 ## License
 

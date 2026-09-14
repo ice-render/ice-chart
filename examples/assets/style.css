@@ -175,6 +175,13 @@ table td {
   color: var(--bs-primary);
 }
 
+/* 开关型按钮的「已开启」状态（示例页的控件行都用这一套，别各写一份） */
+.snapshot-actions button.active {
+  border-color: var(--bs-primary);
+  color: var(--bs-primary);
+  background: rgba(13, 110, 253, 0.08);
+}
+
 .snapshot-json {
   margin: 0;
   padding: 0.6rem 0.75rem;

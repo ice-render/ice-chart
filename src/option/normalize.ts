@@ -1,4 +1,4 @@
-import type { AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
+import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
@@ -76,6 +76,23 @@ export function normalizeAnimation(input: any): any {
   return { enabled, enter: stage('enter'), update: stage('update'), highlight: stage('highlight') };
 }
 
+/**
+ * 归一化标注配置（只做**形状**层面的收拢）。
+ *
+ * 数据值 → 像素的解析不在这里：归一化阶段还没有比例尺（要等布局之后），
+ * 而「这条标注画不画得出来」只有拿到坐标轴才知道 —— 那部分在 `src/annotation/resolve.ts`。
+ */
+export function normalizeAnnotation(input: any): AnnotationOption | null {
+  if (!input || typeof input !== 'object') return null;
+  const list = (value: any): any[] =>
+    Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : [];
+  const lines = list(input.lines);
+  const points = list(input.points);
+  const areas = list(input.areas);
+  if (!lines.length && !points.length && !areas.length) return null;
+  return { lines, points, areas };
+}
+
 export interface NormalizeContext {
   hiddenIds?: Record<string, boolean>;
   /** 被隐藏的扇区（饼图），key 为 `seriesId#dataIndex`。 */
@@ -150,6 +167,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   merged.theme = option.theme;
   merged.aspect = option.aspect === 'equal' ? 'equal' : 'auto';
   merged.polarGrid = option.polarGrid || null;
+  merged.annotation = normalizeAnnotation(option.annotation);
   merged.tooltip = { show: option.tooltip?.show !== false, ...merged.tooltip };
   merged.crosshair = { show: option.crosshair?.show !== false, ...merged.crosshair };
 

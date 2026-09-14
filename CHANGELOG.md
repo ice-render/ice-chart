@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### 新增：标注 `option.annotation`（目标线 / 阈值线 / 异常点 / 目标区间）
+
+「目标线、SLA 阈值、告警线、达标区」是业务里出现频率最高的一类诉求，而它**不是一种新的图表类型**：
+它是挂在坐标轴上的一个图层（与网格线 / 准星同族），数据来自 option、几何来自比例尺。
+
+```ts
+annotation: {
+  lines: [
+    { axis: 'y', value: 3200, text: '目标 3200' },                 // 水平目标线
+    { axis: 'x', value: '6-18', text: '上线' },                     // 垂直线
+    { axis: 'y', value: 1500, text: '阈值', dashed: false },        // 实线 / 自定义虚实
+  ],
+  points: [{ x: '6-14', y: 640, text: '异常点', symbol: 'diamond' }],
+  areas: [{ axis: 'y', from: 0, to: 1000, text: '达标区' }],
+}
+```
+
+- **定位走比例尺**：数值轴按数值、类目轴按类目名或下标、时间轴按时间戳 / 日期串；
+  因此随缩放、平移、跨图联动一起动，缩放窗口外的标注自动消失、缩回来又出现。
+- **不进图例、不占数据下标**：不参与堆叠、不污染提示框的数据行，也不吃命中
+  （压在数据点上时点到的仍然是数据）。
+- **越界不画**（而不是裁成半条），原因进 **`chart.annotationDiagnostics()`**：
+  值写错 / 类目不存在是 `error`（表单标红），越界或场景没有直角坐标系是 `warning`。
+  单条坏标注不影响其它标注，也不让图表崩 —— 与表达式诊断同一套契约。
+- 纯数据、可序列化：跟着 `toJSON()` 快照一起存盘还原，往返后像素一致。
+- 图层位置在**系列之上、坐标轴与覆盖层之下**；文字用主题的 `labelHaloColor` 描边
+  （标注常常压在数据线上，没有描边会糊在一起）。
+
+新增 `annotation/resolve.ts`（纯函数：数据 → 像素 + 诊断）、`components/Annotation.ts`（绘制层）、
+`normalizeAnnotation()`、`chart.annotationDiagnostics()` / `annotationErrors()`。
+示例：[examples/annotation.html](./examples/annotation.html)。
+
+**验收**：单测 12 条（数值 / 类目 / 下标 / 时间轴定位、越界、非法值、缩放跟随、
+区间夹取、不参与命中、非直角场景、序列化往返）；真浏览器 6 条（真光栅化、墨迹不越出画布、
+**除标注覆盖区域外与「无标注」逐像素一致**、越界诊断、缩放后消失与恢复、
+**存盘 → 载入 → 再出图逐像素一致**、**布局变化后旧位置不留残墨**）。
+实测：39 套件 / **365 用例**，示例页冒烟 30 页 + 交互审计 334 步 + 悬停扫描全过。
+
 ### 新增：图表不再是封闭渲染器（三条能力）
 
 **1. 自定义系列类型 `registerSeriesType(type, factory)`**
@@ -820,5 +858,3 @@ yAxis: { padding: 0.05 }   // 默认值；写 0 表示精确贴边
 - 主题：light / dark / 自定义片段，色板取自 ice-render 设计 token。
 - 工具链：Rollup（ESM + CJS + UMD + .d.ts/.d.mts）、jest（jsdom + Canvas 2D 桩）、eslint、prettier。
 - 示例：基础折线 / 面积、分组与堆叠柱形、交互总览、时间轴 + dataZoom、跨图联动。
-
-
