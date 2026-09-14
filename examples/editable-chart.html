@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 可编辑图表（自定义系列 + 数据坐标图元）</title>
+    <!--
+      三条能力的实景演示：
+      1. registerSeriesType：把自定义系列（火花条）注册成一等类型，命中/悬停/图例/序列化全都自动生效；
+      2. addMark：把「引擎图元」挂到数据坐标上 —— 阈值线可拖、预测带、注释卡片都跟着缩放/平移走；
+      3. 拖拽回写：拖阈值线 → 反解数据值 → 抛 mark:drag → 页面据此改文案 / 改配色。
+      组件是引擎的一等公民，所以这些图元同时带命中测试、事件与动画能力。
+    -->
+    <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      .edit-badge {
+        display: inline-block;
+        padding: 0.1rem 0.45rem;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(13, 110, 253, 0.1);
+        color: var(--bs-primary);
+      }
+      .edit-hint {
+        margin-left: 0.5rem;
+        font-size: 0.8125rem;
+        color: var(--bs-secondary-color);
+      }
+      .edit-state {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8125rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>可编辑图表</h1>
+    <p class="lead">
+      <span class="edit-badge">自定义系列</span> 火花条（sparkline）通过 <code>registerSeriesType()</code> 接入 ——
+      它照样有命中、悬停、提示框与序列化。<span class="edit-badge">数据坐标图元</span>
+      注释卡片、阈值线、预测带都是**引擎图元**（<code>ICEStar</code> / <code>ICERect</code> / <code>ICEText</code>），
+      挂在数据坐标上，缩放平移后不脱锚。<span class="edit-badge">可拖</span> 直接拖那条阈值线试试。
+    </p>
+    <div class="card">
+      <div class="edit-state">
+        阈值：<b id="threshold-value">150</b> <span class="edit-hint" id="threshold-note">拖动阈值线编辑；当前没有超限</span>
+      </div>
+      <canvas id="chart" width="960" height="420"></canvas>
+    </div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+    <div class="card" id="snapshot-panel"></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const { ICERect, ICEStar, ICEText } = ICE;
+      const MONTHS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月'];
+      const SALES = [120, 142, 168, 154, 196, 172, 210, 188];
+      const FORECAST = [118, 138, 160, 158, 190, 178, 205, 195];
+
+      /** 自定义系列：每个数据点画一根火花条（演示 registerSeriesType 的接入方式）。 */
+      class SparkSeries extends ICEChart.SeriesBase {
+        constructor(series, props) {
+          super(series, props);
+          this.seriesType = 'sparkline';
+          this.clipToBox = true;
+        }
+        doRender() {
+          this.rebuildPixels();
+          const n = this.pixels.length / 2;
+          if (!n) return;
+          const slot = Math.max(2, (this.state.width / n) * 0.42);
+          this.beginDraw();
+          this.ctx.fillStyle = this.series.option.color || '#0d6efd';
+          this.ctx.globalAlpha = 0.45;
+          for (let i = 0; i < n; i++) {
+            const x = this.pixels[i * 2];
+            const y = this.pixels[i * 2 + 1];
+            if (!isFinite(x) || !isFinite(y)) continue;
+            this.ctx.fillRect(x - slot / 2, y, slot, this.pixels[i * 2 + 1 + 1] === undefined ? 6 : 40);
+          }
+          this.ctx.globalAlpha = 1;
+          this.endDraw();
+        }
+        hitTestIndex(localX, localY) {
+          this.rebuildPixels();
+          const n = this.pixels.length / 2;
+          let best = -1;
+          let bestDist = 18 * 18;
+          for (let i = 0; i < n; i++) {
+            const dx = this.pixels[i * 2] - localX;
+            const dy = this.pixels[i * 2 + 1] - localY;
+            const dist = dx * dx + dy * dy;
+            if (dist <= bestDist) {
+              bestDist = dist;
+              best = i;
+            }
+          }
+          return best;
+        }
+      }
+      ICEChart.registerSeriesType('sparkline', (series, props) => new SparkSeries(series, props));
+
+      const chart = ICEChart.createChart('chart', {
+        theme: 'light',
+        title: { text: '月度销量（含预测带与可拖阈值线）', subtext: '火花条是自定义系列 · 注释与阈值线是数据坐标图元' },
+        legend: { show: true },
+        tooltip: { trigger: 'axis' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        interaction: {
+          hover: { enabled: true, dimOthers: true },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+          brush: { enabled: true, axes: 'x', mode: 'zoom' },
+        },
+        xAxis: { type: 'category', data: MONTHS },
+        yAxis: { min: 0, max: 260 },
+        series: [
+          { id: 'sales', type: 'line', name: '实际销量', data: SALES, smooth: 0.2, lineWidth: 2 },
+          { id: 'forecast', type: 'line', name: '预测', data: FORECAST, color: '#6c757d', lineWidth: 1.5 },
+          { id: 'spark', type: 'sparkline', name: '火花条（自定义系列）', data: SALES, color: '#0d6efd' },
+        ],
+      });
+
+      // ---------------- 数据坐标图元 ----------------
+      // 1) 预测带：y ∈ [150, 200] 的目标区间
+      chart.addMark({
+        type: 'yBand',
+        y0: 150,
+        y1: 200,
+        // 引擎图元的样式约定：fill / stroke 是「要不要填充、要不要描边」，
+        // 颜色写在 style 里，且键名是 **ctx 属性名**（fillStyle / strokeStyle / lineWidth）
+        // 引擎图元默认是「要描边」的（描边色来自引擎主题），纯填充的图元记得显式关掉描边，
+        // 否则横跨绘图区的线 / 带会把描边画到绘图区边界上。
+        component: new ICERect({
+          width: 1,
+          height: 1,
+          fill: true,
+          stroke: false,
+          style: { fillStyle: 'rgba(13, 110, 253, 0.10)' },
+        }),
+      });
+
+      // 2) 阈值线：可拖 —— 拖完把新的数据值写回，并抛 mark:drag
+      const threshold = chart.addMark({
+        type: 'yLine',
+        y: 150,
+        draggable: true,
+        component: new ICERect({
+          width: 1,
+          height: 3,
+          fill: true,
+          stroke: false,
+          draggable: true,
+          interactive: true,
+          style: { fillStyle: '#dc3545' },
+        }),
+      });
+
+      // 3) 注释卡片：钉在「7月 210」这个点上，缩放平移后跟着走
+      const card = new ICERect({
+        width: 118,
+        height: 40,
+        radius: 6,
+        fill: true,
+        stroke: true,
+        interactive: true,
+        style: { fillStyle: 'rgba(255, 255, 255, 0.96)', strokeStyle: '#dc3545', lineWidth: 1 },
+      });
+      chart.addMark({ type: 'point', x: '7月', y: 210, dx: 0, dy: -34, component: card });
+      chart.addMark({
+        type: 'point',
+        x: '7月',
+        y: 210,
+        dx: 0,
+        dy: -34,
+        component: new ICEStar({
+          radius: 9,
+          spikes: 5,
+          fill: true,
+          stroke: true,
+          style: { fillStyle: '#dc3545', strokeStyle: '#ffffff', lineWidth: 1 },
+        }),
+      });
+      chart.addMark({
+        type: 'point',
+        x: '7月',
+        y: 210,
+        dx: 0,
+        dy: -34,
+        component: new ICEText({ text: '峰值 210', style: { fillStyle: '#dc3545', fontSize: 12 } }),
+      });
+
+      // ---------------- 拖拽语义 ----------------
+      const log = document.getElementById('log');
+      const write = (text) => {
+        log.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '  ' + text;
+      };
+      const thresholdValue = document.getElementById('threshold-value');
+      const thresholdNote = document.getElementById('threshold-note');
+      chart.on('mark:drag', (data) => {
+        const value = Math.round(data.yValue);
+        thresholdValue.textContent = String(value);
+        const exceeded = SALES.filter((v) => v > value).length;
+        thresholdNote.textContent = exceeded ? `已超限 ${exceeded} 个月` : '当前没有超限';
+        thresholdNote.style.color = exceeded ? '#dc3545' : 'var(--bs-secondary-color)';
+        write(`mark:drag  y=${value}（阈值线拖拽中）`);
+      });
+      chart.on('mark:dragend', (data) => write(`mark:dragend  y=${Math.round(data.yValue)}（写回锚点）`));
+      chart.on('item:hover', (params) => write(`item:hover  ${params.seriesName} @ ${params.xValue} = ${params.value}`));
+      chart.on('zoom:change', (range) => write(`zoom:change  ${JSON.stringify(range.x ? range.x.map((v) => (typeof v === 'number' ? Math.round(v) : v)) : range)}`));
+
+      window.__chart = chart;
+      window.__charts = { chart };
+      if (window.mountSnapshotPanel) window.mountSnapshotPanel();
+    </script>
+  </body>
+</html>

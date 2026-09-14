@@ -1,5 +1,5 @@
 import { ICE, ICEGroup } from 'ice-render';
-import type { ChartOption, DataItem, LegendToggleParams } from './types';
+import type { ChartMarkData, ChartMarkHandle, ChartMarkSpec, ChartOption, DataItem, LegendToggleParams } from './types';
 import type { ChartLayout, InternalSeries, NormalizedOption, Rect } from './internal';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { computeLayout } from './layout/layout';
@@ -31,6 +31,8 @@ const Z = {
   plotArea: 10,
   grid: 20,
   series: 100,
+  /** 数据坐标图元（注释 / 阈值线 / 预测带）：压在系列之上、坐标轴与覆盖层之下 */
+  mark: 300,
   axis: 400,
   title: 450,
   legend: 500,
@@ -135,6 +137,12 @@ export class ICEChart {
   public dataZoomSlider: DataZoomSlider | null = null;
   public seriesComponents: SeriesBase[] = [];
   public controller: InteractionController;
+  /** 数据坐标图元的容器（注释 / 阈值线 / 预测带）。 */
+  public markLayer: ICEGroup | null = null;
+  private marks: Array<{ id: string; spec: ChartMarkSpec; component: any; dragging: boolean }> = [];
+  private markSeq = 0;
+  /** 摆位期间（chart 自己移动图元）不要当成用户拖拽。 */
+  private syncingMarks = false;
 
   /** 交互层使用的别名（与 InteractionHost 接口约定一致）。 */
   public get brush(): Brush | null {
@@ -418,6 +426,282 @@ export class ICEChart {
       inside = xs.filter((v) => v >= lo && v <= hi).length;
     }
     return inside >= need ? [lo, hi] : domain;
+  }
+
+  // ------------------------------------------------------- 数据坐标图元（mark）
+
+  /**
+   * 把一个**引擎图元**挂到数据坐标上：注释卡片 / 阈值线 / 目标线 / 预测带。
+   *
+   * 组件由调用方创建（`new ICEStar(...)` / `new ICERect(...)` / 自定义组件），
+   * chart 负责：
+   * - 按数据坐标摆位（缩放 / 平移 / 数据更新后自动跟随，不脱锚）；
+   * - 线 / 带按绘图区尺寸定尺寸；
+   * - 数据点移出可视区时自动隐藏（`hideWhenOutOfView`，默认 true）；
+   * - 可拖拽时把拖完的位置反解成数据坐标写回，并抛 `mark:drag` / `mark:dragend`。
+   *
+   * 因为组件是引擎的一等公民，它同时拥有命中测试、事件、关键帧动画与序列化能力。
+   */
+  public addMark(spec: ChartMarkSpec): ChartMarkHandle {
+    const id = spec.id || `mark-${++this.markSeq}`;
+    if (this.marks.some((m) => m.id === id)) {
+      throw new Error(`[ice-chart] addMark：id「${id}」已经存在`);
+    }
+    if (!spec || !spec.component) {
+      throw new Error('[ice-chart] addMark：必须提供 component（一个引擎图元实例）');
+    }
+    const kind = spec.type || 'point';
+    if (kind !== 'point' && kind !== 'xLine' && kind !== 'yLine' && kind !== 'xBand' && kind !== 'yBand') {
+      throw new Error(`[ice-chart] addMark：不支持的 type「${String(kind)}」`);
+    }
+    const mark = { id, spec: { ...spec, id }, component: spec.component, dragging: false };
+    this.marks.push(mark);
+    this.ensureMarkLayer().addChild(spec.component);
+    // 用户拖动图元 → 反解成数据坐标回写（用 AFTER_MOVE：拖拽过程与程序化移动都会触发，
+    // 所以摆位期间用 syncingMarks 兜住，避免「自己摆一下也算用户拖了」）
+    if (typeof spec.component.on === 'function') {
+      spec.component.on('AFTER_MOVE', (evt: any) => {
+        if (this.syncingMarks) return;
+        // 用事件载荷里的 left/top：引擎在 BEFORE_MOVE → 改 state → AFTER_MOVE 之间更新状态，
+        // 直接读 state 有可能会拿到旧值（实测差 3.4 个数据单位）。
+        const at =
+          evt && isFinite(evt.left) && isFinite(evt.top)
+            ? { left: Number(evt.left), top: Number(evt.top) }
+            : undefined;
+        const data = this.markDataAt(mark, at);
+        if (kind === 'point') {
+          mark.spec.x = data.xValue;
+          mark.spec.y = data.yValue;
+        } else if (kind === 'xLine' || kind === 'xBand') {
+          if (kind === 'xLine') mark.spec.x = data.xValue;
+          else mark.spec.x0 = data.xValue;
+        } else {
+          if (kind === 'yLine') mark.spec.y = data.yValue;
+          else mark.spec.y0 = data.yValue;
+        }
+        mark.dragging = true;
+        // spec 是唯一事实来源：拖完立刻按 spec 重摆一次 —— 该锚定的轴弹回原位，
+        // 只保留真正被编辑的那个方向（否则「拖阈值线」会把它横向拖出绘图区）。
+        this.syncMarks();
+        this.emit('mark:drag', data);
+        if (typeof mark.spec.onDrag === 'function') mark.spec.onDrag(data);
+      });
+    }
+    this.syncMarks();
+    return this.markHandle(mark);
+  }
+
+  /** 取一个图元句柄。 */
+  public getMark(id: string): ChartMarkHandle | null {
+    const mark = this.marks.find((m) => m.id === id);
+    return mark ? this.markHandle(mark) : null;
+  }
+
+  public getMarks(): ChartMarkHandle[] {
+    return this.marks.map((m) => this.markHandle(m));
+  }
+
+  /** 移除一个图元（只从图表里摘掉，不销毁组件 —— 组件归调用方所有）。 */
+  public removeMark(id: string): boolean {
+    const index = this.marks.findIndex((m) => m.id === id);
+    if (index < 0) return false;
+    const [mark] = this.marks.splice(index, 1);
+    if (this.markLayer && mark.component) this.markLayer.removeChild(mark.component);
+    return true;
+  }
+
+  public clearMarks(): void {
+    for (const mark of this.marks) {
+      if (this.markLayer && mark.component) this.markLayer.removeChild(mark.component);
+    }
+    this.marks = [];
+  }
+
+  /** 这个组件是不是图表管理的图元（交互层据此让路：按在注释上不该触发框选 / 平移）。 */
+  public isMarkComponent(component: any): boolean {
+    return !!component && this.marks.some((m) => m.component === component);
+  }
+
+  /** 拖拽结束：抛 `mark:dragend`（拖拽过程中抛的是 `mark:drag`）。 */
+  public finishMarkDrag(): void {
+    for (const mark of this.marks) {
+      if (!mark.dragging) continue;
+      mark.dragging = false;
+      this.emit('mark:dragend', this.markDataAt(mark));
+    }
+  }
+
+  private ensureMarkLayer(): ICEGroup {
+    if (this.markLayer) return this.markLayer;
+    const canvas = this.layout ? this.layout.canvas : this.canvasRect();
+    const layer = new ICEGroup({
+      left: 0,
+      top: 0,
+      width: canvas.width,
+      height: canvas.height,
+      origin: 'top-left',
+      fill: false,
+      stroke: false,
+      interactive: false,
+      draggable: false,
+      transformable: false,
+      linkable: false,
+      zIndex: Z.mark,
+    });
+    this.root.addChild(layer);
+    this.markLayer = layer;
+    return layer;
+  }
+
+  private markHandle(mark: { id: string; spec: ChartMarkSpec; component: any }): ChartMarkHandle {
+    const handle: ChartMarkHandle = {
+      id: mark.id,
+      spec: mark.spec,
+      component: mark.component,
+      update: (patch: Partial<ChartMarkSpec>) => {
+        Object.assign(mark.spec, patch);
+        this.syncMarks();
+        return handle;
+      },
+      toData: () => this.markDataAt(mark),
+      remove: () => {
+        this.removeMark(mark.id);
+      },
+    };
+    return handle;
+  }
+
+  /** 取某个图元用的 y 轴（多轴叠加时可按 seriesId 指定）。 */
+  private markAxis(spec: ChartMarkSpec) {
+    if (spec.seriesId) {
+      const series = this.norm.series.find((s) => s.id === spec.seriesId || s.name === spec.seriesId);
+      if (series) return this.norm.yAxes[series.axisIndex] || this.norm.yAxis;
+    }
+    return this.norm.yAxes[0] || this.norm.yAxis;
+  }
+
+  /** 数据坐标 → 像素（图表坐标系），并算出该图元的盒子。 */
+  private markBox(spec: ChartMarkSpec, size: { width: number; height: number }) {
+    const kind: string = spec.type || 'point';
+    const plot = this.layout.plot;
+    const xScale: any = this.norm.xAxis.scale;
+    const yAxis: any = this.markAxis(spec);
+    const yScale: any = yAxis && yAxis.scale;
+    const dx = Number(spec.dx) || 0;
+    const dy = Number(spec.dy) || 0;
+    const px = (value: any) => plot.x + Number(xScale.map(value)) + dx;
+    const py = (value: any) => plot.y + Number(yScale.map(value)) + dy;
+    const w = size.width || 1;
+    const h = size.height || 1;
+    if (kind === 'xLine') {
+      return { left: px(spec.x) - w / 2, top: plot.y + dy, width: w, height: plot.height };
+    }
+    if (kind === 'yLine') {
+      return { left: plot.x + dx, top: py(spec.y) - h / 2, width: plot.width, height: h };
+    }
+    if (kind === 'xBand') {
+      const a = px(spec.x0);
+      const b = px(spec.x1);
+      return { left: Math.min(a, b), top: plot.y + dy, width: Math.abs(b - a), height: plot.height };
+    }
+    if (kind === 'yBand') {
+      const a = py(spec.y0);
+      const b = py(spec.y1);
+      return { left: plot.x + dx, top: Math.min(a, b), width: plot.width, height: Math.abs(b - a) };
+    }
+    const cx = px(spec.x);
+    const cy = py(spec.y);
+    return { left: cx - w / 2, top: cy - h / 2, width: w, height: h, anchor: [cx, cy] as [number, number] };
+  }
+
+  /** 图元当前锚点对应的数据坐标（拖拽回传 / `toData()` 用）。 */
+  private markDataAt(mark: { id: string; spec: ChartMarkSpec; component: any }, at?: { left: number; top: number }): ChartMarkData {
+    const spec = mark.spec;
+    const kind: string = spec.type || 'point';
+    const plot = this.layout.plot;
+    const xScale: any = this.norm.xAxis.scale;
+    const yAxis: any = this.markAxis(spec);
+    const yScale: any = yAxis && yAxis.scale;
+    const state = mark.component.state || {};
+    const w = state.width || 0;
+    const h = state.height || 0;
+    const left = at ? at.left : state.left;
+    const top = at ? at.top : state.top;
+    let localX: number;
+    let localY: number;
+    if (kind === 'point') {
+      localX = left + w / 2;
+      localY = top + h / 2;
+    } else if (kind === 'xLine' || kind === 'xBand') {
+      localX = left + w / 2;
+      localY = plot.y + plot.height / 2;
+    } else {
+      localX = plot.x + plot.width / 2;
+      localY = top + h / 2;
+    }
+    const xValue = xScale && typeof xScale.invert === 'function' ? xScale.invert(localX - plot.x) : null;
+    const yValue = yScale && typeof yScale.invert === 'function' ? Number(yScale.invert(localY - plot.y)) : NaN;
+    const isXY = kind === 'point';
+    return {
+      id: mark.id,
+      xValue,
+      yValue: kind === 'xLine' || kind === 'xBand' || !isFinite(yValue) ? undefined : yValue,
+      pixel: [localX, localY],
+    };
+  }
+
+  /** 把每个图元摆到它该在的位置（rebuild 之后调用：缩放 / 平移 / 数据更新都不会脱锚）。 */
+  private syncMarks(): void {
+    if (!this.marks.length || !this.norm || !this.layout) return;
+    const plot = this.layout.plot;
+    this.syncingMarks = true;
+    let moved = false;
+    try {
+      for (const mark of this.marks) {
+        const state = mark.component.state || {};
+        const box = this.markBox(mark.spec, { width: state.width || 0, height: state.height || 0 });
+        // 锚点算不出有限值（类目被平移 / 缩放出当前域）时**只隐藏，不写坐标**：
+        // 把 NaN 写进 state，引擎会当成 0 画到画布左上角 —— 表现为一整块墨迹糊在坐标轴上（实测 2159 像素）。
+        if (![box.left, box.top, box.width, box.height].every((v) => isFinite(v))) {
+          mark.component.setState({ display: false });
+          continue;
+        }
+        const hideOut = mark.spec.hideWhenOutOfView !== false;
+        const anchor = (box as any).anchor || [box.left + box.width / 2, box.top + box.height / 2];
+        // 锚点算不出有限值（例如类目不在当前缩放窗口里）同样按「看不到」处理
+        const finiteAnchor = isFinite(anchor[0]) && isFinite(anchor[1]);
+        const outOfView =
+          !finiteAnchor ||
+          anchor[0] < plot.x - box.width || anchor[0] > plot.x + plot.width + box.width ||
+          anchor[1] < plot.y - box.height || anchor[1] > plot.y + plot.height + box.height;
+        // 注意：引擎图元的 `origin` 只影响**变换枢轴**，不影响绘制起点 ——
+        // `left/top` 永远等于绘制盒的左上角（引擎内部用 localOrigin 在矩阵里补掉了）。
+        // 所以这里直接写左上角，不要自己再按 origin 做中心换算（实测那样会把整块带状图元推出绘图区）。
+        const left = Math.round(box.left);
+        const top = Math.round(box.top);
+        const width = Math.max(1, Math.round(box.width));
+        const height = Math.max(1, Math.round(box.height));
+        if (state.left !== left || state.top !== top) {
+          // 位置用引擎的 setPosition：它会把**旧位置**也标脏
+          mark.component.setPosition(left, top);
+          moved = true;
+        }
+        if (state.width !== width || state.height !== height) {
+          mark.component.setState({ width, height });
+          moved = true;
+        }
+        mark.component.setState({ display: hideOut ? !outOfView : true });
+      }
+    } finally {
+      this.syncingMarks = false;
+    }
+    if (this.markLayer) {
+      this.markLayer.setState({ width: this.layout.canvas.width, height: this.layout.canvas.height });
+    }
+    // 已知问题（见 scripts/audit-interactions.mjs 的 KNOWN_ISSUES）：绘图区几何变化后，
+    // 标记层的旧位置可能残留 ~9px 的暗红线段。图元位置用 setPosition 已经能覆盖绝大多数情况，
+    // 但「布局变化 + 局部重绘」这条组合还需要一条正规的整帧重绘路径。
+    void moved;
   }
 
   /** 恢复完整数据域。 */
@@ -925,6 +1209,8 @@ export class ICEChart {
     // 域过渡期间不要重跑「数据 → 系列」那条链路：数据没变，
     // 重跑会清掉系列的动画起点（fromEffective），值插值就断了。
     this.syncComponents(domainOverride ? false : animate);
+    // 数据坐标图元：布局 / 比例尺 / 数据都可能刚变过，重新摆一遍（缩放平移后不脱锚）
+    this.syncMarks();
     this.ice.dirty = true;
     // 缩放 / 平移 / 数据更新后，悬停视觉（准星、高亮环、提示框）必须跟着数据重新定位
     if (this.controller) this.controller.refreshHover();

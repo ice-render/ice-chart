@@ -30,6 +30,10 @@ export interface InteractionHost extends HitHost {
   formatAxisValue(axis: 'x' | 'y', value: any): string;
   /** 未经缩放的完整数据域（缩放约束用）。 */
   fullDomain(axis: 'x' | 'y'): any[];
+  /** 这个组件是不是图表管理的「数据坐标图元」（注释 / 阈值线 / 预测带）。 */
+  isMarkComponent?(component: any): boolean;
+  /** 拖拽收尾：抛 mark:dragend。 */
+  finishMarkDrag?(): void;
 }
 
 type DragState =
@@ -794,6 +798,12 @@ export class InteractionController {
       };
       return true;
     }
+    // 数据坐标图元（注释卡片 / 阈值线 / 预测带）：按在它上面时交给组件自己处理拖拽，
+    // 图表层不要抢着开始框选 / 平移 —— 否则「拖注释」会变成「拖画布」。
+    if (target.component && typeof this.host.isMarkComponent === 'function' && this.host.isMarkComponent(target.component)) {
+      this.setHover(null);
+      return false;
+    }
     if (!this.resolver.isInsidePlot(target.chart[0], target.chart[1])) return false;
 
     const interaction = this.host.norm.option.interaction || {};
@@ -825,6 +835,8 @@ export class InteractionController {
   }
 
   public handlePointerUp(screenX: number, screenY: number, _evt?: any): void {
+    // 图元拖拽由引擎的组件拖动处理，图表层没有自己的 drag 状态 —— 这里统一收尾
+    if (typeof this.host.finishMarkDrag === 'function') this.host.finishMarkDrag();
     const drag = this.drag;
     if (!drag) return;
     this.drag = null;

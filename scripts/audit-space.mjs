@@ -39,6 +39,7 @@ const pages = [
   'graph',
   'mini-matlab',
   'dsl-vs-option',
+  'editable-chart',
   'animation',
   'finance',
   'sankey',
