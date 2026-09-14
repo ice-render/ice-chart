@@ -232,7 +232,8 @@ function buildAxisLayout(
   // （30 个点的折线就是 30 个刻度），全画出来会挤成一团。这里按「标签宽度 + 间隔」
   // 算一个步长，只保留整步长上的标签；刻度线照画。
   if (axis === 'x' && ticks.length > 2 && maxLabelWidth > 0) {
-    const range = typeof scale.range === 'function' ? scale.range() : null;
+    // 注意：Chart 的 Scale 把区间存成 `range` **属性**（不是 d3 那种方法），两种都兼容
+    const range = typeof scale.range === 'function' ? scale.range() : scale.range;
     const axisLength = range && range.length >= 2 ? Math.abs(range[1] - range[0]) : 0;
     if (axisLength > 0) {
       const spacing = axisLength / (ticks.length - 1 || 1);
