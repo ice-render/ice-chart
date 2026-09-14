@@ -67,12 +67,15 @@ Vite / webpack / Rollup 直接 import，Node 侧 `require('@damoqiongqiu/ice-cha
 
 ## 设计原则
 
-**0. 视觉基调是 Bootstrap**
+**0. 视觉基调是 Bootstrap，数据系列配色与引擎共用一份**
 
-默认主题直接取 Bootstrap 5 的调色板与设计变量（primary / success / danger / warning / info、
+默认主题取 Bootstrap 5 的调色板与设计变量（primary / success / danger / warning / info、
 gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 Bootstrap 页面里
-与按钮、卡片、表格是同一套视觉语言。需要换品牌色时用 `theme: { colorPalette: [...] }` 覆盖即可，
-或直接改 `BOOTSTRAP_TOKENS` 派生自己的主题。
+与按钮、卡片、表格是同一套视觉语言。
+
+**系列配色不在这里定义**：`CHART_PALETTE` 直接 import 引擎的 `FAMILY_PALETTE`（暗色为
+`FAMILY_PALETTE_DARK`）—— 家族里数据系列配色只有这一份，同一份数据用引擎画、用图表画是同一组颜色。
+需要换品牌色时用 `theme: { colorPalette: [...] }` 覆盖即可，或直接改 `BOOTSTRAP_TOKENS` 派生自己的主题。
 
 ![Bootstrap 风格默认主题](./docs/screenshots/charts-light.png)
 

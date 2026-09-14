@@ -1,4 +1,5 @@
 import { createChart, chartThemeToEnginePatch, BOOTSTRAP_CHART_THEME, BOOTSTRAP_DARK_CHART_THEME } from '../../src/index';
+import { DARK_THEME } from 'ice-render';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
 
@@ -80,7 +81,8 @@ describe('图表主题 → 引擎主题', () => {
     await c.render();
     expect(c.norm.theme.textColor).toBe(BOOTSTRAP_DARK_CHART_THEME.textColor);
     // auto 是"跟随引擎"，所以**不该**把图表主题反推回引擎（否则下一轮 auto 读到的是自己推的值）
-    expect(c.ice.getTheme().semantic.background).toBe('#111827');
+    // 拿引擎的暗色主题做基准比对，避免把引擎的色值变化复制到本库的测试里
+    expect(c.ice.getTheme().semantic.background).toBe(DARK_THEME.semantic.background);
   });
 
   it('自定义主题片段：推给引擎的是解析后的完整主题', async () => {

@@ -1,3 +1,4 @@
+import { FAMILY_PALETTE, FAMILY_PALETTE_DARK } from 'ice-render';
 import type { ChartTheme } from '../types';
 
 /**
@@ -7,29 +8,24 @@ import type { ChartTheme } from '../types';
  * gray-100~900、`$border-radius: .375rem`、系统字体栈），这样图表放在 Bootstrap 页面里
  * 与按钮、卡片、表格是同一套视觉语言，不需要额外对齐色板。
  *
- * 说明：`colorPalette` 的前几位刻意排成「primary → success → danger → info → indigo」，
- * 把低对比度的 `warning` 黄往后放 —— 折线/散点用黄色在浅色底上辨识度差，
- * 但作为第 6 个系列色出现时是安全的。
+ * 说明：`colorPalette` **不再由本文件定义**，而是直接引引擎的家族色板 `FAMILY_PALETTE`
+ * （见 `CHART_PALETTE` 的说明）。本文件只保留图表自己那层"画在哪、字多大"的 token
+ * （轴、网格、图例、提示框、画刷…）以及 Bootstrap 的 UI 调色板 `BOOTSTRAP_TOKENS`。
  */
 
 /** Bootstrap 5 调色板（官方 hex 值）。 */
 /**
- * 图表默认色板（**唯一来源**）。
+ * 图表默认色板（**唯一来源 = 引擎的家族色板**）。
  *
- * 以前它散落在 layout/force、layout/treemap、layout/sankey、WaterfallSeries 各自的
- * `palette || ['#0D6EFD']` 兜底里 —— 同一页面里不同图表可能来自不同来源的色板，
- * 视觉上就是「配色怪」。现在统一成一处，各处以它兜底。
+ * 以前家族里有两份 8 色：引擎一份（Tailwind 500s）、图表一份（本地字面量）。同一份数据
+ * 用引擎直接画、和用图表画，从第 2 个系列起颜色就不一样。现在图表直接 import 引擎的
+ * `FAMILY_PALETTE` —— **家族里数据系列配色只有这一份**（`ice-render` 是它的家）。
+ *
+ * 它同时也是 layout/force、layout/treemap、layout/sankey、WaterfallSeries 的兜底，
+ * 以及亮色主题 `colorPalette` 本身 —— 以前这些地方各写 `palette || ['#0D6EFD']`，
+ * 同一页面里不同图表可能来自不同色板。
  */
-export const CHART_PALETTE: string[] = [
-  '#0D6EFD',
-  '#10B981',
-  '#F59E0B',
-  '#EF4444',
-  '#8B5CF6',
-  '#14B8A6',
-  '#EC4899',
-  '#6366F1',
-];
+export const CHART_PALETTE: string[] = [...FAMILY_PALETTE];
 
 export const BOOTSTRAP_TOKENS = {
   primary: '#0D6EFD',
@@ -66,24 +62,11 @@ export const BOOTSTRAP_TOKENS = {
 
 const B = BOOTSTRAP_TOKENS;
 
-/** 系列默认色序：与 Bootstrap 主题色一致，低对比度的黄色后置。 */
-const BOOTSTRAP_PALETTE = [
-  B.primary,
-  B.success,
-  B.danger,
-  B.info,
-  B.indigo,
-  B.warning,
-  B.orange,
-  B.teal,
-  B.pink,
-  B.secondary,
-];
-
 /** 亮色主题（Bootstrap 默认外观）。 */
 export const BOOTSTRAP_CHART_THEME: ChartTheme = {
   backgroundColor: 'transparent',
-  colorPalette: BOOTSTRAP_PALETTE,
+  // 家族色板（唯一来源见 CHART_PALETTE）—— 不再另排一套 Bootstrap 语义色序
+  colorPalette: CHART_PALETTE,
   textColor: B.dark,
   subTextColor: B.secondary,
   axisLineColor: B.gray[300],
@@ -111,18 +94,8 @@ export const BOOTSTRAP_CHART_THEME: ChartTheme = {
 /** 暗色主题（Bootstrap 5 `data-bs-theme="dark"` 的中性灰基调）。 */
 export const BOOTSTRAP_DARK_CHART_THEME: ChartTheme = {
   backgroundColor: 'transparent',
-  colorPalette: [
-    '#4D94FF',
-    '#479F76',
-    '#EA868F',
-    '#6EDFF6',
-    '#A370F7',
-    '#FFDA6A',
-    '#FD9843',
-    '#79DFC1',
-    '#E685B5',
-    B.gray[500],
-  ],
+  // 家族色板的深色变体（唯一来源 = 引擎的 FAMILY_PALETTE_DARK）
+  colorPalette: [...FAMILY_PALETTE_DARK],
   textColor: B.gray[200],
   subTextColor: B.gray[500],
   axisLineColor: B.gray[700],

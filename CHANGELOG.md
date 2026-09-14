@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.22.0 - 2026-09-14
+
+本轮主题：**数据系列配色收敛到引擎的家族色板**（对齐 `ice-render@2.5` 的品牌基线），
+顺手修掉一个「写在顶层的瀑布图配色不生效」的真 bug。
+
+### 变更（破坏性：默认系列配色）
+
+- **`colorPalette` 不再由本库自行定义**，改为引引擎的家族色板：
+  亮色 = `FAMILY_PALETTE`，暗色 = `FAMILY_PALETTE_DARK`（都从 `ice-render` import）。
+  以前家族里有两份 8 色（引擎一份、本库一份），**同一份数据用引擎画、用图表画，从第 2 个系列起
+  颜色就不一样**；现在只有一份，`ice-render` 是它的家。
+- 因此**默认系列配色的顺序会变**：亮色主题此前走「Bootstrap 语义色序」
+  （primary → success → danger → info → indigo → warning → orange → teal → pink → secondary，共 10 色），
+  现在统一成家族色板（蓝 → 绿 → 琥珀 → 红 → 紫 → 青 → 粉 → 靛，共 8 色）。
+  暗色主题同样收敛，**少掉原先的第 9/10 色**（多余的粉与灰），超出后按色板循环。
+  显式传 `theme: { colorPalette: [...] }` 或给系列 / 数据项指定 `color` 的用法完全不受影响。
+- `CHART_PALETTE`（layout/force、layout/treemap、layout/sankey、WaterfallSeries 的兜底）
+  现在就是家族色板的副本 —— 以前它与主题里的 `colorPalette` 是两份不同的 8 色，
+  同一页面里不同类型图表可能来自不同色板。
+
+### 修复
+
+- **顶层 `option.waterfall` 一直不生效**。types 里承诺「`option.waterfall` 与系列级 `waterfall`
+  两者等价，series 优先」，但绘制侧只读了系列级，写在顶层的 `increaseColor / decreaseColor /
+  totalColor / connector` 全部静默失效。旧测试之所以"通过"，是因为它断言的
+  `#198754 / #dc3545 / #0d6efd` 恰好与色板兜底值相同 —— 换了色板才暴露出来。
+  现在归一化阶段就把两者解析成一份（系列优先），并补了「顶层生效 + 系列覆盖顶层」的单测。
+
+### 验证
+
+- `verify:full` 全绿（单测 + 全部 examples 的浏览器冒烟）。
+- 依赖对齐：`devDependency ice-render ^2.5.1`（家族色板从这一版起可从包根 import）。
+
 ## 0.21.0 - 2026-09-14
 
 本轮主题：**把图表主题和引擎主题接起来**（引擎 2.4 起），并修正 `theme: 'auto'` 的实现。
