@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.21.0 - 2026-09-14
+
+本轮主题：**把图表主题和引擎主题接起来**（引擎 2.4 起），并修正 `theme: 'auto'` 的实现。
+
+### 新增
+
+- **图表主题 → 引擎主题的桥**（`theme/chartEngineBridge.ts`）。本库有自己的 Bootstrap 主题，
+  它管的是图表画出来的东西；但一个图表实例里还可能有**引擎自己画的东西** —— 引擎的默认样式、
+  交互外壳（选中框 / 手柄 / 插槽 / 引导线 / 连线标签）、以及应用往 `chart.ice` 里塞的自定义图元。
+  两套主题不打通就会出现「图表是暗的、引擎那层还是亮的」。
+  - `chartThemeToEnginePatch(theme)`：**只用图表主题已有的 token** 按同名语义映射
+    （background / text / muted / hint / border / palette / chrome.selection / chrome.linkLabel /
+    base.fontFamily / base.fontSize），不新造颜色；
+  - `applyChartThemeToEngine(ice, theme)`：一次性应用（语义色 + 外壳）。
+  - `ICEChart` 建图与 `setOption` 时自动应用；**主题没变不重复推**（推一次会让引擎整棵树标脏），
+    `theme: 'auto'` 时**不推**（auto 是"跟随引擎"，推回去会变成自己跟自己的回喂）。
+
+### 修复
+
+- **`theme: 'auto'` 以前恒等于 `'light'`**（`resolveChartTheme` 里只判断了 `'dark'`），与文档承诺的
+  「跟随 ice-render 实例主题」不一致。现在按引擎实例主题 `semantic.background` 的相对亮度判定明暗，
+  真正跟随（归一化层仍然保持纯函数：`preferDark` 由 `ICEChart` 算好传进 `NormalizeContext`）。
+- `rebuild()` 里那次归一化也要带 `preferDark` —— `this.norm` 来自那一遍（第一遍只是编译管线的前置）。
+
+### 说明：哪些颜色**不进**主题
+
+桑基节点边框、树图顶层标签、折线 / 散点标记的外圈这类**压在饱和色块上的白字与白描边**，
+是对比色而不是主题色 —— 换主题也不该变，所以它们仍然是写死的白色（这是有意的，不是漏网）。
+
+### 验证
+
+- 单测 +5（映射原则 / 建图即推 / setOption 跟随 / auto 真正跟随引擎 / 自定义片段）。
+- `verify:full` 全绿：**372** 个单测（40 套）+ 36 个浏览器用例。
+
 ## 0.20.1 - 2026-09-14
 
 本轮：**对齐并验证引擎 ice-render 2.4.0**（无 API / 行为变更，补丁级）。

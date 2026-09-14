@@ -10,6 +10,7 @@ import type {
 } from './types';
 import type { ChartLayout, InternalSeries, NormalizedOption, Rect } from './internal';
 import { normalizeOption, toSerializableOption } from './option/normalize';
+import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
 import { createScale, formatTick, type Scale } from './scale';
 import { GridLines } from './components/GridLines';
@@ -186,6 +187,8 @@ export class ICEChart {
   private destroyed = false;
   /** 抑制对外事件的重入深度（跨图联动时避免 A→B→A 的回环）。 */
   private silenceDepth = 0;
+  /** 上一次推给引擎的图表主题指纹（避免重复推：推一次会让引擎整棵树标脏）。 */
+  private __appliedEngineThemeKey: string | null = null;
   private a11yMirror = new A11yMirror(this);
   /**
    * 更新动画期间的坐标轴数据域过渡。
@@ -1101,7 +1104,24 @@ export class ICEChart {
     this.option = option;
     // 记录更新前的 y 数据域：更新动画需要把「域的变化」也一起插值，否则会瞬跳
     const previousYDomain = this.norm ? this.norm.yAxis.domain.slice() : null;
-    const normalized = normalizeOption(option, { hiddenIds: this.hiddenIds, hiddenSlices: this.hiddenSlices });
+    const normalized = normalizeOption(option, {
+      hiddenIds: this.hiddenIds,
+      hiddenSlices: this.hiddenSlices,
+      // theme:'auto' = 跟随引擎实例主题：明暗由引擎主题的背景色亮度判定（归一化层保持纯函数）
+      preferDark: isEngineThemeDark(this.ice),
+    });
+    // 图表主题 → 引擎主题：图表实例里那些**引擎自己画的东西**（默认样式 / 交互外壳 /
+    // 应用后加的自定义图元）跟着图表的主题走，避免"图表是暗的、外壳还是亮的"。
+    // 两条约束：
+    //   ① `theme:'auto'` 时**不推** —— auto 是"跟随引擎"，再推回去就成了自己跟自己的回喂；
+    //   ② 主题没变不推 —— 推一次会让引擎整棵树标脏（下标 / 重建路径会频繁走到这里）。
+    if (option.theme !== 'auto') {
+      const themeKey = JSON.stringify(normalized.theme);
+      if (themeKey !== this.__appliedEngineThemeKey) {
+        applyChartThemeToEngine(this.ice, normalized.theme);
+        this.__appliedEngineThemeKey = themeKey;
+      }
+    }
     this.fullXDomain = normalized.xAxis.domain.slice();
     this.fullYDomain = normalized.yAxis.domain.slice();
     this.fullYDomains = normalized.yAxes.map((axis) => axis.domain.slice());
@@ -1211,6 +1231,8 @@ export class ICEChart {
     const norm = normalizeOption(this.option, {
       hiddenIds: this.hiddenIds,
       hiddenSlices: this.hiddenSlices,
+      // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
+      preferDark: isEngineThemeDark(this.ice),
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
       yDomain:
         this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
@@ -1802,6 +1824,38 @@ export function hiddenSliceIndexes(norm: NormalizedOption, seriesId: string): nu
     if (norm.hiddenSlices[`${seriesId}#${point.index}`]) out.push(point.index);
   }
   return out;
+}
+
+/**
+ * 引擎实例主题是不是暗色 —— 用 `semantic.background` 的相对亮度判定（WCAG 公式的简化版）。
+ *
+ * 只用于 `option.theme: 'auto'`：图表要跟着**引擎那一层**的明暗走，而不是跟着页面 / 系统。
+ */
+function isEngineThemeDark(ice: any): boolean {
+  try {
+    const background = ice && ice.getTheme && ice.getTheme().semantic.background;
+    const rgb = parseHexColor(background);
+    if (!rgb) return false;
+    const [r, g, b] = rgb.map((value) => {
+      const channel = value / 255;
+      return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+    });
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luminance < 0.35;
+  } catch (err) {
+    return false;
+  }
+}
+
+/** `#rgb` / `#rrggbb` → `[r,g,b]`；其它写法（含 transparent / rgba）返回 null。 */
+function parseHexColor(color: any): [number, number, number] | null {
+  if (typeof color !== 'string') return null;
+  const value = color.trim();
+  if (value.charAt(0) !== '#') return null;
+  let hex = value.slice(1);
+  if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  if (hex.length !== 6) return null;
+  return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
 }
 
 function toAlpha(color: string, alpha: number): string {

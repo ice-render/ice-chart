@@ -95,6 +95,11 @@ export function normalizeAnnotation(input: any): AnnotationOption | null {
 
 export interface NormalizeContext {
   hiddenIds?: Record<string, boolean>;
+  /**
+   * 引擎实例主题是不是暗色（`theme: 'auto'` 时用来决定跟亮色还是暗色主题）。
+   * 由 `ICEChart` 按 `ice.getTheme()` 算出后传进来 —— 归一化层本身不碰引擎实例，保持纯函数。
+   */
+  preferDark?: boolean;
   /** 被隐藏的扇区（饼图），key 为 `seriesId#dataIndex`。 */
   hiddenSlices?: Record<string, boolean>;
   /** 当前 x 数据域（数据缩放后）。不传表示自动。 */
@@ -115,7 +120,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     throw new Error('[ice-chart] option.series 必须是数组。');
   }
 
-  const theme = resolveChartTheme(option.theme);
+  const theme = resolveChartTheme(option.theme, { preferDark: !!context.preferDark });
   const merged: any = {
     legend: {
       show: option.series.length > 1,
