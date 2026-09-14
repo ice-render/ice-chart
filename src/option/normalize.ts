@@ -179,6 +179,14 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const radar = option.radar || null;
   const graphOption = option.graph || null;
   const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null, graphOption, context);
+  // 瀑布图配置「顶层与系列级等价，series 优先」（types 的承诺）。以前只读了系列级，
+  // 写在顶层的 `option.waterfall.*` 静默失效 —— 测试之前靠色板兜底值恰好相同而没暴露。
+  for (const s of series) {
+    if (s.type !== 'waterfall') continue;
+    const own = (s.option as any).waterfall;
+    const resolved = own !== undefined ? own : option.waterfall;
+    if (resolved !== undefined) s.waterfallOption = resolved;
+  }
   const hiddenIds: Record<string, boolean> = { ...(context.hiddenIds || {}) };
   for (const s of series) {
     if (merged.legend?.selected && merged.legend.selected[s.name] === false) {

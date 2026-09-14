@@ -12,6 +12,7 @@ import type {
   SeriesType,
   TreemapOption,
   ChartTheme,
+  WaterfallOption,
 } from './types';
 import type { Scale } from './scale';
 import type { ChartLabels } from './types';
@@ -63,6 +64,13 @@ export interface InternalSeries {
   hidden: boolean;
   /** 绑定的 y 轴下标。 */
   axisIndex: number;
+  /**
+   * 归一化后的瀑布图配置（系列级优先，其次顶层 `option.waterfall`）。
+   *
+   * 顶层与系列级「两者等价」是 types 里的承诺；把解析结果落在内部系列上，
+   * 绘制侧就不用再去够顶层 option（那需要给每个系列组件塞一份 chart 反引用）。
+   */
+  waterfallOption?: WaterfallOption;
   /**
    * 数据域采样值（函数绘图用）。
    *

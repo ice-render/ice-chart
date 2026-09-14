@@ -1,4 +1,4 @@
-import { createChart } from '../../src/index';
+import { createChart, BOOTSTRAP_CHART_THEME } from '../../src/index';
 import { normalizeOption, computeBoxplotSummary } from '../../src/option/normalize';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
@@ -179,5 +179,28 @@ describe('箱线图 / 瀑布图（引擎集成）', () => {
     expect(content.title).toBe('成本');
     expect(content.rows[0]).toMatchObject({ name: '减少', value: '-420' });
     expect(content.rows[1]).toMatchObject({ name: '累计', value: '780' });
+  });
+
+  it('瀑布配色写在顶层 option.waterfall 或系列上都生效，系列优先', async () => {
+    // 顶层（types 里承诺「两者等价」；以前只读系列级，顶层配置静默失效）
+    const topLevel = await mount({
+      ...WATERFALL,
+      waterfall: { increaseColor: '#111111', decreaseColor: '#222222', totalColor: '#333333' },
+    });
+    const topBars: any = topLevel.seriesComponents[0];
+    expect(topBars.barColorAt(0).toLowerCase()).toBe('#111111');
+    expect(topBars.barColorAt(1).toLowerCase()).toBe('#222222');
+    expect(topBars.barColorAt(4).toLowerCase()).toBe('#333333');
+
+    // 系列级覆盖顶层
+    const perSeries = await mount({
+      ...WATERFALL,
+      waterfall: { increaseColor: '#111111', decreaseColor: '#222222', totalColor: '#333333' },
+      series: [{ ...WATERFALL.series[0], waterfall: { increaseColor: '#aaaaaa' } }],
+    });
+    const seriesBars: any = perSeries.seriesComponents[0];
+    expect(seriesBars.barColorAt(0).toLowerCase()).toBe('#aaaaaa');
+    // 系列级只写了 increaseColor，其余仍走色板兜底（不是顶层的那两个）
+    expect(seriesBars.barColorAt(1).toLowerCase()).toBe(BOOTSTRAP_CHART_THEME.colorPalette[2].toLowerCase());
   });
 });

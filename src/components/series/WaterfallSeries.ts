@@ -24,7 +24,7 @@ export class WaterfallSeries extends BarSeries {
 
   /** 每根柱子的颜色：增（success）/ 减（danger）/ 合计（primary），可配置。 */
   protected barColorAt(index: number): string {
-    const option: any = this.series.option.waterfall || {};
+    const option: any = waterfallOptionOf(this.series);
     const theme = this.chartTheme;
     const palette = (theme && theme.colorPalette) || CHART_PALETTE;
     if (this.isTotalItem(index)) return option.totalColor || palette[0];
@@ -33,7 +33,7 @@ export class WaterfallSeries extends BarSeries {
 
   protected doRender(): void {
     super.doRender();
-    const option: any = this.series.option.waterfall || {};
+    const option: any = waterfallOptionOf(this.series);
     if (option.connector === false) return;
     const coord = this.coord;
     if (!coord) return;
@@ -70,4 +70,13 @@ export class WaterfallSeries extends BarSeries {
     if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
     ctx.restore();
   }
+}
+
+/**
+ * 取本系列的瀑布配置：归一化时已经把「系列级优先，其次顶层 `option.waterfall`」解析好，
+ * 这里再兜一层系列自身的字段（直接 new 出系列组件、没走归一化的场景）。
+ */
+function waterfallOptionOf(series: any): any {
+  if (series && series.waterfallOption) return series.waterfallOption;
+  return (series && series.option && series.option.waterfall) || {};
 }
