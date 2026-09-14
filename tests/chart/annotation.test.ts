@@ -254,6 +254,50 @@ describe('标注（annotation）', () => {
     expect(codes()).toEqual(['annotation:unsupported-scene']);
   });
 
+  it('横向排布（类目在 y 轴）：数值轴的竖线 + 类目轴的横线都能定位', async () => {
+    // 排行榜写法：x 轴是数值、y 轴是类目 —— 目标线这时是**竖线**（axis: 'x'）
+    const c = mount({
+      xAxis: { type: 'value', name: '万元' },
+      yAxis: { type: 'category', data: ['华东', '华北', '华南', '西南', '西北'] },
+      series: [{ id: 'sales', type: 'bar', data: [320, 302, 301, 334, 390] }],
+      annotation: {
+        lines: [
+          { axis: 'x', value: 350, text: '区域目标 350' },
+          { axis: 'y', value: '华南', text: '华南' },
+        ],
+      },
+    } as ChartOption);
+    await c.render();
+
+    expect(c.annotation.resolved.lines).toHaveLength(2);
+    expect(line(0).pixel).toBeCloseTo(pixelOf('x', 350), 1);
+    expect(line(1).pixel).toBeCloseTo(pixelOf('y', '华南'), 1);
+    expect(c.annotationDiagnostics()).toHaveLength(0);
+  });
+
+  it('多 y 轴：axisIndex 指定贴哪根轴定位', async () => {
+    const c = mount({
+      yAxis: [{ name: '成交量' }, { name: '涨跌幅(%)' }],
+      series: [
+        { id: 'volume', type: 'bar', data: [1200, 1350, 980, 1500] },
+        { id: 'change', type: 'line', yAxisIndex: 1, data: [1.2, -0.8, 2.4, -1.6] },
+      ],
+      annotation: {
+        lines: [
+          { axis: 'y', value: 1400, text: '成交量警戒' },
+          { axis: 'y', value: 2, text: '涨幅警戒', axisIndex: 1 },
+        ],
+      },
+    } as ChartOption);
+    await c.render();
+
+    expect(c.annotation.resolved.lines).toHaveLength(2);
+    // 副轴（右轴）的 2% 与主轴刻度的像素完全不是一回事 —— 这条能挡住「多轴时全按主轴算」
+    expect(line(1).pixel).toBeCloseTo(pixelOf('y', 2, 1), 1);
+    expect(Math.abs(line(1).pixel - pixelOf('y', 2, 0))).toBeGreaterThan(10);
+    expect(c.annotationDiagnostics()).toHaveLength(0);
+  });
+
   it('序列化往返：标注进快照、还原后像素一致、再导出一致', async () => {
     const c = mount({
       ...OPTION,
