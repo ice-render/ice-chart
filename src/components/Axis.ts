@@ -65,9 +65,7 @@ export class Axis extends ChartComponent {
   }
 
   private axisLayoutOf(layout: ChartLayout): AxisLayout {
-    return this.orientation === 'x'
-      ? layout.xAxisLayout
-      : layout.yAxes[this.axisIndex] || layout.yAxisLayout;
+    return this.orientation === 'x' ? layout.xAxisLayout : layout.yAxes[this.axisIndex] || layout.yAxisLayout;
   }
 
   /** 当前刻度 + 目标位置 + 标签（抽稀规则与绘制时完全一致，两边共用这一份）。 */
@@ -92,7 +90,10 @@ export class Axis extends ChartComponent {
         if (w > maxLabel) maxLabel = w;
       }
       const slot = plot.width / ticks.length;
-      if (maxLabel + 8 > slot) labelStride = Math.ceil((maxLabel + 8) / Math.max(1, slot));
+      // 舒适间隔 64px（2026-09-14 调整）：原来只要「标签宽度 + 8」不超槽宽就不稀释，
+      // 于是 30 个刻度的数字标签虽然不重叠、也会挤成一片编号。
+      const need = Math.max(maxLabel + 8, 64);
+      if (need > slot) labelStride = Math.ceil(need / Math.max(1, slot));
     }
 
     const marks: AxisTickMark[] = [];

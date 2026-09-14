@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -38,8 +38,11 @@
         --col: 120px;
         --gap: 12px;
       }
-      * { box-sizing: border-box; }
-      html, body {
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
         margin: 0;
         padding: 0;
         min-height: 100%;
@@ -111,8 +114,13 @@
         height: 1px;
         background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.65));
       }
-      .topbar .wing.left { left: 210px; }
-      .topbar .wing.right { right: 210px; transform: scaleX(-1); }
+      .topbar .wing.left {
+        left: 210px;
+      }
+      .topbar .wing.right {
+        right: 210px;
+        transform: scaleX(-1);
+      }
       .topbar .wing::after {
         content: '';
         position: absolute;
@@ -131,8 +139,12 @@
         gap: 10px;
         height: 100%;
       }
-      .topbar .side.left { left: 0; }
-      .topbar .side.right { right: 0; }
+      .topbar .side.left {
+        left: 0;
+      }
+      .topbar .side.right {
+        right: 0;
+      }
 
       .pill {
         display: inline-flex;
@@ -148,16 +160,32 @@
         color: var(--muted);
         white-space: nowrap;
       }
-      .pill b { color: var(--text); font-weight: 600; }
-      .pill.ok { color: var(--green); border-color: rgba(34, 197, 94, 0.45); }
+      .pill b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .pill.ok {
+        color: var(--green);
+        border-color: rgba(34, 197, 94, 0.45);
+      }
       .pill.danger {
         color: var(--red);
         border-color: rgba(255, 91, 106, 0.55);
         background: rgba(255, 91, 106, 0.1);
         animation: blink 1.1s steps(2, end) infinite;
       }
-      @keyframes blink { 50% { opacity: 0.45; } }
-      .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+      @keyframes blink {
+        50% {
+          opacity: 0.45;
+        }
+      }
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 8px currentColor;
+      }
 
       button.ghost {
         font: inherit;
@@ -170,13 +198,16 @@
         color: var(--text-dim);
         cursor: pointer;
       }
-      button.ghost:hover { border-color: var(--cyan); color: #fff; box-shadow: 0 0 12px rgba(0, 229, 255, 0.25); }
+      button.ghost:hover {
+        border-color: var(--cyan);
+        color: #fff;
+        box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+      }
 
       /* ---------------- 面板：切角亮边 + 四角 L 形描边 ---------------- */
       .panel {
         position: relative;
-        background:
-          linear-gradient(180deg, var(--panel-tint) 0%, var(--panel-tint-2) 100%);
+        background: linear-gradient(180deg, var(--panel-tint) 0%, var(--panel-tint-2) 100%);
         border: 1px solid var(--line);
         padding: 8px;
       }
@@ -192,18 +223,44 @@
           linear-gradient(var(--corner), var(--corner)), linear-gradient(var(--corner), var(--corner)),
           linear-gradient(var(--corner), var(--corner)), linear-gradient(var(--corner), var(--corner));
         background-repeat: no-repeat;
-        background-size: 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px;
+        background-size:
+          14px 2px,
+          2px 14px,
+          14px 2px,
+          2px 14px,
+          14px 2px,
+          2px 14px,
+          14px 2px,
+          2px 14px;
         background-position:
-          left top, left top, right top, right top,
-          left bottom, left bottom, right bottom, right bottom;
+          left top,
+          left top,
+          right top,
+          right top,
+          left bottom,
+          left bottom,
+          right bottom,
+          right bottom;
         opacity: 0.85;
       }
-      .panel.span3 { grid-column: span 3; }
-      .panel.span6 { grid-column: span 6; }
-      .panel.span12 { grid-column: span 12; }
-      .panel.alert { border-color: rgba(255, 91, 106, 0.6); }
-      .panel.alert::before { --corner: var(--red); }
-      .panel.alert { box-shadow: inset 0 0 26px rgba(255, 91, 106, 0.12); }
+      .panel.span3 {
+        grid-column: span 3;
+      }
+      .panel.span6 {
+        grid-column: span 6;
+      }
+      .panel.span12 {
+        grid-column: span 12;
+      }
+      .panel.alert {
+        border-color: rgba(255, 91, 106, 0.6);
+      }
+      .panel.alert::before {
+        --corner: var(--red);
+      }
+      .panel.alert {
+        box-shadow: inset 0 0 26px rgba(255, 91, 106, 0.12);
+      }
 
       .panel-title {
         display: flex;
@@ -230,7 +287,10 @@
         color: var(--muted);
         letter-spacing: 0;
       }
-      canvas { display: block; touch-action: none; }
+      canvas {
+        display: block;
+        touch-action: none;
+      }
 
       /* ---------------- KPI 条：一条整宽面板 + 竖直分隔线 ---------------- */
       .kpis {
@@ -256,7 +316,11 @@
         width: 1px;
         background: linear-gradient(180deg, transparent, rgba(0, 229, 255, 0.35), transparent);
       }
-      .kpi .label { font-size: 13px; color: var(--text-dim); letter-spacing: 1px; }
+      .kpi .label {
+        font-size: 13px;
+        color: var(--text-dim);
+        letter-spacing: 1px;
+      }
       .kpi .value {
         font-family: var(--mono);
         font-size: 30px;
@@ -266,10 +330,24 @@
         color: var(--cyan);
         text-shadow: 0 0 18px rgba(0, 229, 255, 0.35);
       }
-      .kpi .value small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 6px; }
-      .kpi .trend { font-family: var(--mono); font-size: 12px; color: var(--green); }
-      .kpi .trend.down { color: var(--red); }
-      .kpi.alert .value { color: var(--red); text-shadow: 0 0 18px rgba(255, 91, 106, 0.4); }
+      .kpi .value small {
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--muted);
+        margin-left: 6px;
+      }
+      .kpi .trend {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--green);
+      }
+      .kpi .trend.down {
+        color: var(--red);
+      }
+      .kpi.alert .value {
+        color: var(--red);
+        text-shadow: 0 0 18px rgba(255, 91, 106, 0.4);
+      }
 
       /* ---------------- 底部：序列化 JSON 面板（深色） ---------------- */
       .footer {
@@ -280,7 +358,10 @@
         color: var(--muted);
         font-size: 12px;
       }
-      .footer code { color: var(--cyan); font-family: var(--mono); }
+      .footer code {
+        color: var(--cyan);
+        font-family: var(--mono);
+      }
 
       #snapshot-panel {
         grid-column: span 12;
@@ -288,12 +369,28 @@
         background: rgba(6, 20, 36, 0.85);
         padding: 10px 12px;
       }
-      #snapshot-panel .snapshot-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-      #snapshot-panel .snapshot-title { font-size: 13px; }
-      #snapshot-panel .spacer { flex: 1 1 auto; }
+      #snapshot-panel .snapshot-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      #snapshot-panel .snapshot-title {
+        font-size: 13px;
+      }
+      #snapshot-panel .spacer {
+        flex: 1 1 auto;
+      }
       #snapshot-panel .snapshot-meta,
-      #snapshot-panel .snapshot-note { color: var(--muted); font-size: 11px; }
-      #snapshot-panel .snapshot-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+      #snapshot-panel .snapshot-note {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      #snapshot-panel .snapshot-tabs {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
       #snapshot-panel button {
         font: inherit;
         font-size: 11px;
@@ -304,8 +401,14 @@
         color: var(--muted);
         cursor: pointer;
       }
-      #snapshot-panel button:hover { border-color: var(--cyan); color: var(--text); }
-      #snapshot-panel .snapshot-tabs button.active { border-color: var(--cyan); color: var(--cyan); }
+      #snapshot-panel button:hover {
+        border-color: var(--cyan);
+        color: var(--text);
+      }
+      #snapshot-panel .snapshot-tabs button.active {
+        border-color: var(--cyan);
+        color: var(--cyan);
+      }
       #snapshot-panel .snapshot-json {
         margin: 0;
         padding: 8px 10px;
@@ -319,11 +422,21 @@
         line-height: 1.6;
         white-space: pre;
       }
-      #snapshot-panel .tok-key { color: #6edff6; }
-      #snapshot-panel .tok-str { color: #79dfc1; }
-      #snapshot-panel .tok-num { color: #fac858; }
-      #snapshot-panel .tok-bool { color: #e685b5; }
-      #snapshot-panel .tok-null { color: var(--muted); }
+      #snapshot-panel .tok-key {
+        color: #6edff6;
+      }
+      #snapshot-panel .tok-str {
+        color: #79dfc1;
+      }
+      #snapshot-panel .tok-num {
+        color: #fac858;
+      }
+      #snapshot-panel .tok-bool {
+        color: #e685b5;
+      }
+      #snapshot-panel .tok-null {
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>
@@ -447,7 +560,18 @@
       // 大屏统一主题：包一层 dark 主题，换掉网格线/坐标轴/提示框的取色
       const TINT = 'rgba(0, 229, 255, 0.1)';
       const theme = {
-        colorPalette: ['#00e5ff', '#2e9bff', '#22c55e', '#fac858', '#fb923c', '#a78bfa', '#ff5b6a', '#79dfc1', '#6edff6', '#e685b5'],
+        colorPalette: [
+          '#00e5ff',
+          '#2e9bff',
+          '#22c55e',
+          '#fac858',
+          '#fb923c',
+          '#a78bfa',
+          '#ff5b6a',
+          '#79dfc1',
+          '#6edff6',
+          '#e685b5',
+        ],
         textColor: '#e6f1ff',
         // 轴文字刻意用近灰：大屏底是深蓝，稍微偏暖/冷的灰都够用；
         // 太蓝会被「越界墨迹」审计判成饱和色（阈值是通道极差 45）
@@ -459,7 +583,11 @@
         legend: { textColor: '#9fb6d4', inactiveColor: '#3b4c68' },
         tooltip: { background: 'rgba(4, 16, 31, 0.96)', borderColor: 'rgba(0, 229, 255, 0.35)', textColor: '#e6f1ff' },
         // 准星标签用深底 + 青字：亮青底既刺眼、也会被判成「压轴墨迹」
-        crosshair: { lineColor: 'rgba(0, 229, 255, 0.5)', labelBackground: 'rgba(3, 12, 24, 0.94)', labelColor: '#7ee7ff' },
+        crosshair: {
+          lineColor: 'rgba(0, 229, 255, 0.5)',
+          labelBackground: 'rgba(3, 12, 24, 0.94)',
+          labelColor: '#7ee7ff',
+        },
         brush: { fill: 'rgba(0, 229, 255, 0.12)', stroke: 'rgba(0, 229, 255, 0.8)' },
         selection: { stroke: '#00e5ff', dimOpacity: 0.35 },
       };
@@ -492,7 +620,16 @@
         ...BASE,
         yAxis: { name: 'req/s', min: 0, max: 2600 },
         series: [
-          { id: 'qps', type: 'area', name: 'QPS', data: [], color: '#00e5ff', areaOpacity: 0.24, lineWidth: 2, smooth: 0.25 },
+          {
+            id: 'qps',
+            type: 'area',
+            name: 'QPS',
+            data: [],
+            color: '#00e5ff',
+            areaOpacity: 0.24,
+            lineWidth: 2,
+            smooth: 0.25,
+          },
           { id: 'p95', type: 'line', name: 'P95(ms)', data: [], color: '#2e9bff', lineWidth: 1.5, smooth: 0.25 },
         ],
       });
@@ -500,7 +637,18 @@
       const latency = ICEChart.createChart('latency', {
         ...BASE,
         yAxis: { name: 'ms', min: 0, max: 600 },
-        series: [{ id: 'lat', type: 'area', name: 'P95', data: [], color: '#22c55e', areaOpacity: 0.26, lineWidth: 2, smooth: 0.25 }],
+        series: [
+          {
+            id: 'lat',
+            type: 'area',
+            name: 'P95',
+            data: [],
+            color: '#22c55e',
+            areaOpacity: 0.26,
+            lineWidth: 2,
+            smooth: 0.25,
+          },
+        ],
       });
       // 悬停 / 缩放 / 框选三路联动（按 x 数据值对齐，不是按像素）
       const link = ICEChart.linkCharts([flow, latency], { axis: 'x', hover: true, zoom: true, brush: true });
@@ -509,7 +657,17 @@
       const liquid = ICEChart.createChart('liquid', {
         ...BASE,
         tooltip: { trigger: 'item' },
-        liquid: { min: 0, max: 100, color: '#00e5ff', borderWidth: 4, waveHeight: 0.05, waveLength: 1.4, waveSpeed: 1.7, unit: '%', detail: { fontSize: 34 } },
+        liquid: {
+          min: 0,
+          max: 100,
+          color: '#00e5ff',
+          borderWidth: 4,
+          waveHeight: 0.05,
+          waveLength: 1.4,
+          waveSpeed: 1.7,
+          unit: '%',
+          detail: { fontSize: 34 },
+        },
         series: [{ id: 'wl', type: 'liquid', name: '占用率', data: [{ name: 'CPU', value: 0 }] }],
       });
 
@@ -556,7 +714,8 @@
       const heatData = () => {
         const out = [];
         for (let col = 0; col < HEAT_COLS; col++) {
-          for (let row = 0; row < HEAT_ROWS.length; row++) out.push([`T${col}`, HEAT_ROWS[row], Number(heatMatrix[col][row].toFixed(1))]);
+          for (let row = 0; row < HEAT_ROWS.length; row++)
+            out.push([`T${col}`, HEAT_ROWS[row], Number(heatMatrix[col][row].toFixed(1))]);
         }
         return out;
       };
@@ -567,7 +726,15 @@
         yAxis: { type: 'category' },
         grid: { x: false, y: false },
         animation: { enter: { duration: 400 }, update: { duration: 240, easing: 'linear' } },
-        series: [{ id: 'heat', type: 'heatmap', name: '负载', data: heatData(), heatmap: { minColor: '#062036', maxColor: '#00e5ff' } }],
+        series: [
+          {
+            id: 'heat',
+            type: 'heatmap',
+            name: '负载',
+            data: heatData(),
+            heatmap: { minColor: '#062036', maxColor: '#00e5ff' },
+          },
+        ],
       });
 
       const sankey = ICEChart.createChart('sankey', {
@@ -620,7 +787,17 @@
       const rose = ICEChart.createChart('rose', {
         ...BASE,
         tooltip: { trigger: 'item' },
-        series: [{ id: 'ch', type: 'pie', name: '渠道', data: roseData, roseType: 'area', innerRadius: 0.36, label: { show: false } }],
+        series: [
+          {
+            id: 'ch',
+            type: 'pie',
+            name: '渠道',
+            data: roseData,
+            roseType: 'area',
+            innerRadius: 0.36,
+            label: { show: false },
+          },
+        ],
       });
 
       const graph = ICEChart.createChart('graph', {
@@ -660,8 +837,21 @@
       });
 
       const tree = [
-        { name: '计算', children: [{ name: '订单', value: 320 }, { name: '用户', value: 260 }, { name: '支付', value: 180 }] },
-        { name: '存储', children: [{ name: 'MySQL', value: 280 }, { name: 'Redis', value: 140 }] },
+        {
+          name: '计算',
+          children: [
+            { name: '订单', value: 320 },
+            { name: '用户', value: 260 },
+            { name: '支付', value: 180 },
+          ],
+        },
+        {
+          name: '存储',
+          children: [
+            { name: 'MySQL', value: 280 },
+            { name: 'Redis', value: 140 },
+          ],
+        },
         { name: '网络', value: 160 },
       ];
       const treemap = ICEChart.createChart('treemap', {
@@ -683,7 +873,17 @@
         ...BASE,
         tooltip: { trigger: 'item' },
         animation: { enter: { duration: 600 }, update: { duration: 420, easing: 'easeOutCubic' } },
-        series: [{ id: 'conv', type: 'funnel', name: '转化', data: funnelData, minSize: 0.18, gap: 2, label: { position: 'inside' } }],
+        series: [
+          {
+            id: 'conv',
+            type: 'funnel',
+            name: '转化',
+            data: funnelData,
+            minSize: 0.18,
+            gap: 2,
+            label: { position: 'inside' },
+          },
+        ],
       });
 
       const candles = [];
@@ -757,17 +957,46 @@
           heat.setData('heat', heatData());
         }
         if (t % 30 === 0) {
-          radar.setData('east', [clamp(82 + (Math.random() - 0.5) * 10, 30, 100), clamp(74 + (Math.random() - 0.5) * 10, 30, 100), clamp(88 + (Math.random() - 0.5) * 8, 30, 100), clamp(91 - state.errors * 2, 30, 100), clamp(66 + (Math.random() - 0.5) * 8, 30, 100)]);
-          radar.setData('north', [clamp(70 + (Math.random() - 0.5) * 10, 30, 100), clamp(88 + (Math.random() - 0.5) * 6, 30, 100), clamp(72 + (Math.random() - 0.5) * 10, 30, 100), clamp(84 + (Math.random() - 0.5) * 6, 30, 100), clamp(78 + (Math.random() - 0.5) * 8, 30, 100)]);
+          radar.setData('east', [
+            clamp(82 + (Math.random() - 0.5) * 10, 30, 100),
+            clamp(74 + (Math.random() - 0.5) * 10, 30, 100),
+            clamp(88 + (Math.random() - 0.5) * 8, 30, 100),
+            clamp(91 - state.errors * 2, 30, 100),
+            clamp(66 + (Math.random() - 0.5) * 8, 30, 100),
+          ]);
+          radar.setData('north', [
+            clamp(70 + (Math.random() - 0.5) * 10, 30, 100),
+            clamp(88 + (Math.random() - 0.5) * 6, 30, 100),
+            clamp(72 + (Math.random() - 0.5) * 10, 30, 100),
+            clamp(84 + (Math.random() - 0.5) * 6, 30, 100),
+            clamp(78 + (Math.random() - 0.5) * 8, 30, 100),
+          ]);
         }
         if (t % 90 === 0) {
-          rose.setData('ch', roseData.map((d) => ({ ...d, value: Math.round(d.value * (0.82 + Math.random() * 0.36)) })));
-          funnel.setData('conv', funnelData.map((d, i) => ({ ...d, value: Math.round(d.value * (0.9 + Math.random() * 0.2 * (1 + i * 0.1))) })));
+          rose.setData(
+            'ch',
+            roseData.map((d) => ({ ...d, value: Math.round(d.value * (0.82 + Math.random() * 0.36)) }))
+          );
+          funnel.setData(
+            'conv',
+            funnelData.map((d, i) => ({
+              ...d,
+              value: Math.round(d.value * (0.9 + Math.random() * 0.2 * (1 + i * 0.1))),
+            }))
+          );
           treemap.setData(
             'res',
-            tree.map((node) => (node.children
-              ? { ...node, children: node.children.map((c) => ({ ...c, value: Math.round(c.value * (0.78 + Math.random() * 0.44)) })) }
-              : { ...node, value: Math.round(node.value * (0.78 + Math.random() * 0.44)) }))
+            tree.map((node) =>
+              node.children
+                ? {
+                    ...node,
+                    children: node.children.map((c) => ({
+                      ...c,
+                      value: Math.round(c.value * (0.78 + Math.random() * 0.44)),
+                    })),
+                  }
+                : { ...node, value: Math.round(node.value * (0.78 + Math.random() * 0.44)) }
+            )
           );
         }
 
@@ -792,7 +1021,8 @@
         if (now - fpsAt >= 1000) {
           $('pill-clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
           const up = Math.floor((Date.now() - state.startedAt) / 1000);
-          $('pill-uptime').textContent = `${String(Math.floor(up / 60)).padStart(2, '0')}:${String(up % 60).padStart(2, '0')}`;
+          $('pill-uptime').textContent =
+            `${String(Math.floor(up / 60)).padStart(2, '0')}:${String(up % 60).padStart(2, '0')}`;
           window.__fps = Math.round((frames / (now - fpsAt)) * 1000);
           fpsAt = now;
           frames = 0;
@@ -819,10 +1049,42 @@
       });
 
       window.__chart = flow;
-      window.__charts = { flow, latency, liquid, gauge, radar, heat, sankey, rose, graph, treemap, funnel, candles: candleChart };
+      window.__charts = {
+        flow,
+        latency,
+        liquid,
+        gauge,
+        radar,
+        heat,
+        sankey,
+        rose,
+        graph,
+        treemap,
+        funnel,
+        candles: candleChart,
+      };
       window.__link = link;
       window.__dashboardState = state;
       mountSnapshotPanel();
+    </script>
+
+    <!-- 自适应：大屏是固定列宽网格（按 1920 设计），窄屏下会被裁掉最右一列。
+         这里按视口等比缩放整个 .screen，并同步收缩页面高度（transform 不影响布局高度）。 -->
+    <script>
+      (function () {
+        var screen = document.querySelector('.screen');
+        if (!screen) return;
+        function fit() {
+          var natural = screen.offsetWidth; // 未缩放时的布局宽度（transform 不影响它）
+          if (!natural) return;
+          var scale = Math.min(1, (window.innerWidth - 8) / natural);
+          screen.style.transformOrigin = 'top center';
+          screen.style.transform = scale < 1 ? 'scale(' + scale + ')' : '';
+          document.body.style.height = scale < 1 ? Math.ceil(screen.offsetHeight * scale + 24) + 'px' : '';
+        }
+        fit();
+        window.addEventListener('resize', fit);
+      })();
     </script>
   </body>
 </html>
