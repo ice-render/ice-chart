@@ -94,4 +94,47 @@ describe('图表主题 → 引擎主题', () => {
     // 没覆盖的字段仍来自亮色基底
     expect(semantic.border).toBe(BOOTSTRAP_CHART_THEME.axisLineColor);
   });
+
+  /**
+   * `theme:'auto'` 的「跟随」以前只在**建图 / setOption 那一刻采样一次**：
+   * 宿主之后调 `ice.setTheme('dark')`，图表纹丝不动（轴、系列、图例全是亮色）。
+   * 现在引擎在主题变更时会广播，图表订阅后重新归一化 —— 明暗重新判定、立即重绘。
+   */
+  describe("theme:'auto' 被动跟随引擎主题", () => {
+    it('引擎换主题 → 图表跟着换（不用等下一次 setOption）', () => {
+      const c = mount({ ...BASE, theme: 'auto' });
+      expect(c.norm.theme.textColor).toBe(BOOTSTRAP_CHART_THEME.textColor);
+
+      c.ice.setTheme('dark');
+
+      expect(c.norm.theme.textColor).toBe(BOOTSTRAP_DARK_CHART_THEME.textColor);
+    });
+
+    it('引擎切回亮色 → 图表切回亮色（两个方向都跟）', () => {
+      const c = mount({ ...BASE, theme: 'auto' });
+      c.ice.setTheme('dark');
+      expect(c.norm.theme.textColor).toBe(BOOTSTRAP_DARK_CHART_THEME.textColor);
+
+      c.ice.setTheme('default');
+
+      expect(c.norm.theme.textColor).toBe(BOOTSTRAP_CHART_THEME.textColor);
+    });
+
+    it('显式主题不跟随（light / dark / 自定义都不受影响），也不反过来覆盖宿主刚设的主题', () => {
+      const c = mount({ ...BASE, theme: 'light' });
+      c.ice.setTheme('dark');
+      expect(c.norm.theme.textColor).toBe(BOOTSTRAP_CHART_THEME.textColor);
+      // 图表没有把 light 再推回去压掉宿主的选择
+      expect(c.ice.getTheme().semantic.background).toBe(DARK_THEME.semantic.background);
+    });
+
+    it('destroy() 之后退订：引擎再换主题也不会回头画已销毁的图', () => {
+      const c = mount({ ...BASE, theme: 'auto' });
+      const rebuild = jest.fn();
+      (c as any).rebuild = rebuild;
+      c.destroy();
+      c.ice.setTheme('dark');
+      expect(rebuild).not.toHaveBeenCalled();
+    });
+  });
 });

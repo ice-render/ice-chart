@@ -189,6 +189,14 @@ export class ICEChart {
   private silenceDepth = 0;
   /** 上一次推给引擎的图表主题指纹（避免重复推：推一次会让引擎整棵树标脏）。 */
   private __appliedEngineThemeKey: string | null = null;
+  /**
+   * 引擎主题变更的退订函数（`theme:'auto'` 被动跟随，见 `onThemeChange`）。
+   *
+   * 以前 `auto` 只在**建图 / setOption 那一刻采样一次**引擎明暗：宿主之后调
+   * `ice.setTheme('dark')`，图表的轴 / 系列 / 图例全是亮色纹丝不动。引擎 2.6 起会广播主题变更，
+   * 这里订阅、重新归一化（明暗重新判定）并重绘。
+   */
+  private __offThemeFollow: (() => void) | null = null;
   private a11yMirror = new A11yMirror(this);
   /**
    * 更新动画期间的坐标轴数据域过渡。
@@ -265,6 +273,15 @@ export class ICEChart {
     // 首次渲染也要播「入场」动画（历史 bug：构造时传 animate:false，导致进场是硬切）
     this.applyOption(option, { animate: 'enter', preserveView: false });
     this.controller.bind();
+
+    // `theme:'auto'` 的"跟随引擎"要覆盖**引擎之后的变化**，不只是建图那一刻。
+    // 主题是可随时 setOption 改的（auto → 显式），所以订阅一次、在回调里判"当前是不是 auto"。
+    this.__offThemeFollow = this.ice.onThemeChange(({ kind }) => {
+      // 只有交互外壳变了不影响图表配色；auto 的明暗由引擎主题的背景亮度决定，只看 'theme'。
+      if (kind !== 'theme' || this.destroyed) return;
+      if (!this.option || this.option.theme !== 'auto') return;
+      this.rebuild(false);
+    });
 
     if (chartOptions.autoResize) this.observeResize();
   }
@@ -961,6 +978,11 @@ export class ICEChart {
   public destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    // 先退订主题跟随：销毁后引擎再换主题不该回头画这张图
+    if (this.__offThemeFollow) {
+      this.__offThemeFollow();
+      this.__offThemeFollow = null;
+    }
     this.stopDomainTransition();
     // 无障碍镜像是挂在 canvas 旁边的 DOM，必须在销毁时一并摘掉（否则页面会残留隐藏表格）
     this.a11yMirror.detach();
