@@ -42,6 +42,15 @@ export type {
   TooltipOption,
   TooltipParams,
   CrosshairOption,
+  AnnotationOption,
+  AnnotationLineOption,
+  AnnotationPointOption,
+  AnnotationAreaOption,
+  AnnotationAxis,
+  AnnotationTextPosition,
+  AnnotationPointTextPosition,
+  AnnotationDiagnostic,
+  AnnotationDiagnosticCode,
   GridOption,
   DataZoomOption,
   InteractionOption,
@@ -72,7 +81,13 @@ export { createScale, formatTick, formatNumberTick, LinearScale, BandScale, Time
 export type { Scale, CreateScaleOptions } from './scale';
 
 // 归一化 / 布局（纯函数，便于在应用层复用或做 DSL 编译）
-export { normalizeOption, toSerializableOption, normalizeAnimation, DEFAULT_ANIMATION_STAGES } from './option/normalize';
+export {
+  normalizeOption,
+  toSerializableOption,
+  normalizeAnimation,
+  normalizeAnnotation,
+  DEFAULT_ANIMATION_STAGES,
+} from './option/normalize';
 export type { NormalizeContext } from './option/normalize';
 export { computeLayout } from './layout/layout';
 export type { DataPoint, InternalSeries, InternalAxis, NormalizedOption, ChartLayout, Rect, LegendItemLayout } from './internal';
@@ -81,6 +96,10 @@ export type { DataPoint, InternalSeries, InternalAxis, NormalizedOption, ChartLa
 export { ChartComponent } from './components/ChartComponent';
 export { PlotArea } from './components/PlotArea';
 export { GridLines } from './components/GridLines';
+export { Annotation } from './components/Annotation';
+export type { AnnotationInk } from './components/Annotation';
+export { resolveAnnotation } from './annotation/resolve';
+export type { ResolvedAnnotation, ResolvedLine, ResolvedPoint, ResolvedArea, AnnotationContext } from './annotation/resolve';
 export { Axis } from './components/Axis';
 export { Legend, roundRect } from './components/Legend';
 export { Title } from './components/Title';

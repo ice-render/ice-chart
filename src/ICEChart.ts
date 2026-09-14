@@ -1,10 +1,19 @@
 import { ICE, ICEGroup } from 'ice-render';
-import type { ChartMarkData, ChartMarkHandle, ChartMarkSpec, ChartOption, DataItem, LegendToggleParams } from './types';
+import type {
+  AnnotationDiagnostic,
+  ChartMarkData,
+  ChartMarkHandle,
+  ChartMarkSpec,
+  ChartOption,
+  DataItem,
+  LegendToggleParams,
+} from './types';
 import type { ChartLayout, InternalSeries, NormalizedOption, Rect } from './internal';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { computeLayout } from './layout/layout';
 import { createScale, formatTick, type Scale } from './scale';
 import { GridLines } from './components/GridLines';
+import { Annotation } from './components/Annotation';
 import { PlotArea } from './components/PlotArea';
 import { Axis } from './components/Axis';
 import { Legend } from './components/Legend';
@@ -33,6 +42,8 @@ const Z = {
   series: 100,
   /** 数据坐标图元（注释 / 阈值线 / 预测带）：压在系列之上、坐标轴与覆盖层之下 */
   mark: 300,
+  /** 标注图层（目标线 / 异常点 / 目标区间）：在数据图元之上、坐标轴与覆盖层之下 */
+  annotation: 310,
   axis: 400,
   title: 450,
   legend: 500,
@@ -122,6 +133,7 @@ export class ICEChart {
   public root: ICEGroup;
   public plotArea: PlotArea;
   public grid: GridLines;
+  public annotation: Annotation;
   public radarGrid: RadarGrid;
   /** 极坐标网格（r(θ) 曲线用；画在直角坐标场景里，配合 aspect:'equal'）。 */
   public polarGrid: PolarGrid;
@@ -214,6 +226,7 @@ export class ICEChart {
 
     this.plotArea = new PlotArea({ left: 0, top: 0, width: 1, height: 1, zIndex: Z.plotArea });
     this.grid = new GridLines({ width: canvas.width, height: canvas.height, zIndex: Z.grid });
+    this.annotation = new Annotation({ width: canvas.width, height: canvas.height, zIndex: Z.annotation });
     this.radarGrid = new RadarGrid({ width: canvas.width, height: canvas.height, zIndex: Z.grid + 5 });
     this.polarGrid = new PolarGrid({ width: canvas.width, height: canvas.height, zIndex: Z.grid + 6 });
     this.axisX = new Axis({ orientation: 'x', width: canvas.width, height: canvas.height, zIndex: Z.axis });
@@ -231,6 +244,7 @@ export class ICEChart {
     this.root.addChildren([
       this.plotArea,
       this.grid,
+      this.annotation,
       this.radarGrid,
       this.polarGrid,
       this.axisX,
@@ -295,6 +309,24 @@ export class ICEChart {
       }
     }
     return out;
+  }
+
+  /**
+   * 标注诊断（**回答「我写的目标线为什么没出来」**）。
+   *
+   * `error` 表示**这条标注写错了**（值缺失 / 不是合法数值 / 类目不存在 / 日期解析不出来）——
+   * 表单该标红；`warning` 表示写对了但当前画不出来，两种来源：值在可视域外（缩放或数据更新
+   * 之后它可能又会出现）、当前场景没有直角坐标系（饼图 / 雷达 / 桑基 / 树图）。
+   *
+   * 与表达式诊断同款：坏标注**不让图表崩**，也不影响其它标注。
+   */
+  public annotationDiagnostics(): AnnotationDiagnostic[] {
+    return this.annotation ? this.annotation.diagnostics.slice() : [];
+  }
+
+  /** 只取标注错误（表单标红用）。需要提示（越界等）请用 `annotationDiagnostics()`。 */
+  public annotationErrors(): AnnotationDiagnostic[] {
+    return this.annotationDiagnostics().filter((item) => item.severity === 'error');
   }
 
   /** 更新单个系列的数据。 */
@@ -1321,6 +1353,20 @@ export class ICEChart {
     this.grid.axisYList = this.axisYList;
     this.grid.syncTicks();
 
+    // 标注：定位与越界判定在 resolveAnnotation()（纯函数），这里只把坐标系喂给它。
+    // 非直角场景没有 x/y 坐标系，组件会给出结构化诊断而不是静默（见 annotationDiagnostics()）。
+    this.annotation.setState({ width: canvas.width, height: canvas.height, display: true });
+    this.annotation.plot = plot;
+    this.annotation.xAxis = norm.xAxis;
+    this.annotation.yAxes = norm.yAxes;
+    this.annotation.sync(norm.option.annotation, {
+      kind: norm.kind,
+      plot,
+      xAxis: norm.xAxis,
+      yAxes: norm.yAxes,
+      theme,
+    });
+
     if (this.legend) {
       this.legend.setState({ width: canvas.width, height: canvas.height });
       this.legend.layout = layout;
@@ -1710,6 +1756,7 @@ export class ICEChart {
     const types: Array<[string, any]> = [
       ['ice-chart:PlotArea', PlotArea],
       ['ice-chart:GridLines', GridLines],
+      ['ice-chart:Annotation', Annotation],
       ['ice-chart:Axis', Axis],
       ['ice-chart:Legend', Legend],
       ['ice-chart:Title', Title],

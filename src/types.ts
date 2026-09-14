@@ -548,6 +548,128 @@ export interface ChartLabels {
   slice?: string;
 }
 
+/** 标注的定位轴：`'y'` 画水平线（值是 y 值），`'x'` 画垂直线。 */
+export type AnnotationAxis = 'x' | 'y';
+
+/** 标注线 / 区间的文字沿线位置。 */
+export type AnnotationTextPosition = 'start' | 'center' | 'end';
+
+/** 标注点的文字位置。 */
+export type AnnotationPointTextPosition = 'top' | 'bottom' | 'left' | 'right';
+
+/**
+ * 标注线：目标线 / 阈值线 / 告警线。
+ *
+ * **定位走坐标轴的比例尺**，所以它随缩放、平移、跨图联动一起动；值落在当前可视域之外
+ * **不画**（诊断里给出提示，见 `chart.annotationDiagnostics()`），而不是被裁成半条。
+ */
+export interface AnnotationLineOption {
+  /** 定位轴：`'y'`（默认）画水平线，`'x'` 画垂直线。 */
+  axis?: AnnotationAxis;
+  /** 定位值：数值轴写数值；类目轴写类目名或下标；时间轴写时间戳 / 日期串。 */
+  value?: number | string | Date;
+  /** 线旁边的说明文字（不传则不画字）。 */
+  text?: string;
+  /** 线色，默认取主题的正文色。 */
+  color?: string;
+  /** 线宽（CSS 像素），默认 1。 */
+  lineWidth?: number;
+  /** 是否虚线（默认 true —— 标注是「说明」，实线会跟数据线抢视线）。 */
+  dashed?: boolean;
+  /** 自定义虚线间隔（像素）；给了就以它为准，`[]` 表示实线。 */
+  lineDash?: number[];
+  /** 文字沿线的位置，默认 `'end'`。 */
+  textPosition?: AnnotationTextPosition;
+  /** 文字颜色，默认取线色。 */
+  textColor?: string;
+  /** 文字字号，默认取主题字号。 */
+  fontSize?: number;
+  /** 多 y 轴时贴哪根轴定位，默认 0（主轴）。 */
+  axisIndex?: number;
+}
+
+/** 标注点：异常点 / 事件点 —— 在坐标系里定位一个点并配文字。 */
+export interface AnnotationPointOption {
+  /** x 值（类目轴写类目名或下标；时间轴写时间戳 / 日期串）。 */
+  x?: number | string | Date;
+  /** y 值。 */
+  y?: number;
+  text?: string;
+  color?: string;
+  /** 标记形状，默认 `'circle'`。 */
+  symbol?: 'circle' | 'rect' | 'diamond' | 'triangle';
+  /** 标记直径（像素），默认 8。 */
+  symbolSize?: number;
+  /** 文字相对点的位置，默认 `'top'`。 */
+  textPosition?: AnnotationPointTextPosition;
+  textColor?: string;
+  fontSize?: number;
+  axisIndex?: number;
+}
+
+/**
+ * 标注区间：达标区 / 维护窗口 —— 沿某个轴的一段。
+ *
+ * 与标注线不同，**区间允许有一端越界**：只画落在可视域里的那一段（这是图上「看到一半的区间」
+ * 的正常语义）；整段都在可视域外才不画，并给出诊断。
+ */
+export interface AnnotationAreaOption {
+  /** 沿哪根轴划分：`'y'`（默认）是横向的带，`'x'` 是纵向的带。 */
+  axis?: AnnotationAxis;
+  /** 区间起点（含）。 */
+  from?: number | string | Date;
+  /** 区间终点（含）。 */
+  to?: number | string | Date;
+  /** 填充色，默认取主题正文色的低透明度。 */
+  color?: string;
+  /** 区间内的说明文字。 */
+  text?: string;
+  /** 文字在区间上的位置，默认 `'center'`。 */
+  textPosition?: AnnotationTextPosition;
+  textColor?: string;
+  fontSize?: number;
+  axisIndex?: number;
+}
+
+/**
+ * 标注图层。
+ *
+ * 它是**坐标系上的一个图层**（与网格线 / 准星同族），不是新的系列类型：数据来自 option、
+ * 几何来自比例尺，因此不参与图例、堆叠与数据下标，也不会污染提示框的数据行。
+ * 默认不参与命中测试（点标注不该抢走下面数据点的点击）。
+ */
+export interface AnnotationOption {
+  lines?: AnnotationLineOption[];
+  points?: AnnotationPointOption[];
+  areas?: AnnotationAreaOption[];
+}
+
+/** 标注诊断的机器可读编码。 */
+export type AnnotationDiagnosticCode =
+  /** 值缺失 / 不是合法数值 / 日期解析不出来 —— 这条标注一定画不出来。 */
+  | 'annotation:invalid-value'
+  /** 值不在当前可视数据域内（缩放后会重新判定）。 */
+  | 'annotation:out-of-range'
+  /** 类目轴上没有这个类目。 */
+  | 'annotation:unknown-category'
+  /** 当前场景没有直角坐标系（饼图 / 雷达 / 桑基等），标注无处可画。 */
+  | 'annotation:unsupported-scene';
+
+/**
+ * 标注诊断（与表达式诊断同款：不让图表崩，但必须能被表单拿到）。
+ *
+ * `severity: 'error'` 表示**这条标注写错了**（标红），`'warning'` 表示写对了但当前画不出来
+ * （提示即可 —— 缩放 / 数据更新后它可能又出现了）。
+ */
+export interface AnnotationDiagnostic {
+  code: AnnotationDiagnosticCode;
+  severity: 'error' | 'warning';
+  message: string;
+  /** 出问题的标注种类与它在数组里的下标（表单据此定位到具体那一行）。 */
+  kind: 'line' | 'point' | 'area';
+  index: number;
+}
+
 export interface ChartOption {
   /** 'light' | 'dark' | 'auto'（跟随 ice-render 实例主题）| 自定义主题片段。 */
   theme?: 'light' | 'dark' | 'auto' | Partial<ChartTheme>;
@@ -586,6 +708,8 @@ export interface ChartOption {
   graph?: GraphOption;
   /** 极坐标网格（画 `r(θ)` 时的同心圆 + 辐条底图）。 */
   polarGrid?: boolean | PolarGridOption;
+  /** 标注图层：目标线 / 阈值线、异常点、目标区间（见 `AnnotationOption`）。 */
+  annotation?: AnnotationOption;
   /**
    * 坐标轴比例：`'equal'` = x/y 一个数据单位在屏幕上等长（MATLAB 的 `axis equal`）。
    * 画圆 / 参数曲线 / 几何图形时必须开，否则圆会被拉成椭圆（绘图区本身也会收缩成正方形）。
