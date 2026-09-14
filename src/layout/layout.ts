@@ -60,7 +60,9 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   const yAxisLayout = yAxisLayouts[0];
 
   const title = buildTitleLayout(norm);
-  const titleHeight = title ? (title.text ? title.textStyle.fontSize * 1.5 : 0) + (title.subtext ? title.subtextStyle.fontSize * 1.4 : 0) : 0;
+  const titleHeight = title
+    ? (title.text ? title.textStyle.fontSize * 1.5 : 0) + (title.subtext ? title.subtextStyle.fontSize * 1.4 : 0)
+    : 0;
   // 标题在上、图例在其下方；图例排版需要知道标题占用的高度
   const legend = layoutLegend(norm, ctx, canvas, margin.top + titleHeight);
   const legendSize = legend ? legendSizeOf(legend, norm) : { width: 0, height: 0 };
@@ -89,7 +91,8 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   // dataZoom 滑块：在坐标轴之下预留一条轨道
   const sliderOption = norm.option.dataZoom && norm.option.dataZoom.slider;
-  const showSlider = norm.kind === 'cartesian' && !!norm.option.dataZoom && (!sliderOption || sliderOption.show !== false);
+  const showSlider =
+    norm.kind === 'cartesian' && !!norm.option.dataZoom && (!sliderOption || sliderOption.show !== false);
   const sliderHeight = Math.max(12, Number(sliderOption && sliderOption.height) || SLIDER_HEIGHT);
   let sliderY: number | null = null;
   if (showSlider) {
@@ -114,7 +117,8 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     const halfH = plot.height / 2;
     // 饼图默认带引导线标签，标签要画到圆外，因此预留一圈文字空间
     const hasLabels =
-      norm.kind === 'polar' && norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false));
+      norm.kind === 'polar' &&
+      norm.series.some((s) => s.type === 'pie' && !(s.option.label && s.option.label.show === false));
     const labelAllowance = hasLabels ? Math.min(46, halfMin * 0.26) : 6;
     let radius: number;
     if (norm.kind === 'gauge') {
@@ -224,6 +228,24 @@ function buildAxisLayout(
     const w = measureTextWidth(ctx, label, fontSize, fontFamily);
     if (w > maxLabelWidth) maxLabelWidth = w;
   }
+  // 刻度标签按**可用像素**稀释（2026-09-14）：类别轴的刻度数等于数据点数
+  // （30 个点的折线就是 30 个刻度），全画出来会挤成一团。这里按「标签宽度 + 间隔」
+  // 算一个步长，只保留整步长上的标签；刻度线照画。
+  if (axis === 'x' && ticks.length > 2 && maxLabelWidth > 0) {
+    const range = typeof scale.range === 'function' ? scale.range() : null;
+    const axisLength = range && range.length >= 2 ? Math.abs(range[1] - range[0]) : 0;
+    if (axisLength > 0) {
+      const spacing = axisLength / (ticks.length - 1 || 1);
+      const minGap = maxLabelWidth + 10;
+      if (spacing < minGap) {
+        const keepEvery = Math.ceil(minGap / spacing);
+        for (let i = 0; i < labels.length; i++) {
+          if (i % keepEvery !== 0) labels[i] = '';
+        }
+      }
+    }
+  }
+
   const rotate = Math.abs(Number(axisOption.labelRotate) || 0);
   const radians = (rotate * Math.PI) / 180;
   const rotatedHeight = maxLabelWidth * Math.sin(radians) + fontSize * 1.4;
@@ -305,7 +327,10 @@ function layoutLegend(norm: NormalizedOption, ctx: any, canvas: Rect, topOffset:
   const itemWidth = option.itemWidth || 12;
   const itemHeight = Math.max(option.itemHeight || 12, fontSize * 1.4);
   const gap = option.itemGap || 16;
-  const pieces = items.map((item) => ({ item, textWidth: measureTextWidth(ctx, item.name, fontSize, norm.theme.fontFamily) }));
+  const pieces = items.map((item) => ({
+    item,
+    textWidth: measureTextWidth(ctx, item.name, fontSize, norm.theme.fontFamily),
+  }));
   const rowHeight = itemHeight + 4;
   const margin = norm.option.margin;
 

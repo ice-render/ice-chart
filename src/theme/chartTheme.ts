@@ -13,6 +13,24 @@ import type { ChartTheme } from '../types';
  */
 
 /** Bootstrap 5 调色板（官方 hex 值）。 */
+/**
+ * 图表默认色板（**唯一来源**）。
+ *
+ * 以前它散落在 layout/force、layout/treemap、layout/sankey、WaterfallSeries 各自的
+ * `palette || ['#0D6EFD']` 兜底里 —— 同一页面里不同图表可能来自不同来源的色板，
+ * 视觉上就是「配色怪」。现在统一成一处，各处以它兜底。
+ */
+export const CHART_PALETTE: string[] = [
+  '#0D6EFD',
+  '#10B981',
+  '#F59E0B',
+  '#EF4444',
+  '#8B5CF6',
+  '#14B8A6',
+  '#EC4899',
+  '#6366F1',
+];
+
 export const BOOTSTRAP_TOKENS = {
   primary: '#0D6EFD',
   secondary: '#6C757D',
@@ -40,7 +58,8 @@ export const BOOTSTRAP_TOKENS = {
     900: '#212529',
   },
   /** Bootstrap 的 --bs-body-font-family。 */
-  fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif',
+  fontFamily:
+    'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif',
   /** --bs-border-radius */
   radius: 6,
 } as const;

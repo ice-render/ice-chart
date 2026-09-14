@@ -1,3 +1,4 @@
+import { CHART_PALETTE } from '../theme/chartTheme';
 import type { Rect } from '../internal';
 import type { SankeyLinkOption, SankeyNodeOption, SankeyOption } from '../types';
 
@@ -51,7 +52,7 @@ export function layoutSankey(
   links: SankeyLinkOption[],
   rect: Rect,
   options: SankeyOption = { nodes: [], links: [] },
-  palette: string[] = ['#3B82F6']
+  palette: string[] = CHART_PALETTE
 ): SankeyLayoutResult {
   const count = nodes.length;
   if (!count) return { nodes: [], links: [] };
@@ -65,7 +66,13 @@ export function layoutSankey(
   };
 
   const resolved = links
-    .map((link, id) => ({ id, source: indexOf(link.source), target: indexOf(link.target), value: Math.max(0, Number(link.value) || 0), color: link.color }))
+    .map((link, id) => ({
+      id,
+      source: indexOf(link.source),
+      target: indexOf(link.target),
+      value: Math.max(0, Number(link.value) || 0),
+      color: link.color,
+    }))
     .filter((link) => link.source >= 0 && link.target >= 0 && link.value > 0);
 
   // 1) 分层：Kahn 拓扑求最长路径
@@ -176,7 +183,9 @@ export function layoutSankey(
   }
   // 最后一轮包住底部溢出
   for (const column of columns) {
-    const overflow = column.length ? layout[column[column.length - 1]].y + layout[column[column.length - 1]].height - (rect.y + rect.height) : 0;
+    const overflow = column.length
+      ? layout[column[column.length - 1]].y + layout[column[column.length - 1]].height - (rect.y + rect.height)
+      : 0;
     if (overflow > 0) {
       for (const id of column) layout[id].y = Math.max(rect.y, layout[id].y - overflow);
     }

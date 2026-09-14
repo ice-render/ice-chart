@@ -1,3 +1,4 @@
+import { CHART_PALETTE } from '../../theme/chartTheme';
 import { BarSeries } from './BarSeries';
 import type { SeriesType } from '../../types';
 
@@ -25,7 +26,7 @@ export class WaterfallSeries extends BarSeries {
   protected barColorAt(index: number): string {
     const option: any = this.series.option.waterfall || {};
     const theme = this.chartTheme;
-    const palette = (theme && theme.colorPalette) || ['#0D6EFD'];
+    const palette = (theme && theme.colorPalette) || CHART_PALETTE;
     if (this.isTotalItem(index)) return option.totalColor || palette[0];
     return this.isIncrease(index) ? option.increaseColor || palette[1] : option.decreaseColor || palette[2];
   }

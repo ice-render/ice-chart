@@ -123,7 +123,10 @@ export class PieSeries extends SeriesBase {
 
       let outer = radius;
       if (roseType && maxValue > 0) {
-        outer = roseType === 'area' ? radius * Math.sqrt(Math.max(0, value) / maxValue) : radius * (Math.max(0, value) / maxValue);
+        outer =
+          roseType === 'area'
+            ? radius * Math.sqrt(Math.max(0, value) / maxValue)
+            : radius * (Math.max(0, value) / maxValue);
         outer = Math.max(3, outer);
       }
       const inner = radius * innerRatio;
@@ -278,7 +281,6 @@ export class PieSeries extends SeriesBase {
         const outer = this.slices[i * 4 + 3];
         if (Math.abs(a1 - a0) <= 1e-9) continue;
         // 太窄的扇形不画标签，避免文字互相压叠（玫瑰图里小扇区尤其明显）
-        if (Math.abs(a1 - a0) < (inside ? 0.3 : 0.12)) continue;
         const point = this.series.points[i];
         const value = point.y || 0;
         const radius = coord.polar.radius;
@@ -292,7 +294,10 @@ export class PieSeries extends SeriesBase {
           seriesName: this.series.name,
           color: point.color || this.series.color,
         };
-        const text = labelOption && typeof labelOption.formatter === 'function' ? String(labelOption.formatter(params)) : `${params.name} ${percent.toFixed(1)}%`;
+        const text =
+          labelOption && typeof labelOption.formatter === 'function'
+            ? String(labelOption.formatter(params))
+            : `${params.name} ${percent.toFixed(1)}%`;
         const mid = (a0 + a1) / 2;
         if (inside) {
           if (isFinite(lastAngle)) {
@@ -305,12 +310,15 @@ export class PieSeries extends SeriesBase {
           const anchor = inner + (outer - inner) * 0.62 + stackLevel * (this.fontSize() + 4);
           // 文字比扇区弧长还宽就不画内部标签：与其叠成一团，不如交给图例与提示框
           const arcWidth = Math.abs(a1 - a0) * anchor;
-          if (measureTextWidth(this.ctx, text, this.fontSize(), this.fontFamily()) > arcWidth + 6) continue;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(text, cx + Math.cos(mid) * anchor, cy + Math.sin(mid) * anchor);
-          continue;
+          if (measureTextWidth(this.ctx, text, this.fontSize(), this.fontFamily()) <= arcWidth + 6) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(text, cx + Math.cos(mid) * anchor, cy + Math.sin(mid) * anchor);
+            continue;
+          }
+          // 装不下就落到下面的「外侧标签」分支 —— 以前这里是 continue（静默丢弃），
+          // 于是「扇形小 + 系列多」的玫瑰图会出现「有的系列没有标签」（2026-09-14 修）。
         }
         const elbow = radius + 8;
         const end = radius + 26;
@@ -330,7 +338,8 @@ export class PieSeries extends SeriesBase {
         ctx.stroke();
         ctx.textAlign = right ? 'left' : 'right';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = this.series.points[i].color || this.series.color;
+        // 文字用主题的坐标轴标签色（保证浅底/深底都可读）；与扇区的关联由引线承担
+        ctx.fillStyle = (this.chartTheme && this.chartTheme.axisLabelColor) || '#475569';
         ctx.fillText(text, x3 + (right ? 4 : -4) * unit, y3);
       }
     }

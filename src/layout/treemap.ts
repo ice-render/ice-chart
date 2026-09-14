@@ -1,3 +1,4 @@
+import { CHART_PALETTE } from '../theme/chartTheme';
 import type { Rect } from '../internal';
 import type { TreemapOption } from '../types';
 
@@ -39,7 +40,7 @@ export function layoutTreemap(
   data: TreemapInputNode[],
   rect: Rect,
   options: TreemapOption = {},
-  palette: string[] = ['#0D6EFD']
+  palette: string[] = CHART_PALETTE
 ): TreemapNodeLayout[] {
   const out: TreemapNodeLayout[] = [];
   const gap = Math.max(0, Number(options.gap) || 2);
@@ -103,10 +104,16 @@ export function layoutTreemap(
 }
 
 /** 顶层换色后，把子节点按各自父色重新淡化一遍。 */
-function recolor(nodes: TreemapNodeLayout[], parentId: number, parentColor: string, palette: string[], depthFade: number): void {
+function recolor(
+  nodes: TreemapNodeLayout[],
+  parentId: number,
+  parentColor: string,
+  palette: string[],
+  depthFade: number
+): void {
   for (const node of nodes) {
     if (node.parent !== parentId) continue;
-    node.color = shade(parentColor, (node.depth) * depthFade);
+    node.color = shade(parentColor, node.depth * depthFade);
     recolor(nodes, node.id, node.color, palette, depthFade);
   }
 }
@@ -164,8 +171,18 @@ function squarify(items: RowItem[], rect: Rect, total: number): Array<{ item: Ro
       offset += length;
     }
     remaining = horizontal
-      ? { x: remaining.x + thickness, y: remaining.y, width: Math.max(0, remaining.width - thickness), height: remaining.height }
-      : { x: remaining.x, y: remaining.y + thickness, width: remaining.width, height: Math.max(0, remaining.height - thickness) };
+      ? {
+          x: remaining.x + thickness,
+          y: remaining.y,
+          width: Math.max(0, remaining.width - thickness),
+          height: remaining.height,
+        }
+      : {
+          x: remaining.x,
+          y: remaining.y + thickness,
+          width: remaining.width,
+          height: Math.max(0, remaining.height - thickness),
+        };
   }
   return out;
 }

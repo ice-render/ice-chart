@@ -1,3 +1,4 @@
+import { CHART_PALETTE } from '../theme/chartTheme';
 import type { Rect } from '../internal';
 import type { GraphLinkOption, GraphNodeOption, GraphOption } from '../types';
 
@@ -52,7 +53,7 @@ export function forceLayout(
   links: GraphLinkOption[],
   rect: Rect,
   options: GraphOption = { nodes: [], links: [] },
-  palette: string[] = ['#0D6EFD']
+  palette: string[] = CHART_PALETTE
 ): ForceLayoutResult {
   const count = nodes.length;
   if (!count) return { nodes: [], links: [] };
@@ -68,7 +69,13 @@ export function forceLayout(
     return -1;
   };
   const resolved = links
-    .map((link, id) => ({ id, source: indexOf(link.source), target: indexOf(link.target), value: Number(link.value) || 1, color: link.color }))
+    .map((link, id) => ({
+      id,
+      source: indexOf(link.source),
+      target: indexOf(link.target),
+      value: Number(link.value) || 1,
+      color: link.color,
+    }))
     .filter((link) => link.source >= 0 && link.target >= 0 && link.source !== link.target);
 
   const cx = rect.x + rect.width / 2;
@@ -78,7 +85,10 @@ export function forceLayout(
   // 1) 初始位置：给了坐标就用，否则环形铺开
   const positions = nodes.map((node, i) => {
     if (isFinite(Number(node.x)) && isFinite(Number(node.y))) {
-      return { x: clamp(Number(node.x), rect.x + 2, rect.x + rect.width - 2), y: clamp(Number(node.y), rect.y + 2, rect.y + rect.height - 2) };
+      return {
+        x: clamp(Number(node.x), rect.x + 2, rect.x + rect.width - 2),
+        y: clamp(Number(node.y), rect.y + 2, rect.y + rect.height - 2),
+      };
     }
     const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
     return { x: cx + Math.cos(angle) * maxRadius * 0.8, y: cy + Math.sin(angle) * maxRadius * 0.8 };
@@ -281,10 +291,7 @@ export function sampleGraphLink(
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
     const mt = 1 - t;
-    points.push([
-      mt * mt * a.x + 2 * mt * t * cx + t * t * b.x,
-      mt * mt * a.y + 2 * mt * t * cy + t * t * b.y,
-    ]);
+    points.push([mt * mt * a.x + 2 * mt * t * cx + t * t * b.x, mt * mt * a.y + 2 * mt * t * cy + t * t * b.y]);
   }
   return points;
 }
