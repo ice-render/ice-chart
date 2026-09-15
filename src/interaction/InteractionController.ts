@@ -135,14 +135,26 @@ export class InteractionController {
     return [x, y];
   }
 
-  /** 指针是否落在本图 canvas 的内容盒内（CSS 像素语义）。 */
+  /**
+   * 指针是否落在本图 canvas 的内容盒内（CSS 像素语义）。
+   *
+   * **尺寸测不出来时一律判 false**（早先这里返回 true）。理由：引擎的原生监听挂在
+   * window 上，本图会收到**整页**的指针事件，而这个判断是唯一的"这事件不属于我"闸门。
+   * `display:none` 的画布（切页之后被藏起来的那些）宽度/高度是 0，旧实现"尺寸未知就当
+   * 指针在上面"，于是隐藏中的图会把全页的移动都吃下来，在**错误的坐标**上锁住一个悬停；
+   * 等它被显示出来，`refreshHover()` 会把这个陈旧悬停重新解析一遍，画面上就出现一个
+   * 没人悬停却擦不掉的提示框 + 十字准星（切页时必现）。
+   *
+   * 真实事件到达前引擎已经量过尺寸（`updateCanvasBoundingRect`），所以"量不到"就等于
+   * "这张图现在根本不在画面上"，判 false 不会误伤可见画布。
+   */
   public isOverCanvas(screenX: number, screenY: number): boolean {
     const ice: any = this.host && this.host.ice;
     if (!ice) return false;
     const dpr = ice.dpr || 1;
     const width = (ice.canvasWidth || 0) / dpr;
     const height = (ice.canvasHeight || 0) / dpr;
-    if (!(width > 0) || !(height > 0)) return true;
+    if (!(width > 0) || !(height > 0)) return false;
     return screenX >= 0 && screenY >= 0 && screenX <= width && screenY <= height;
   }
 
@@ -257,8 +269,14 @@ export class InteractionController {
       this.updateDrag(screenX, screenY, evt);
       return;
     }
-    // 页面上的其它图表也会收到这次移动（引擎监听在 window 上），必须忽略
-    if (!this.isOverCanvas(screenX, screenY)) return;
+    // 页面上的其它图表也会收到这次移动（引擎监听在 window 上），必须忽略。
+    // 但"忽略"不等于"什么都不做"：指针已经离开本图时，本图残留的悬停（准星 + 提示框 +
+    // 高亮环）必须主动收起 —— 否则鼠标划出去之后提示框会一直挂在画面上，用户没有任何
+    // 办法把它弄掉（画布外不再产生让本图重新取悬停的坐标）。
+    if (!this.isOverCanvas(screenX, screenY)) {
+      if (this.hover) this.setHover(null);
+      return;
+    }
     this.updateHover(screenX, screenY);
   }
 

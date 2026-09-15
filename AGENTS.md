@@ -82,6 +82,18 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
   `fill()` 方法覆盖成字符串，运行时抛 `this.ctx.fill is not a function`（踩过）。
 - **交互要给图元让路**：`InteractionController` 的按下处理必须在命中图元时提前返回，
   否则「拖注释」会变成「拖画布」（框选 / 平移抢走拖拽）。
+- **悬停的两条铁律**（2026-09-15 修，别改回去）：
+  1. **画布量不到尺寸（`canvasWidth/Height` 为 0）＝ 指针不在本图上，判 `false`**。
+     引擎的原生监听挂在 **window** 上，同一页里每张图都会收到整页的事件，`isOverCanvas`
+     是唯一的"这事件不属于我"闸门。切页时被 `display:none` 藏起来的图尺寸为 0，早先这里
+     返回 `true`（"尺寸未知就当指针在上面"），于是**隐藏中的图会把全页的移动都吃下来**，
+     在错误坐标上锁住一个悬停；等它显示出来，`refreshHover()` 把这个陈旧悬停重新解析一遍，
+     画面上就凭空多出一个**没人悬停却擦不掉的提示框 + 十字准星**（切页必现）。
+  2. **指针离开画布要主动 `setHover(null)`，不能只是"忽略这次事件"**。
+     画布外不再产生让本图重新取悬停的坐标，只 return 的话提示框会一直挂在画面上
+     （用户没有任何办法弄掉）。回归点：`tests/interaction/isolation.test.ts` 里
+     「clears its own hover when the pointer leaves the canvas」与
+     「never treats a not-laid-out canvas (display:none) as hovered」。
 
 ## 分支与发版约定（家族铁律，2026-09-13 确立）
 

@@ -51,13 +51,31 @@ describe('多图事件隔离', () => {
     const bPixel = b.seriesComponents[0].pixelAt(2)!;
     b.controller.handlePointerMove(bPlot.x + bPixel[0], bPlot.y + bPixel[1]);
     expect(b.controller.hover).not.toBeNull();
+  });
 
-    // A 图上继续移动鼠标时，B 图也会收到这一事件，但坐标落在 B 的画布之外 —— 必须忽略
-    b.controller.handlePointerMove(b.ice.canvasWidth + 200, 150);
-    expect(b.controller.hover).not.toBeNull();
+  it('clears its own hover when the pointer leaves the canvas', async () => {
+    const chart = await mount();
+    const plot = chart.layout.plot;
+    const pixel = chart.seriesComponents[0].pixelAt(2)!;
+    chart.controller.handlePointerMove(plot.x + pixel[0], plot.y + pixel[1]);
+    expect(chart.controller.hover).not.toBeNull();
 
-    // 反向同理：A 的悬停不应被任何「画布外事件」清掉
-    expect(a.controller.hover).not.toBeNull();
+    // 指针划出画布：本图必须收起悬停（否则提示框会一直挂在画面上）
+    chart.controller.handlePointerMove(chart.ice.canvasWidth + 200, 150);
+    expect(chart.controller.hover).toBeNull();
+  });
+
+  it('never treats a not-laid-out canvas (display:none) as hovered', async () => {
+    const chart = await mount();
+    // 切页之后被藏起来的图：引擎量不到尺寸，canvasWidth/Height 归零
+    (chart.ice as any).canvasWidth = 0;
+    (chart.ice as any).canvasHeight = 0;
+
+    // 全页的移动照样会派发到它 —— 必须判为"不在我身上"
+    expect(chart.controller.isOverCanvas(120, 90)).toBe(false);
+    // 因此不会在错误坐标上锁住悬停（显示出来之后也就不会凭空画提示框）
+    chart.controller.handlePointerMove(120, 90);
+    expect(chart.controller.hover).toBeNull();
   });
 
   it('does not emit chart:click for clicks outside the canvas', async () => {
