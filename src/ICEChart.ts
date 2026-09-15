@@ -950,27 +950,15 @@ export class ICEChart {
   /** 手动重排（响应式容器变化时调用）。不传尺寸则读取 canvas 的内容盒尺寸。 */
   public resize(cssWidth?: number, cssHeight?: number): this {
     if (this.destroyed) return this;
-    const dpr = this.ice.dpr || 1;
-    const el = this.canvasEl;
-    let width = cssWidth;
-    let height = cssHeight;
-    if (width === undefined || height === undefined) {
-      const rect = el && typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
-      width = (rect && rect.width) || el.width / dpr;
-      height = (rect && rect.height) || el.height / dpr;
-    }
-    const nextWidth = Number(width);
-    const nextHeight = Number(height);
-    if (!(nextWidth > 0) || !(nextHeight > 0)) return this;
-    el.width = Math.round(nextWidth * dpr);
-    el.height = Math.round(nextHeight * dpr);
-    if (el.style) {
-      el.style.width = `${nextWidth}px`;
-      el.style.height = `${nextHeight}px`;
-    }
-    this.ice.canvasWidth = el.width;
-    this.ice.canvasHeight = el.height;
-    if (typeof this.ice.updateCanvasBoundingRect === 'function') this.ice.updateCanvasBoundingRect();
+    // 尺寸对齐交给引擎：backing store × dpr、CSS 尺寸、canvasWidth/Height，
+    // 以及命中矩形 / 内容盒的同步都在它里面，一份实现。
+    //
+    // 这里以前是自己算的，用的是 getBoundingClientRect() 的 **border-box** 尺寸 ——
+    // 画布带边框时会整体偏大（引擎注释里警告过："直接用 border-box 会被边框撑大，
+    // 示例页画布带 1px 边框"）。上面那句"内容盒"一直是意图、不是实现；现在才是。
+    this.ice.fitCanvasToDisplaySize(cssWidth, cssHeight);
+    // 拿不到有效尺寸就不重排：算出来的布局没有意义（沿用既有保护）
+    if (!(this.ice.canvasWidth > 0) || !(this.ice.canvasHeight > 0)) return this;
     this.rebuild(false);
     return this;
   }
