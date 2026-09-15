@@ -15,7 +15,7 @@ export default defineConfig({
   webServer: {
     command: 'node scripts/serve-examples.cjs',
     port: 5177,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
   use: {
