@@ -165,6 +165,10 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   拿「饱和墨迹」当系列会被它污染 —— 实测出现 -395px 这种离谱的越界值。
   系列包围盒直接用 `seriesComponents[].pixelAt(i)` + 组件盒偏移算，干净且精确。
 
+- **主题写入契约（引擎 2.14 起）**：图表的主题补丁走 `ice.setThemePatch('ice-chart', patch)`，
+  **不要**再调 `ice.setTheme()` —— `setTheme` 写的是"基座"（UI 主题的地盘），两边都写基座就是"后写的赢"：
+  应用切 UI 主题会把图表主题抹掉，图表推主题会把 UI 主题抹掉。补丁层让两层互不覆盖、调用顺序无关。
+  （`theme:'auto'` 例外：它本来就是"跟随引擎"，不推主题，见 `ICEChart` 里的注释。）
 - 默认主题 = **Bootstrap 5**（`src/theme/chartTheme.ts` 的 `BOOTSTRAP_TOKENS`）。
   新增组件取色一律从主题里取，不要写死色值；示例页 CSS 也用 Bootstrap 变量。
   例外：**压在图形上的文字描边**走 `theme.labelHaloColor`（浅色 = 白、深色 = 深色）——

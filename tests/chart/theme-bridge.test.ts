@@ -35,10 +35,6 @@ describe('图表主题 → 引擎主题', () => {
 
   it('映射只用图表主题已有的 token（同名语义）', () => {
     const patch = chartThemeToEnginePatch(BOOTSTRAP_DARK_CHART_THEME);
-    expect(patch.background).toBe(BOOTSTRAP_DARK_CHART_THEME.backgroundColor);
-    expect(patch.text).toBe(BOOTSTRAP_DARK_CHART_THEME.textColor);
-    expect(patch.muted).toBe(BOOTSTRAP_DARK_CHART_THEME.subTextColor);
-    expect(patch.border).toBe(BOOTSTRAP_DARK_CHART_THEME.axisLineColor);
     expect(patch.palette).toEqual(BOOTSTRAP_DARK_CHART_THEME.colorPalette);
     expect(patch.chrome.selection.stroke).toBe(BOOTSTRAP_DARK_CHART_THEME.selection.stroke);
     expect(patch.chrome.linkLabel.background).toBe(BOOTSTRAP_DARK_CHART_THEME.tooltip.background);
@@ -47,25 +43,37 @@ describe('图表主题 → 引擎主题', () => {
     expect(patch.base.fontSize.md).toBe(BOOTSTRAP_DARK_CHART_THEME.fontSize);
   });
 
+  it('**不写宿主的语义色**（补丁压在基座之上，写了就会一直盖住宿主）', () => {
+    const patch = chartThemeToEnginePatch(BOOTSTRAP_DARK_CHART_THEME);
+    // 这些槽位属于宿主（UI 主题）：图表自己画轴/系列/图例/背景，用不到它们
+    for (const key of ['primary', 'success', 'warning', 'danger', 'info', 'text', 'muted', 'hint', 'border', 'background']) {
+      expect(patch[key]).toBeUndefined();
+    }
+    // 但**图表派生的外壳**要写（选中框 / 手柄 / 插槽 / 引导线 / 连线标签 / 选区 / 阴影）
+    expect(patch.chrome.handle.fill).toBe(BOOTSTRAP_DARK_CHART_THEME.colorPalette[0]);
+    expect(patch.chrome.slot.fill).toBe(BOOTSTRAP_DARK_CHART_THEME.colorPalette[1]);
+  });
+
   it('建图时就把图表主题推给引擎（亮色主题）', async () => {
     const c = mount({ ...BASE, theme: 'light' });
     await c.render();
     const semantic = c.ice.getTheme().semantic;
-    expect(semantic.text).toBe(BOOTSTRAP_CHART_THEME.textColor);
+    // 推的是**图表自己那层**：调色板 + 图表派生的外壳（宿主语义色不动，见上一条用例）
     expect(semantic.palette[0]).toBe(BOOTSTRAP_CHART_THEME.colorPalette[0]);
+    expect(semantic.chrome.handle.fill).toBe(BOOTSTRAP_CHART_THEME.colorPalette[0]);
   });
 
   it('切换图表主题（setOption）时引擎主题跟着换', async () => {
     const c = mount({ ...BASE, theme: 'light' });
     await c.render();
-    const lightText = c.ice.getTheme().semantic.text;
+    const lightHandle = c.ice.getTheme().semantic.chrome.handle.fill;
 
     c.setOption({ ...BASE, theme: 'dark' });
     await c.render();
     const darkSemantic = c.ice.getTheme().semantic;
-    // 两个主题的 backgroundColor 都是 transparent（图表自己不画底），所以拿文字色比对
-    expect(darkSemantic.text).toBe(BOOTSTRAP_DARK_CHART_THEME.textColor);
-    expect(darkSemantic.text).not.toBe(lightText);
+    // 拿"图表派生的外壳"比对（宿主的语义色不归图表管，见上面的用例）
+    expect(darkSemantic.chrome.handle.fill).toBe(BOOTSTRAP_DARK_CHART_THEME.colorPalette[0]);
+    expect(darkSemantic.chrome.handle.fill).not.toBe(lightHandle);
     expect(darkSemantic.palette[0]).toBe(BOOTSTRAP_DARK_CHART_THEME.colorPalette[0]);
   });
 
@@ -90,9 +98,12 @@ describe('图表主题 → 引擎主题', () => {
     await c.render();
     const semantic = c.ice.getTheme().semantic;
     expect(semantic.palette[0]).toBe('#ff0000');
-    expect(semantic.text).toBe('#111111');
-    // 没覆盖的字段仍来自亮色基底
-    expect(semantic.border).toBe(BOOTSTRAP_CHART_THEME.axisLineColor);
+    expect(semantic.palette[1]).toBe('#00ff00');
+    // 数组是**整份替换**（不是逐项深合并）：推两项，引擎里就是两项
+    expect(semantic.palette.length).toBe(2);
+    // 图表派生的外壳也跟着这份调色板（手柄 = 第 1 色、插槽 = 第 2 色）
+    expect(semantic.chrome.handle.fill).toBe('#ff0000');
+    expect(semantic.chrome.slot.fill).toBe('#00ff00');
   });
 
   /**
