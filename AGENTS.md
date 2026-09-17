@@ -64,6 +64,23 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
 11. **用户输入的表达式一律走 `src/expr`**：禁止 `eval` / `new Function`（CSP 与安全），
     编译失败要能给出位置，且**不能让图表崩**（错误经 `chart.expressionErrors()` 暴露）。
 
+## 成员顺序（2026-09-17 定）
+
+家族的应用层（各仓的页面 / 示例页）按这个顺序排类成员，正则 `S*T*F*C*(A|M)*`：
+
+```
+static 常量/字段  →  static 方法  →  实例字段  →  构造函数  →  访问器 / 实例方法
+```
+
+**本仓是库，`src/` 不强制这条** —— 2026-09-17 体检里只有 3 个类偏离（`ICEChart` 的
+`static restore()` 放在类尾、`Annotation` / `TreemapSeries` 的私有 scratch 字段紧挨着
+用到它的方法），都是能讲得通的"就近放置"。为排版搬家不值得：**TS 里字段的声明顺序是有语义的**
+（初始化按声明顺序执行 + 影响 V8 的 class shape），何况 Google Java Style §3.4.2 明确说
+成员顺序"**没有唯一正确的配方**"、Google 的 TypeScript 指南对顺序**完全沉默**
+（全文 "ordering" 出现 0 次）。
+
+**新代码照契约写；老代码遇到再改**（Boy Scout）。示例页（`examples/*.html`）按契约排。
+
 ## 坐标与原点约定
 
 - 所有图表组件 `origin: 'top-left'`，本地坐标系就是「左上角为原点」的像素坐标；
