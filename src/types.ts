@@ -903,6 +903,8 @@ export type ChartEventName =
   | 'zoom:change'
   | 'pan:change'
   | 'legend:toggle'
+  | 'mark:drag'
+  | 'mark:dragend'
   | 'data:change'
   | 'render';
 
@@ -919,6 +921,18 @@ export interface ChartEventPayloads {
   'zoom:change': ZoomRange;
   'pan:change': ZoomRange;
   'legend:toggle': LegendToggleParams;
+  /**
+   * 数据坐标图元被拖动（拖动过程中每次移动抛一次）。
+   *
+   * 这两个名字**一直是运行时事实**（`ICEChart.addMark` 的拖拽通道与
+   * `finishMarkDrag()` 早就 emit 了它们，README 的事件表也一直列着），
+   * 只是漏在 `ChartEventName` 联合类型之外 —— 于是 `chart.on()` 的宽签名
+   * 让调用处能过、而任何拿 `ChartEventName` 做穷举或建类型安全事件表的代码
+   * 都会**静默漏掉**这两个事件（不报错，只是收不到）。这里补齐。
+   */
+  'mark:drag': ChartMarkData;
+  /** 图元拖动结束（此时锚点已写回数据坐标）。 */
+  'mark:dragend': ChartMarkData;
   /** 通过 setData / setOption 更新数据后触发。 */
   'data:change': { seriesId?: string; seriesIndex?: number };
   render: undefined;

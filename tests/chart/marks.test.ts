@@ -1,7 +1,19 @@
 import { ICERect, ICEStar, ICEText } from 'ice-render';
 import { createChart } from '../../src/index';
 import type { ICEChart } from '../../src/ICEChart';
-import type { ChartOption } from '../../src/types';
+import type { ChartEventHandler, ChartEventName, ChartMarkData, ChartOption } from '../../src/types';
+
+/**
+ * 类型层棘轮：`ChartEventName` 必须包含 README 事件表里列出的这两个 mark 事件。
+ *
+ * 只写 `chart.on('mark:drag', (d: any) => …)` 是抓不住缺口的 —— `on()` 的签名是宽的，
+ * 运行时照样收得到。这里用 `ChartEventHandler<'mark:drag'>` 把**名称 + 载荷**一起钉住，
+ * 漏一个 `types:check` 就红。
+ */
+const MARK_EVENT_HANDLERS: Partial<{ [K in ChartEventName]: ChartEventHandler<K> }> = {
+  'mark:drag': (data: ChartMarkData) => void [data.id, data.pixel, data.xValue, data.yValue],
+  'mark:dragend': (data: ChartMarkData) => void [data.id, data.pixel],
+};
 
 const OPTION: ChartOption = {
   xAxis: { type: 'category', data: ['1月', '2月', '3月', '4月'] },
@@ -123,12 +135,19 @@ describe('数据坐标图元（mark）', () => {
     expect(marks[1].component.state.display).not.toBe(false);
   });
 
+  it('mark 事件名与 README 事件表一致（补上类型联合里漏掉的两个）', () => {
+    expect(Object.keys(MARK_EVENT_HANDLERS).sort()).toEqual(['mark:drag', 'mark:dragend']);
+    expect(typeof MARK_EVENT_HANDLERS['mark:drag']).toBe('function');
+  });
+
   it('拖拽：写回数据坐标并抛 mark:drag / mark:dragend', async () => {
     const c = mount();
-    const dragged: any[] = [];
-    c.on('mark:drag', (data: any) => dragged.push(data));
-    const ended: any[] = [];
-    c.on('mark:dragend', (data: any) => ended.push(data));
+    // 回调**不写 any**：这两个事件名必须真的在 `ChartEventName` / `ChartEventPayloads` 里，
+    // 否则 `types:check` 会红（曾经的缺口就是"运行时能收、类型里没有"，静默漏掉不报错）。
+    const dragged: ChartMarkData[] = [];
+    c.on('mark:drag', (data) => dragged.push(data));
+    const ended: ChartMarkData[] = [];
+    c.on('mark:dragend', (data) => ended.push(data));
     const rect = new ICERect({ width: 12, height: 12, fill: true, draggable: true, interactive: true, style: { fillStyle: '#dc3545' } });
     const mark = c.addMark({ type: 'yLine', y: 120, component: rect });
     await c.render();

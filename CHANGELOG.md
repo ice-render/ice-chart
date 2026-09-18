@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+> 下一个版本发布前，改动在这里累积。
+
+## [0.24.0] - 2026-09-18
+
+### 新增
+
+- **`ChartEventName` 补上 `mark:drag` / `mark:dragend`**（此前只有运行时事实、类型里没有）。
+  这两个事件一直在 emit（`addMark` 的拖拽通道与 `finishMarkDrag()`），README 的事件表也一直列着，
+  却漏在 `ChartEventName` 联合类型与 `ChartEventPayloads` 之外 —— 而 `on(event, fn)` 的签名是宽的，
+  于是**任何拿事件名做穷举、或建类型安全事件表的地方都会静默漏掉**（不报错，只是收不到）。
+  载荷类型是现有的 `ChartMarkData`。
+
 ### 变更
 
 - **主题补丁层**（引擎 2.14 起）：本仓写引擎主题的入口从"直接改实例主题"改成**命名补丁**
@@ -16,6 +28,10 @@
 
 - 新增 `tests/theme/color-budget.test.ts`：写死色值的**按文件预算棘轮**（只减不增）。
   库这一层以前没有这道门禁，于是"顺手写个写死色值"没人拦。
+- `tests/chart/marks.test.ts`：mark 拖拽用例的回调参数从 `any` 收成 `ChartMarkData`，
+  并加一条类型层棘轮（`Partial<{ [K in ChartEventName]: ChartEventHandler<K> }>` 里必须能写出
+  这两个事件）—— 事件名漏一个，`npm run types:check` 就红。**类型缺口只能靠类型门禁守**，
+  运行时用例永远抓不住"能收但没类型"。
 
 ## 0.23.4 - 2026-09-15
 

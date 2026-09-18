@@ -1,7 +1,7 @@
 {
   "author": "大漠穷秋",
   "name": "@damoqiongqiu/ice-chart",
-  "version": "0.23.4",
+  "version": "0.24.0",
   "license": "MIT",
   "description": "基于 ice-render Canvas 引擎的交互式图表库：命中测试与事件派发由引擎承担，图表层只做「数据 ↔ 像素 ↔ 语义事件」。",
   "keywords": [
