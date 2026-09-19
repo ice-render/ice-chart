@@ -4,6 +4,19 @@
 
 > 下一个版本发布前，改动在这里累积。
 
+## [0.27.1] - 2026-09-19
+
+### 修复
+
+- **删掉"只对原始 DOM 事件调 `preventDefault`"的历史绕过**：那是为 `ice-render@2.17` 及以前
+  写的 —— 那时 `ICEEvent.preventDefault()` 是 `throw new Error('Method not implemented.')` 的桩，
+  直接调会把整条事件派发链打断。2.18 起它是真实现（`cancelable` 时置 `defaultPrevented`
+  并**转给原始 DOM 事件**），本包 peer 下限也已抬到 `^2.18.0`，所以改成：
+  ① 优先调事件自身的 `preventDefault()`；② 只有"事件桩（仅 `originalEvent`）"或 ① 抛了
+  （原生方法未绑定 / 被动监听器）才退回直接调原始事件。
+
+  **对外无行为变化**（回归：原有用例继续通过，新增"事件自己有 `preventDefault` 时优先用它"一条）。
+
 ## [0.27.0] - 2026-09-19
 
 ### 变更
