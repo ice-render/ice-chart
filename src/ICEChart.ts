@@ -1,4 +1,4 @@
-import { ICE, ICEGroup } from 'ice-render';
+import { ICE, ICEGroup, ICE_EVENT_NAME_CONSTS } from 'ice-render';
 import type {
   AnnotationDiagnostic,
   ChartMarkData,
@@ -512,7 +512,7 @@ export class ICEChart {
     // 用户拖动图元 → 反解成数据坐标回写（用 AFTER_MOVE：拖拽过程与程序化移动都会触发，
     // 所以摆位期间用 syncingMarks 兜住，避免「自己摆一下也算用户拖了」）
     if (typeof spec.component.on === 'function') {
-      spec.component.on('AFTER_MOVE', (evt: any) => {
+      spec.component.on(ICE_EVENT_NAME_CONSTS.AFTER_MOVE, (evt: any) => {
         if (this.syncingMarks) return;
         // 用事件载荷里的 left/top：引擎在 BEFORE_MOVE → 改 state → AFTER_MOVE 之间更新状态，
         // 直接读 state 有可能会拿到旧值（实测差 3.4 个数据单位）。
@@ -992,10 +992,10 @@ export class ICEChart {
         return;
       }
       const handler = () => {
-        bus.off('ROUND_FINISH', handler, null);
+        bus.off(ICE_EVENT_NAME_CONSTS.ROUND_FINISH, handler, null);
         resolve();
       };
-      bus.on('ROUND_FINISH', handler, null);
+      bus.on(ICE_EVENT_NAME_CONSTS.ROUND_FINISH, handler, null);
       this.ice.dirty = true;
     });
   }
@@ -1195,7 +1195,7 @@ export class ICEChart {
     const bus: any = this.ice.evtBus;
     if (!bus) return;
     this.domainFrameHandler = () => this.stepDomainTransition();
-    bus.on('ICE_FRAME_EVENT', this.domainFrameHandler, this);
+    bus.on(ICE_EVENT_NAME_CONSTS.ICE_FRAME_EVENT, this.domainFrameHandler, this);
   }
 
   private stepDomainTransition(): void {
@@ -1226,7 +1226,7 @@ export class ICEChart {
   private stopDomainTransition(): void {
     if (!this.domainFrameHandler) return;
     const bus: any = this.ice && this.ice.evtBus;
-    if (bus) bus.off('ICE_FRAME_EVENT', this.domainFrameHandler, this);
+    if (bus) bus.off(ICE_EVENT_NAME_CONSTS.ICE_FRAME_EVENT, this.domainFrameHandler, this);
     this.domainFrameHandler = null;
   }
 
