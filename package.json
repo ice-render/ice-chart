@@ -68,7 +68,7 @@
     "verify:full": "npm run verify && npm run test:e2e"
   },
   "peerDependencies": {
-    "ice-render": "^2.17.0"
+    "ice-render": "^2.18.0"
   },
   "devDependencies": {
     "@babel/core": "7.28.5",
