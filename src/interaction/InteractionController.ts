@@ -161,18 +161,27 @@ export class InteractionController {
   /**
    * 阻止默认行为。
    *
-   * 只对**原始 DOM 事件**调用，原因有两条：
-   * ① `ice-render@2.17.0` 及以前，`ICEEvent.preventDefault()` 是 `throw new Error('Method not implemented.')`
-   *    的桩 —— 对引擎事件直接调它会把整条派发链打断；
-   * ② 某些路径下事件对象上的 `preventDefault` 是未绑定的原生方法，直接调用会抛 "Illegal invocation"。
-   * 同样要容错 —— 被动监听器里调用会被浏览器拒绝。
+   * `ice-render@2.18` 起 `ICEEvent.preventDefault()` 是**真实现**：`cancelable` 时置 `defaultPrevented`
+   * 并**转给原始 DOM 事件**；原生 DOM 事件自然也是直接生效。所以这里不再需要区分来源，
+   * 只留一层容错 —— 某些运行时里事件上的 `preventDefault` 是未绑定的原生方法（"Illegal invocation"）、
+   * 被动监听器里调用也会被浏览器拒绝，这两种情况忽略即可，不影响交互语义。
    *
-   * ⚠️ `ice-render` 2.18 起 `preventDefault()` 是真实现（`cancelable` 时生效、并转给原始 DOM 事件），
-   * 那时这层封装可以退化成一行 `evt.preventDefault()`；本包 peer 下限是 `^2.17.0`，
-   * 所以要等引擎发版、peer 抬上去之后再简化。
+   * （历史：2.17 及以前 `ICEEvent.preventDefault()` 是 `throw new Error('Method not implemented.')` 的桩，
+   * 那时只能对 `evt.originalEvent` 调；peer 下限抬到 `^2.18.0` 之后这层绕过就删掉了。）
    */
   private preventDefault(evt: any): void {
-    const raw = evt && evt.originalEvent ? evt.originalEvent : evt;
+    if (!evt) return;
+    // ① 首选事件自身的方法：`ICEEvent`（2.18+）会自己转给原始 DOM 事件，原生事件直接生效
+    if (typeof evt.preventDefault === 'function') {
+      try {
+        evt.preventDefault();
+        return;
+      } catch (err) {
+        // 落到 ② 再试一次：被动监听器 / 原生方法未绑定（"Illegal invocation"）
+      }
+    }
+    // ② 兜底：事件桩（只有 originalEvent）或上面抛了的情况，直接对原始事件调
+    const raw = evt.originalEvent;
     if (!raw || typeof raw.preventDefault !== 'function') return;
     try {
       raw.preventDefault();

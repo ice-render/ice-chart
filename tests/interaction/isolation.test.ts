@@ -121,4 +121,25 @@ describe('多图事件隔离', () => {
     });
     expect(called).toBe(true);
   });
+
+  it('prefers the event own preventDefault (ice-render 2.18+ forwards it to the DOM event)', async () => {
+    const chart = await mount();
+    const plot = chart.layout.plot;
+    let ownCalled = false;
+    let rawCalled = false;
+    chart.controller.handleWheel(plot.x + plot.width / 2, plot.y + plot.height / 2, 120, {
+      // 引擎 2.18 起 ICEEvent.preventDefault() 是真实现：它自己会转给原始 DOM 事件
+      preventDefault() {
+        ownCalled = true;
+      },
+      originalEvent: {
+        preventDefault() {
+          rawCalled = true;
+        },
+      },
+    });
+    expect(ownCalled).toBe(true);
+    // 事件自己有 preventDefault 时，不再越级直接调原始事件（转发由引擎负责）
+    expect(rawCalled).toBe(false);
+  });
 });
