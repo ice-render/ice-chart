@@ -120,7 +120,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter、**数据域留白 `padding`（默认 5%）** |
 | 图例 | top / bottom / left / right | **可点击切换系列 / 扇区显隐**并重算数据域 |
-| 提示框 | axis / item 触发器 | 画在画布内（小程序同样可用）；K 线给 OHLC、桑基给流量 |
+| 提示框 | axis / item 触发器 | 画在画布内（不依赖 HTML 浮层）；K 线给 OHLC、桑基给流量 |
 | 十字准星 | x / y / xy | 带坐标轴数值标签；跟随时长按距离缩放（`crosshair.followDuration`，默认上限 90ms，`0` = 立即跟随） |
 | 悬停高亮 | 圆环 / 柱形描边 | 可配置 `dimOthers` 压暗其他系列 |
 | 选中 | single / multiple | 点击或键盘 Enter，抛出 `select:change` |

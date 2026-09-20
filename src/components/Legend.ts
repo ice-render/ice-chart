@@ -73,7 +73,7 @@ export class Legend extends ChartComponent {
   }
 }
 
-/** 圆角矩形路径（不依赖 roundRect API，兼容小程序基础库）。 */
+/** 圆角矩形路径（手写四段圆弧：与全局 Path2D / SVG 导出共用同一条命令流，不依赖 roundRect API）。 */
 export function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: number): void {
   const radius = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();

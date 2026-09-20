@@ -1,6 +1,6 @@
 /**
  * 文本测量与排版。优先用真实 ctx.measureText，拿不到时退化为估算
- * —— 小程序 / 单测里也可能没有可用的 2d 上下文。
+ * —— 单测里也可能没有可用的 2d 上下文。
  */
 
 export interface TextMetricsLike {

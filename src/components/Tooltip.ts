@@ -17,7 +17,7 @@ export interface TooltipContent {
 }
 
 /**
- * 提示框。画在画布内（不使用 HTML 浮层），因此小程序等无 DOM 运行时同样可用，
+ * 提示框。画在画布内（不使用 HTML 浮层），因此无 DOM 的宿主（headless / 测试桩）同样可用，
  * 也能被引擎的离屏缓存 / 脏矩形机制正确擦除。
  */
 export class Tooltip extends ChartComponent {
