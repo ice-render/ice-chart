@@ -1,7 +1,7 @@
 import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
-import { arrayAccessors } from '../internal';
-import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
+import { arrayAccessors, columnAccessors } from '../internal';
+import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption, SeriesColumns } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
@@ -109,6 +109,15 @@ export interface NormalizeContext {
   yDomain?: [number, number] | null;
   /** 每个 y 轴的数据域（多轴时按 index 区分）。 */
   yDomains?: Array<[number, number] | null>;
+  /**
+   * 虚拟（列存）系列的数据列缓存，key 为系列 id。
+   *
+   * 为什么需要：`data` 在第一次归一化之后就被释放了（这正是虚拟化省内存的地方），
+   * 而一次 `applyOption` 会归一化两遍（applyOption 自己一遍、rebuild 一遍）。
+   * 于是列存要在**图表实例**上留一份：第一遍建列并放进缓存，第二遍直接复用。
+   * 带 data 的输入永远以 data 为准（缓存只是「没有 data 时怎么办」的答案）。
+   */
+  virtualColumns?: Map<string, SeriesColumns>;
 }
 
 /**
@@ -256,6 +265,10 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
       ? xAxisOption.type
       : 'linear'
     : resolveXAxisType(xAxisOption, series);
+  // 虚拟（列存）系列只有数值列，类目轴表达不了它（别让 100 万个数值被聚合成 100 万个类目）
+  if (series.some((s) => s.virtual) && (xType === 'category' || horizontal)) {
+    throw new Error('[ice-chart] 虚拟（列存）系列只支持数值型 x 轴（xAxis.type 不要写 category）。');
+  }
   let rawXDomain: any[];
   let categories: any[];
   if (horizontal) {
@@ -391,6 +404,40 @@ function buildSeries(
     }
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
+    // 列存（虚拟）系列：只建列，不建数据点数组（见 plans/scatter-large-data-virtualization.md）
+    if (option.virtual) {
+      const cached = context && context.virtualColumns ? context.virtualColumns.get(id) : undefined;
+      // 没有 data（已被释放）时复用上一遍建好的列；带 data 的输入永远以 data 为准
+      const columns = cached && option.data === undefined ? cached : buildVirtualColumns(option, i);
+      if (context && context.virtualColumns) context.virtualColumns.set(id, columns);
+      /**
+       * **释放原始 data**：建完列之后图表只保留 x / y（/ size）三条列。
+       *
+       * 这里换掉的是 option.series 里的那一项本身（`merged.series === option.series`，
+       * 两处一起生效）—— 百万级输入（元组数组动辄 40~70MB）从此没有任何引用，
+       * 调用方自己留着的引用不受影响。提示框的 `params.data` 因此为空（见 types 里的说明）。
+       */
+      const leanOption: SeriesOption = { ...option, data: undefined };
+      seriesOptions[i] = leanOption;
+      const internal: InternalSeries = {
+        id,
+        index: i,
+        type: option.type,
+        name,
+        color,
+        option: leanOption,
+        points: [],
+        virtual: true,
+        columns,
+        pointCount: columns.y.length,
+        ...columnAccessors(columns),
+        hasExplicitX: true,
+        hidden: false,
+        axisIndex: 0,
+      };
+      out.push(internal);
+      continue;
+    }
     const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph, context);
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
@@ -408,6 +455,7 @@ function buildSeries(
       color,
       option,
       points,
+      virtual: false,
       pointCount: points.length,
       // 普通系列：读点就是 points 的直读，与迁移前逐字等价（列存系列在 Phase 2 步骤 3 换实现）。
       ...arrayAccessors(points),
@@ -429,6 +477,12 @@ function buildPoints(
   context?: NormalizeContext
 ): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
+  if (!Array.isArray(option.data) && option.data && typeof option.data === 'object') {
+    // 列式输入（{ x, y }）只有列存（virtual）系列认识；普通系列拿到它只会画出一张空图
+    throw new Error(
+      `[ice-chart] series 的列式 data（{ x, y }）需要配 virtual: true（当前 type: '${option.type}'）。`
+    );
+  }
   const points: DataPoint[] = [];
   let hasExplicitX = false;
   // 函数绘图 / 参数曲线：数据点由表达式现算（不是用户给的数组）
@@ -697,6 +751,126 @@ function toNumber(value: any): number | null {
   return isFinite(n) ? n : null;
 }
 
+/**
+ * 列存（虚拟）系列的建列：**一趟扫描**同时算好数据域、单调性与尺寸范围。
+ *
+ * 为什么必须一趟：100 万点上每多扫一遍就是几毫秒，而且中间产物（临时数组）会立刻被丢弃；
+ * 建完之后只有 `x / y / size` 三条列常驻，`points` 留空 —— 这就是省内存的全部秘密。
+ *
+ * 输入三种写法都收：
+ * 1. 列式 `{ x, y, size? }`（大数据推荐直接给 `Float64Array`，图表**直接采用**，不复制）；
+ * 2. `[[x, y], ...]` 元组数组；
+ * 3. `[y, y, ...]` 纯数值数组（x 取下标）。
+ */
+function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesColumns {
+  const fail: (reason: string) => never = (reason) => {
+    throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
+  };
+  if (option.type !== 'scatter') {
+    fail(`目前只支持散点图（scatter），收到 type: '${option.type}'。`);
+  }
+  if (option.stack) fail('不支持堆叠（stack）。');
+
+  const data: any = option.data;
+  let count = 0;
+  let readX: ((i: number) => any) | null = null;
+  let readY: ((i: number) => any) | null = null;
+  let readSize: ((i: number) => any) | null = null;
+  /** 列式输入且已经是 Float64Array 时直接采用（省掉一份 8MB/百万点的复制）。 */
+  let adoptX: Float64Array | null = null;
+  let adoptY: Float64Array | null = null;
+  let adoptSize: Float64Array | null = null;
+
+  if (data && !Array.isArray(data) && typeof data === 'object' && (data as any).x !== undefined) {
+    const cols: any = data;
+    count = Number(cols.y.length) || 0;
+    if (Number(cols.x.length) !== count) fail(`的 x / y 长度不一致（${cols.x.length} vs ${cols.y.length}）。`);
+    readX = (i) => cols.x[i];
+    readY = (i) => cols.y[i];
+    readSize = cols.size ? (i) => cols.size[i] : null;
+    adoptX = cols.x instanceof Float64Array ? cols.x : null;
+    adoptY = cols.y instanceof Float64Array ? cols.y : null;
+    adoptSize = cols.size instanceof Float64Array ? cols.size : null;
+  } else if (Array.isArray(data)) {
+    count = data.length;
+    readX = (i) => (Array.isArray(data[i]) ? data[i][0] : i);
+    readY = (i) => (Array.isArray(data[i]) ? data[i][1] : data[i]);
+    readSize = (i) => (Array.isArray(data[i]) && data[i].length > 2 ? data[i][2] : undefined);
+  } else {
+    fail('需要 data（列式 { x, y }、元组数组或数值数组）。');
+  }
+
+  const x = adoptX && adoptX.length === count ? adoptX : new Float64Array(count);
+  const y = adoptY && adoptY.length === count ? adoptY : new Float64Array(count);
+  if (!readX || !readY) fail('的数据无法解析。');
+  if (!adoptX || adoptX.length !== count) {
+    for (let i = 0; i < count; i++) {
+      const value = Number(readX(i));
+      if (!isFinite(value)) fail(`需要数值型 x（第 ${i} 项是 ${JSON.stringify(readX(i))}）。`);
+      x[i] = value;
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      if (!isFinite(x[i])) fail(`需要数值型 x（第 ${i} 项是 ${JSON.stringify(x[i])}）。`);
+    }
+  }
+
+  let hasSize = false;
+  const size = adoptSize && adoptSize.length === count ? adoptSize : new Float64Array(count).fill(NaN);
+  for (let i = 0; i < count; i++) {
+    const rawSize = readSize ? readSize(i) : undefined;
+    if (rawSize !== undefined && rawSize !== null && rawSize !== '') {
+      const parsed = Number(rawSize);
+      if (isFinite(parsed)) {
+        size[i] = parsed;
+        hasSize = true;
+      }
+    }
+    const parsedY = toNumber(readY(i));
+    y[i] = parsedY === null ? NaN : parsedY;
+  }
+
+  // 数据域 / 单调性：与建列同一趟（下面的循环就是扫描本体，上面那次只做了拷贝）
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  let monotonic = true;
+  let prevX = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const xv = x[i];
+    if (xv < xMin) xMin = xv;
+    if (xv > xMax) xMax = xv;
+    if (xv < prevX) monotonic = false;
+    prevX = xv;
+    const yv = y[i];
+    if (!Number.isNaN(yv)) {
+      if (yv < yMin) yMin = yv;
+      if (yv > yMax) yMax = yv;
+    }
+    const sv = size[i];
+    if (!Number.isNaN(sv)) {
+      if (sv < sMin) sMin = sv;
+      if (sv > sMax) sMax = sv;
+    }
+  }
+  if (!isFinite(xMin)) {
+    xMin = 0;
+    xMax = 1;
+  }
+  return {
+    x,
+    y,
+    size: hasSize ? size : null,
+    xDomain: [xMin, xMax],
+    yDomain: isFinite(yMin) ? [yMin, yMax] : null,
+    xMonotonic: monotonic,
+    sizeExtent: hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null,
+  };
+}
+
 /** 推断 x 轴类型：显式配置优先，其次是「有柱状图 → 类目」。 */
 function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear' | 'category' | 'time' | 'log' {
   if (option.type) return option.type;
@@ -956,6 +1130,11 @@ function buildXDomain(
 
   const values: number[] = [];
   for (const s of series) {
+    // 虚拟（列存）系列：数据域在归一化那一趟里算好了，别再扫一遍全量数据
+    if (s.columns) {
+      values.push(s.columns.xDomain[0], s.columns.xDomain[1]);
+      continue;
+    }
     // 参数曲线的横坐标不是 xValue（那是参数 t），要用 x(t) 的极值
     if (s.domainXValues && s.domainXValues.length) {
       for (const v of s.domainXValues) if (isFinite(v)) values.push(v);
@@ -1042,6 +1221,11 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     if (s.hidden) continue;
     if (s.axisIndex !== axisIndex) continue;
     if (s.type === 'bar' || s.type === 'area') includeZero = true;
+    // 虚拟（列存）系列：数据域在归一化那一趟里算好了
+    if (s.columns) {
+      if (s.columns.yDomain) values.push(s.columns.yDomain[0], s.columns.yDomain[1]);
+      continue;
+    }
     // 函数绘图：数据域用稳健范围（分位数剪掉尖峰），而不是逐点求 min/max
     if (s.domainValues && s.domainValues.length) {
       const [lo, hi] = robustRange(s.domainValues);

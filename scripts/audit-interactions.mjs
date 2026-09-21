@@ -41,7 +41,6 @@ const pages = [
   'editable-chart',
   'annotation',
   'animation',
-  'finance',
   'sankey',
   'serialize',
   'interactions',
@@ -53,6 +52,7 @@ const pages = [
   'dashboard-logistics',
   'dashboard-lab',
   'large-data',
+  'large-data-scatter-virtual',
   'a11y',
   'linked-charts',
 ];

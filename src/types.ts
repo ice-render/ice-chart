@@ -9,6 +9,20 @@
 /** 单条数据项：数字、[x, y]、[x, y, size]（气泡图）、或对象。 */
 export type DataItem = number | null | [any, number | null] | [any, number | null, number] | Record<string, any>;
 
+/**
+ * 列式输入：与 `[x, y]` 数组等价，但不产生「每点一个小数组」。
+ *
+ * 100 万个 `[x, y]` 元组本身就要 40~70MB（每个都是独立对象）。
+ * 大数据量请直接给 `Float64Array`（图表会**直接采用**，不再复制一份）。
+ */
+export interface SeriesColumnData {
+  x: ArrayLike<number>;
+  /** `null` / `NaN` 表示断点。 */
+  y: ArrayLike<number | null>;
+  /** 可选第三维（气泡尺寸）。 */
+  size?: ArrayLike<number>;
+}
+
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
 /** 内置系列类型。 */
@@ -293,7 +307,18 @@ export interface SeriesOption {
   /** 绑定的 y 轴下标，默认 0（对应 option.yAxis 数组下标）。 */
   yAxisIndex?: number;
   name?: string;
-  data?: DataItem[];
+  data?: DataItem[] | SeriesColumnData;
+  /**
+   * **列存（虚拟）系列**（目前只支持 `scatter`）：不建「每点一个对象」的数据点数组，
+   * 只保留 x / y（/ size）几条列，读点时才按需合成。
+   *
+   * 代价（都是有意的取舍，别当成 bug）：
+   * - `tooltip` 的 `params.data` 为空、`symbolSize` 函数拿不到 `data`（`xValue` / `y` / `index` 照常）；
+   * - `data` 在归一化之后**会被释放**（图表不再持有原始数组），因此虚拟系列**不进 option 快照**：
+   *   `toJSON()` 之后再用 `restore()` 会显式报错，而不是还你一张空图；
+   * - 目前只支持数值型 x（类目轴、堆叠、函数绘图请继续用普通系列）。
+   */
+  virtual?: boolean;
   /** 对象型数据项的取值字段。 */
   xField?: string;
   yField?: string;

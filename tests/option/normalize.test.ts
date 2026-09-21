@@ -127,3 +127,77 @@ describe('InternalSeries.pointAt', () => {
     expect(b.pointAt(1)).toBe(b.points[1]);
   });
 });
+
+describe('虚拟（列存）系列（scatter）', () => {
+  const virtualScatter = (extra: any = {}): any => ({
+    id: 's',
+    type: 'scatter',
+    virtual: true,
+    data: [
+      [0, 1],
+      [1, 3],
+      [2, null],
+      [3, 7],
+    ],
+    ...extra,
+  });
+
+  it('只建列：points 为空、数量对、访问器按需合成', () => {
+    const norm = normalizeOption({ series: [virtualScatter()] });
+    const series = norm.series[0];
+    expect(series.virtual).toBe(true);
+    expect(series.points).toEqual([]);
+    expect(series.pointCount).toBe(4);
+    expect(series.pointAt(1)).toMatchObject({ index: 1, xValue: 1, y: 3, base: 0, top: 3 });
+    // 断点在列里是 NaN，读出来仍然是 null（与普通系列同语义）
+    expect(series.pointAt(2).y).toBeNull();
+    expect(series.yValueAt(2)).toBeNull();
+    expect(series.topAt(2)).toBe(0);
+    expect(series.xValueAt(3)).toBe(3);
+    // 数据域是建列那一趟算好的
+    expect(series.columns!.yDomain).toEqual([1, 7]);
+    expect(series.columns!.xDomain).toEqual([0, 3]);
+    expect(norm.xAxis.type).toBe('linear');
+    expect(norm.yAxis.domain[1]).toBeGreaterThanOrEqual(7);
+  });
+
+  it('归一化之后释放原始 data（图表不再持有百万级输入）', () => {
+    const option: any = { series: [virtualScatter()] };
+    normalizeOption(option);
+    expect(option.series[0].data).toBeUndefined();
+    expect(option.series[0].virtual).toBe(true);
+  });
+
+  it('列式输入直接采用（Float64Array 不复制）', () => {
+    const x = new Float64Array([0, 1, 2]);
+    const y = new Float64Array([1, 2, 3]);
+    const norm = normalizeOption({ series: [{ id: 's', type: 'scatter', virtual: true, data: { x, y } }] });
+    expect(norm.series[0].columns!.x).toBe(x);
+    expect(norm.series[0].columns!.y).toBe(y);
+    expect(norm.series[0].pointCount).toBe(3);
+  });
+
+  it('第三维进 size 列（气泡图）', () => {
+    const norm = normalizeOption({
+      series: [
+        virtualScatter({
+          data: [
+            [0, 1, 5],
+            [1, 2, 9],
+          ],
+        }),
+      ],
+    });
+    expect(norm.series[0].columns!.sizeExtent).toEqual([5, 9]);
+    expect(norm.series[0].sizeAt(1)).toBe(9);
+    expect(norm.series[0].sizeAt(0)).toBe(5);
+  });
+
+  it('非法用法显式报错（类型 / 类目轴 / 非数值 x / 堆叠）', () => {
+    expect(() => normalizeOption({ series: [{ type: 'line', virtual: true, data: [[0, 1]] }] })).toThrow(/scatter/);
+    expect(() => normalizeOption({ xAxis: { type: 'category' }, series: [virtualScatter()] })).toThrow(/数值型 x 轴/);
+    expect(() => normalizeOption({ series: [virtualScatter({ data: [['a', 1]] })] })).toThrow(/数值型 x/);
+    expect(() => normalizeOption({ series: [virtualScatter({ stack: 'g' })] })).toThrow(/堆叠/);
+    expect(() => normalizeOption({ series: [{ id: 's', type: 'scatter', virtual: true }] })).toThrow(/需要 data/);
+  });
+});

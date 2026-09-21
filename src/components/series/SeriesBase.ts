@@ -109,22 +109,24 @@ export abstract class SeriesBase extends ChartComponent {
    */
   public symbolSizeAt(index: number): number {
     const option = this.series.option;
-    const point = this.series.pointAt(index);
     const size = option.symbolSize;
     if (typeof size === 'function') {
-      const value = point ? point.y : null;
+      const value = this.series.yValueAt(index);
       let out = NaN;
       try {
+        // 虚拟（列存）系列没有原始数据项 → data 为 undefined（契约见 SeriesOption.virtual）
+        const point = this.series.virtual ? null : this.series.pointAt(index);
         out = Number(size(value, { dataIndex: index, data: point ? point.raw : undefined, seriesName: this.series.name }));
       } catch (err) {
         out = NaN;
       }
       return isFinite(out) && out > 0 ? out : 8;
     }
-    if (point && typeof point.size === 'number' && isFinite(point.size)) {
+    const own = this.series.sizeAt(index);
+    if (typeof own === 'number' && isFinite(own)) {
       const range = Array.isArray(option.symbolSizeRange) ? option.symbolSizeRange : [8, 40];
       const [min, max] = this.sizeExtent;
-      const t = max > min ? (point.size - min) / (max - min) : 0.5;
+      const t = max > min ? (own - min) / (max - min) : 0.5;
       return range[0] + (range[1] - range[0]) * Math.max(0, Math.min(1, t));
     }
     const numeric = Number(size);
@@ -143,7 +145,7 @@ export abstract class SeriesBase extends ChartComponent {
   }
 
   /** 数据里是否带第三维（气泡图尺寸）—— 逐点取值，列存系列也适用。 */
-  private hasPointSize(): boolean {
+  protected hasPointSize(): boolean {
     const series = this.series;
     for (let i = 0, n = series.pointCount; i < n; i++) {
       if (typeof series.sizeAt(i) === 'number') return true;

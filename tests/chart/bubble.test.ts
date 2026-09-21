@@ -39,6 +39,7 @@ function makeSeries(values: number[], extra: any = {}): InternalSeries {
     color: '#0D6EFD',
     option: { type: 'scatter', data: values, ...extra },
     points,
+    virtual: false,
     pointCount: points.length,
     ...arrayAccessors(points),
     hasExplicitX: false,

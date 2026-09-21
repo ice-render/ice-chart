@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 大数据量散点（列存虚拟化）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>大数据量散点：列存（虚拟）系列</h1>
+    <p class="lead">
+      100 万个点直接给 <code>Float64Array</code> 两条列（既不建 100 万个小数组、也不建 100 万个数据点对象）。
+      图表只保留 x / y 两列，像素与命中都按需现算 —— 平移 / 缩放 / 悬停都不掉帧，
+      堆占用从 150MB 量级降到十几 MB。代价写在 <code>virtual</code> 的文档里：
+      不进 option 快照（快照只有列，没有数据）、提示框里没有原始数据项。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="420"></canvas></div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card">
+      <div class="tips" id="stats">等待渲染…</div>
+      <div class="log" id="log">事件日志：</div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const COUNT = 1000000;
+      // 列式输入：x / y 两条 Float64Array（图表直接采用，不再复制一份）
+      const x = new Float64Array(COUNT);
+      const y = new Float64Array(COUNT);
+      for (let i = 0; i < COUNT; i++) {
+        x[i] = i;
+        y[i] = 50 + Math.sin(i / 3000) * 20 + Math.sin(i / 37) * 4 + (i % 50000 === 0 ? 22 : 0);
+      }
+
+      const t0 = performance.now();
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '单点采样（100 万点 × 1 系列）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        grid: { show: true, y: true, x: false },
+        interaction: {
+          hover: { enabled: true },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+        },
+        animation: { enabled: false },
+        xAxis: { type: 'linear', name: '时间轴（秒）' },
+        yAxis: { name: '%' },
+        series: [{ id: 's', type: 'scatter', name: '单点', virtual: true, data: { x, y }, symbolSize: 3 }],
+      });
+      const buildMs = performance.now() - t0;
+
+      const stats = document.getElementById('stats');
+      const updateStats = () => {
+        const component = chart.seriesComponents[0];
+        const memory = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null;
+        stats.textContent =
+          `构建耗时 ${buildMs.toFixed(0)}ms ｜ 点数 ${component.series.pointCount.toLocaleString()}` +
+          ` ｜ 数据点对象 ${component.series.points.length}` +
+          ` ｜ 像素缓存 ${component.pixels.length}` +
+          (memory === null ? '' : ` ｜ 堆 ${memory.toFixed(1)}MB`);
+      };
+      setTimeout(updateStats, 300);
+      setInterval(updateStats, 1000);
+
+      const log = document.getElementById('log');
+      let last = 0;
+      chart.on('item:hover', (p) => {
+        const now = performance.now();
+        if (now - last < 120) return; // 日志本身别成为瓶颈
+        last = now;
+        const memory = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null;
+        log.textContent =
+          `${new Date().toLocaleTimeString()}  ${p.seriesName} @ ${p.xValue} = ${Number(p.value).toFixed(1)}` +
+          (memory === null ? '' : `  ｜ 堆 ${memory.toFixed(1)}MB`) +
+          '\n' +
+          log.textContent;
+      });
+      window.__chart = chart;
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

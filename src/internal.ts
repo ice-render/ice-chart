@@ -48,6 +48,28 @@ export interface PolarLayout {
   radius: number;
 }
 
+/**
+ * 虚拟（列存）系列的数据列。
+ *
+ * 只有「点本身」值得常驻：x / y（NaN 表示断点）与可选的 size 第三维。
+ * 数据域、单调性、尺寸范围都在归一化的**同一趟扫描**里算好，
+ * 之后渲染与命中都不再遍历全量数据（见 ScatterSeries 的虚拟路径）。
+ */
+export interface SeriesColumns {
+  x: ArrayLike<number>;
+  /** NaN = 断点（对外仍然读成 `y: null`）。 */
+  y: Float64Array;
+  size: Float64Array | null;
+  /** 归一化时算好的 x 数据域（虚拟系列只支持数值轴）。 */
+  xDomain: [number, number];
+  /** 归一化时算好的 y 数据域（忽略断点）；全是断点时为 null。 */
+  yDomain: [number, number] | null;
+  /** x 是否单调不减 —— 渲染与命中的二分前提。 */
+  xMonotonic: boolean;
+  /** 尺寸列的范围（气泡映射用）；没有尺寸列时为 null。 */
+  sizeExtent: [number, number] | null;
+}
+
 export interface InternalSeries {
   id: string;
   index: number;
@@ -56,6 +78,13 @@ export interface InternalSeries {
   color: string;
   option: SeriesOption;
   points: DataPoint[];
+  /**
+   * 是否列存（虚拟）系列 —— 这类系列的 `points` 是空的，数据只在 `columns` 里。
+   * 读点/读数量一律走 `pointAt` / `pointCount`，逐点热循环走标量访问器。
+   */
+  virtual: boolean;
+  /** 列存（虚拟）系列的数据列；普通系列为 null。 */
+  columns?: SeriesColumns | null;
   /**
    * 数据点个数 —— **读点数量的唯一入口**。
    *
@@ -81,6 +110,8 @@ export interface InternalSeries {
    * 字段含义与 `DataPoint` 上一一对应。
    */
   xValueAt(index: number): any;
+  /** 第 i 个点的 y 值（`null` = 断点，渲染与命中都要跳过）。 */
+  yValueAt(index: number): number | null;
   baseAt(index: number): number;
   topAt(index: number): number;
   sizeAt(index: number): number | undefined;
@@ -134,14 +165,64 @@ export interface InternalSeries {
  */
 export function arrayAccessors(
   points: DataPoint[]
-): Pick<InternalSeries, 'pointAt' | 'xValueAt' | 'baseAt' | 'topAt' | 'sizeAt'> {
+): Pick<InternalSeries, 'pointAt' | 'xValueAt' | 'yValueAt' | 'baseAt' | 'topAt' | 'sizeAt'> {
   return {
     pointAt: (index: number): DataPoint => points[index],
     xValueAt: (index: number): any => points[index].xValue,
+    yValueAt: (index: number): number | null => points[index].y,
     baseAt: (index: number): number => points[index].base,
     topAt: (index: number): number => points[index].top,
     sizeAt: (index: number): number | undefined => points[index].size,
   };
+}
+
+/**
+ * 列存（虚拟）系列的访问器：**按需合成**一个数据点，不常驻任何 DataPoint 对象。
+ *
+ * 只允许在这里 `new DataPoint`（外加归一化建列时那一处）—— 别处一旦「先物化一份数组」
+ * 就等于把省下来的内存又还回去了。
+ */
+export function columnAccessors(
+  columns: SeriesColumns
+): Pick<InternalSeries, 'pointAt' | 'xValueAt' | 'yValueAt' | 'baseAt' | 'topAt' | 'sizeAt'> {
+  const { x, y, size } = columns;
+  const yAt = (index: number): number | null => {
+    const value = y[index];
+    return isNaNNumber(value) ? null : value;
+  };
+  return {
+    pointAt: (index: number): DataPoint => {
+      const value = yAt(index);
+      const sizeValue = size ? size[index] : NaN;
+      return {
+        index,
+        xValue: x[index],
+        y: value,
+        raw: undefined,
+        base: 0,
+        top: value === null ? 0 : value,
+        name: undefined,
+        size: isNaNNumber(sizeValue) ? undefined : sizeValue,
+      };
+    },
+    xValueAt: (index: number): any => x[index],
+    yValueAt: yAt,
+    baseAt: (): number => 0,
+    topAt: (index: number): number => {
+      const value = yAt(index);
+      return value === null ? 0 : value;
+    },
+    sizeAt: (index: number): number | undefined => {
+      if (!size) return undefined;
+      const value = size[index];
+      return isNaNNumber(value) ? undefined : value;
+    },
+  };
+}
+
+/** `NaN` 判定（列存里 NaN 是「没有值」的记号，不是数值）。 */
+function isNaNNumber(value: number): boolean {
+  return typeof value !== 'number' || Number.isNaN(value);
 }
 
 export interface InternalAxis {

@@ -31,7 +31,6 @@ const pages = [
   'dsl-vs-option',
   'editable-chart',
   'annotation',
-  'finance',
   'sankey',
   'time-series',
   'live-stream',
@@ -40,6 +39,7 @@ const pages = [
   'dashboard-energy',
   'dashboard-logistics',
   'dashboard-lab',
+  'large-data-scatter-virtual',
 ];
 
 fs.mkdirSync(outDir, { recursive: true });

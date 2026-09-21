@@ -8,7 +8,7 @@ import type {
   DataItem,
   LegendToggleParams,
 } from './types';
-import type { ChartLayout, InternalSeries, NormalizedOption, Rect } from './internal';
+import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns } from './internal';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
@@ -200,6 +200,14 @@ export class ICEChart {
   private __offThemeFollow: (() => void) | null = null;
   private a11yMirror = new A11yMirror(this);
   /**
+   * 虚拟（列存）系列的数据列（key 为系列 id）。
+   *
+   * 虚拟系列归一化后会**释放原始 data**，而一次 applyOption 要归一化两遍
+   * （applyOption 一遍、rebuild 一遍）—— 列存留在这里，第二遍直接复用，
+   * 同时也让「用户换数据」的写法（setData 带新 data）自然覆盖旧列。
+   */
+  private virtualColumns = new Map<string, SeriesColumns>();
+  /**
    * 更新动画期间的坐标轴数据域过渡。
    *
    * 数据更新时 y 轴数据域常常会变（例如最大值从 50 掉到 40），如果域瞬跳，
@@ -390,7 +398,24 @@ export class ICEChart {
     if (!target) throw new Error(`[ice-chart] 找不到系列：${seriesIdOrIndex}`);
     const appended = Array.isArray(items) ? items : [];
     if (!appended.length) return this;
-    const next = (target.item.data || []).concat(appended);
+    if (target.item.virtual) {
+      // 虚拟（列存）系列的 data 在归一化后就释放了：追加没有落脚点，
+      // 而「把 data 当成空数组再 concat」会让 100 万点悄悄变成 1 个点。
+      throw new Error(
+        `[ice-chart] 虚拟（列存）系列不支持 appendData（系列 ${
+          target.item.name || target.item.id || target.index
+        }）：请用 setData 重新给一份数据。`
+      );
+    }
+    const current = target.item.data;
+    if (current !== undefined && !Array.isArray(current)) {
+      throw new Error(
+        `[ice-chart] 列式输入（{ x, y }）不支持 appendData（系列 ${
+          target.item.name || target.item.id || target.index
+        }）：请用 setData 重新给一份数据。`
+      );
+    }
+    const next = (current || []).concat(appended);
     const maxPoints = Number(options.maxPoints);
     target.item.data =
       isFinite(maxPoints) && maxPoints > 0 && next.length > maxPoints ? next.slice(next.length - maxPoints) : next;
@@ -1102,6 +1127,18 @@ export class ICEChart {
         `[ice-chart] 快照版本 ${parsed.version} 高于当前实现支持的 ${SNAPSHOT_VERSION}，请升级 ice-chart 后再还原。`
       );
     }
+    /**
+     * 虚拟（列存）系列不参与快照：归一化时就把原始 `data` 释放了（这正是它省内存的原因），
+     * 所以快照里只有 `virtual: true` 而**没有数据**。这里显式报错 ——
+     * 静默还原出一张空图，比报错难查得多。
+     */
+    const incoming = Array.isArray(rawOption && rawOption.series) ? rawOption.series : [];
+    const emptyVirtual = incoming.findIndex((item: any) => item && item.virtual && !item.data);
+    if (emptyVirtual >= 0) {
+      throw new Error(
+        `[ice-chart] 快照里的 series[${emptyVirtual}] 是虚拟（列存）系列，数据不在快照里，无法还原：请用 setData 重新给一份数据（虚拟化省内存的代价就是不进快照）。`
+      );
+    }
     const option = options.optionPatch ? mergeOptionPatch(rawOption, options.optionPatch) : rawOption;
     this.hiddenIds = parsed.hidden || {};
     this.hiddenSlices = parsed.hiddenSlices || {};
@@ -1121,6 +1158,7 @@ export class ICEChart {
       hiddenSlices: this.hiddenSlices,
       // theme:'auto' = 跟随引擎实例主题：明暗由引擎主题的背景色亮度判定（归一化层保持纯函数）
       preferDark: isEngineThemeDark(this.ice),
+      virtualColumns: this.virtualColumns,
     });
     // 图表主题 → 引擎主题：图表实例里那些**引擎自己画的东西**（默认样式 / 交互外壳 /
     // 应用后加的自定义图元）跟着图表的主题走，避免"图表是暗的、外壳还是亮的"。
@@ -1245,6 +1283,7 @@ export class ICEChart {
       hiddenSlices: this.hiddenSlices,
       // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
       preferDark: isEngineThemeDark(this.ice),
+      virtualColumns: this.virtualColumns,
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
       yDomain:
         this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
@@ -1264,6 +1303,14 @@ export class ICEChart {
     });
     // 第二次归一化后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
     this.norm = norm;
+    // 虚拟列存缓存跟着当前系列走：不再是虚拟系列的那些列没有理由继续占着内存
+    if (this.virtualColumns.size) {
+      const live = new Set<string>();
+      for (const series of norm.series) if (series.virtual) live.add(series.id);
+      for (const key of Array.from(this.virtualColumns.keys())) {
+        if (!live.has(key)) this.virtualColumns.delete(key);
+      }
+    }
     if (this.autoYCurve) {
       // 自动贴合后同步 fullYDomains：currentRange() / y 轴缩放的夹取都以它为准
       this.fullYDomain = norm.yAxis.domain.slice();
@@ -1590,7 +1637,7 @@ export class ICEChart {
                       plot,
                       canvas: this.layout.canvas,
                       layout: layoutTreemap(
-                        (series.option.data || []) as any,
+                        (Array.isArray(series.option.data) ? series.option.data : []) as any,
                         plot,
                         norm.treemap || {},
                         norm.theme.colorPalette
