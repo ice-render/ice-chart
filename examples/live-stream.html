@@ -45,7 +45,7 @@
     <p class="lead">
       数据每 16ms 追加一次，图形跟着数据一起动：折线是滑动窗口（新点从右边进来、旧点从左边滑走），
       仪表盘指针用弹簧补间追最新值，热力图每 250ms 左移一列（颜色平滑过渡），
-      K 线的最后一根随数据实时跳动。走的是 <code>chart.appendData(id, items, { maxPoints })</code> ——
+      旋转的最后一根随数据实时跳动。走的是 <code>chart.appendData(id, items, { maxPoints })</code> ——
       滑动窗口式追加，不做值插值（窗口滑动会让下标整体前移，插值会把每个点拖向邻居的值）。
     </p>
 
@@ -73,11 +73,11 @@
 
     <div class="card">
       <div class="snapshot-head">
-        <span class="snapshot-title">实时 K 线（每 8 个采样聚合成一根）</span>
+        <span class="snapshot-title">负载峰值柱形（每 8 个采样取一个峰值）</span>
         <span class="spacer"></span>
-        <span class="snapshot-meta">最后一根随数据跳动 —— 走的是更新动画（OHLC 插值）</span>
+        <span class="snapshot-meta">最后一根随数据跳动 —— 走的是更新动画（柱高插值）</span>
       </div>
-      <canvas id="candles" width="960" height="320"></canvas>
+      <canvas id="bars" width="960" height="320"></canvas>
     </div>
 
     <div class="card" id="snapshot-panel"></div>
@@ -93,9 +93,9 @@
       };
 
       const WINDOW = 180; // 折线滑动窗口
-      const CANDLE_TICKS = 8; // 多少个采样聚合成一根蜡烛
+      const BAR_TICKS = 8; // 多少个采样归到一根柱形
       // 30 根：x 轴类目标签刚好不挤（类目轴不做抽稀，标签太密会糊成一片）
-      const CANDLE_COUNT = 30;
+      const BAR_COUNT = 30;
       const HEAT_COLS = 24;
       const METRICS = ['CPU', '内存', 'IO'];
 
@@ -181,18 +181,18 @@
         series: [{ id: 'heat', type: 'heatmap', name: '负载', data: heatData() }],
       });
 
-      // ---- 实时 K 线：每 8 个采样聚合成一根
-      const candles = [];
-      let building = null;
-      const candleChart = ICEChart.createChart('candles', {
+      // ---- 负载峰值柱形：每 8 个采样归到一根
+      const bars = [];
+      let bucket = null;
+      const barChart = ICEChart.createChart('bars', {
         legend: { show: false },
         tooltip: { trigger: 'item' },
         xAxis: { type: 'category' },
         yAxis: { name: '综合负载', min: 0, max: 100 },
         animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
-        series: [{ id: 'k', type: 'candlestick', name: '负载', data: [], barWidth: 0.55 }],
+        series: [{ id: 'k', type: 'bar', name: '峰值', data: [], barWidth: 0.55 }],
       });
-      const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
+      const barData = () => bars.slice();
 
       // ---- 主循环：每帧推 1 个（速度倍率决定每帧推几个）
       const pushTick = () => {
@@ -215,19 +215,17 @@
         stream.appendData('mem', [[t, Number(state.mem.toFixed(2))]], { maxPoints: WINDOW });
         state.pushed += 2;
 
-        // 蜡烛聚合：最后一根随数据实时跳动（用 CPU 单指标，波动比三项平均更直观）
+        // 峰值聚合：最后一根随数据实时跳动（用 CPU 单指标，波动比三项平均更直观）
         const load = state.cpu;
-        if (!building) building = { o: load, c: load, l: load, h: load };
-        building.c = load;
-        building.h = Math.max(building.h, load);
-        building.l = Math.min(building.l, load);
-        if (t % CANDLE_TICKS === 0) {
-          candles.push({ ...building });
-          if (candles.length > CANDLE_COUNT) candles.shift();
-          building = null;
-          candleChart.setData('k', candleData());
+        if (bucket === null) bucket = load;
+        else bucket = Math.max(bucket, load);
+        if (t % BAR_TICKS === 0) {
+          bars.push(bucket);
+          if (bars.length > BAR_COUNT) bars.shift();
+          bucket = null;
+          barChart.setData('k', barData());
         } else {
-          candleChart.setData('k', candleData().concat([[building.o, building.c, building.l, building.h]]));
+          barChart.setData('k', barData().concat([bucket]));
         }
 
         // 热力图：每 250ms 左移一列
@@ -288,14 +286,14 @@
         write('注入尖峰：CPU 冲向 92%');
       });
       document.getElementById('btn-reset').addEventListener('click', () => {
-        candles.length = 0;
-        building = null;
+        bars.length = 0;
+        bucket = null;
         state.tick = 0;
         state.pushed = 0;
         for (let i = 0; i < HEAT_COLS; i++) heatMatrix[i] = [30, 50, 20];
         stream.setData('cpu', []);
         stream.setData('mem', []);
-        candleChart.setData('k', []);
+        barChart.setData('k', []);
         heat.setData('heat', heatData());
         write('已清空，重新开始');
       });
@@ -303,7 +301,7 @@
       stream.on('item:hover', (p) => write(`负载 hover  t=${Number(p.xValue).toFixed(0)}  ${p.seriesName}=${Number(p.value).toFixed(1)}%`));
 
       window.__chart = stream;
-      window.__charts = { stream, gauge, heat, candles: candleChart };
+      window.__charts = { stream, gauge, heat, bars: barChart };
       window.__liveState = state;
       mountSnapshotPanel();
       write('数据流已启动');

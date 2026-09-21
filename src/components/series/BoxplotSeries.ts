@@ -74,7 +74,7 @@ export class BoxplotSeries extends SeriesBase {
       const point = this.series.points[i];
       const rect = this.boxRectAt(i);
       if (!point || !point.boxplot || !rect) continue;
-      // 水平范围按箱体，垂直范围覆盖整条须（min..max）——和 K 线的命中语义一致
+      // 水平范围按箱体，垂直范围覆盖整条须（min..max）——和箱体的命中语义一致
       const centerX = rect.x + rect.width / 2;
       if (Math.abs(localX - centerX) > rect.width / 2 + 1) continue;
       const yMin = coord.yScale.map(point.boxplot[0]);

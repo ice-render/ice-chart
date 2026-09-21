@@ -99,7 +99,7 @@
         DashKit.panel({ id: 'alarm', title: '告警 Top 5', meta: '横向排名', span: 4, height: 170 }) +
         DashKit.panel({ id: 'topo', title: '设备拓扑', meta: '可拖拽节点', span: 4, height: 170 }) +
         DashKit.panel({ id: 'firmware', title: '固件版本', meta: '环形占比', span: 4, height: 170 }) +
-        DashKit.panel({ id: 'heartbeat', title: '设备心跳 K 线', meta: '每 8 个采样一根', span: 6, height: 170 }) +
+        DashKit.panel({ id: 'heartbeat', title: '设备心跳峰值', meta: '每 8 个采样取一根峰值', span: 6, height: 170 }) +
         DashKit.panel({ id: 'events', title: '异常事件散点', meta: '按严重度着色', span: 6, height: 170 }) +
         '<div class="dk-footer"><span>ice-chart · 交互全部由引擎内建</span>' +
         '<span>同一套 12 列栅格与组件：换配色即另一个大屏</span></div>' +
@@ -260,16 +260,16 @@
         series: [{ id: 'fw', type: 'pie', name: '固件', data: firmwareData, innerRadius: 0.5, label: { show: false } }],
       });
 
-      const candles = [];
-      let building = null;
-      const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
+      const peaks = [];
+      let bucket = null;
+      const peakData = () => peaks.slice();
       const heartbeat = ICEChart.createChart('heartbeat', {
         ...BASE,
         tooltip: { trigger: 'item' },
         xAxis: { type: 'category' },
         yAxis: { name: '心跳(ms)', min: 20, max: 120 },
         animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
-        series: [{ id: 'hb', type: 'candlestick', name: '心跳', data: [], barWidth: 0.5 }],
+        series: [{ id: 'hb', type: 'bar', name: '峰值', data: [], barWidth: 0.5 }],
       });
 
       const events = [];
@@ -331,19 +331,17 @@
             firmware.setData('fw', firmwareData.map((d) => ({ ...d, value: Math.round(d.value * (0.85 + Math.random() * 0.3)) })));
           }
 
-          // 心跳 K 线：每 8 个采样聚合一根
+          // 心跳峰值：每 8 个采样归一根
           const hb = 60 + state.temp - 41 + (state.incident > 0 ? 30 : 0) + (Math.random() - 0.5) * 6;
-          if (!building) building = { o: hb, c: hb, l: hb, h: hb };
-          building.c = hb;
-          building.h = Math.max(building.h, hb);
-          building.l = Math.min(building.l, hb);
+          if (bucket === null) bucket = hb;
+          else bucket = Math.max(bucket, hb);
           if (t % 8 === 0) {
-            candles.push({ ...building });
-            if (candles.length > 34) candles.shift();
-            building = null;
-            heartbeat.setData('hb', candleData());
+            peaks.push(bucket);
+            if (peaks.length > 34) peaks.shift();
+            bucket = null;
+            heartbeat.setData('hb', peakData());
           } else {
-            heartbeat.setData('hb', candleData().concat([[building.o, building.c, building.l, building.h]]));
+            heartbeat.setData('hb', peakData().concat([bucket]));
           }
 
           // 异常事件散点：随机落下，保留最近 40 个

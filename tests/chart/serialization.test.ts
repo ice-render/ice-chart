@@ -79,24 +79,6 @@ const SCENARIOS: Array<{ name: string; option: ChartOption; zoom?: [any, any] }>
     },
   },
   {
-    name: 'K 线',
-    option: {
-      xAxis: { type: 'category' },
-      yAxis: { name: '价格' },
-      series: [
-        {
-          id: 'k',
-          type: 'candlestick',
-          name: 'K',
-          data: [
-            [100, 110, 95, 115],
-            [110, 105, 100, 118],
-          ],
-        },
-      ],
-    },
-  },
-  {
     name: '热力图',
     option: {
       xAxis: { type: 'category' },

@@ -528,19 +528,6 @@ export class InteractionController {
         })),
       };
     }
-    if (anchorItem && anchorItem.series.type === 'candlestick') {
-      const point: any = anchorItem.point;
-      const ohlc = point.ohlc || [0, 0, 0, 0];
-      return {
-        title: this.host.formatAxisValue('x', point.xValue),
-        rows: [
-          { name: '开盘', value: String(ohlc[0]), color: anchorItem.series.color },
-          { name: '收盘', value: String(ohlc[1]), color: anchorItem.series.color },
-          { name: '最低', value: String(ohlc[2]), color: anchorItem.series.color },
-          { name: '最高', value: String(ohlc[3]), color: anchorItem.series.color },
-        ],
-      };
-    }
     // 箱线图：五数概括
     if (anchorItem && anchorItem.series.type === 'boxplot') {
       const point: any = anchorItem.point;

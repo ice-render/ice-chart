@@ -5,7 +5,6 @@ import { LineSeries } from './LineSeries';
 import { ScatterSeries } from './ScatterSeries';
 import { PieSeries } from './PieSeries';
 import { RadarSeries } from './RadarSeries';
-import { CandlestickSeries } from './CandlestickSeries';
 import { HeatmapSeries } from './HeatmapSeries';
 import { SankeySeries } from './SankeySeries';
 import { FunnelSeries } from './FunnelSeries';
@@ -41,7 +40,6 @@ const BUILTIN: Record<string, SeriesFactory> = {
   scatter: (series, props) => new ScatterSeries(series, props),
   pie: (series, props) => new PieSeries(series, props),
   radar: (series, props) => new RadarSeries(series, props),
-  candlestick: (series, props) => new CandlestickSeries(series, props),
   heatmap: (series, props) => new HeatmapSeries(series, props),
   sankey: (series, props) => new SankeySeries(series, props),
   funnel: (series, props) => new FunnelSeries(series, props),
