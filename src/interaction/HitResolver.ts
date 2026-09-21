@@ -90,7 +90,7 @@ export class HitResolver {
     const component = this.seriesComponentOf(series);
     if (!component) return null;
     const pixel = component.pixelAt(dataIndex);
-    const point = series.points[dataIndex];
+    const point = series.pointAt(dataIndex);
     if (!pixel || !point) return null;
     const { plot } = this.host.layout;
     return { series, point, pixel: [plot.x + pixel[0], plot.y + pixel[1]], screen: [0, 0] };
@@ -129,7 +129,7 @@ export class HitResolver {
       const item = this.buildActiveItem(series, index);
       if (!item) continue;
       items.push(item);
-      if (anchorX === null) anchorX = series.points[index].xValue;
+      if (anchorX === null) anchorX = series.pointAt(index).xValue;
     }
     if (!items.length) return null;
     return { dataIndex: items[0].point.index, xValue: anchorX, pixelX: items[0].pixel[0], items };
@@ -146,9 +146,9 @@ export class HitResolver {
     const hiddenSlices = this.host.norm.hiddenSlices || {};
     let best: { series: InternalSeries; index: number; dist: number } | null = null;
     for (const series of visible) {
-      for (let i = 0; i < series.points.length; i++) {
+      for (let i = 0; i < series.pointCount; i++) {
         if ((series.type === 'pie' || series.type === 'funnel') && hiddenSlices[`${series.id}#${i}`]) continue;
-        const dist = valueDistance(xValue, series.points[i].xValue);
+        const dist = valueDistance(xValue, series.pointAt(i).xValue);
         if (dist === null) continue;
         if (!best || dist < best.dist) best = { series, index: i, dist };
       }

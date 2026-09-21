@@ -57,6 +57,13 @@ export interface InternalSeries {
   option: SeriesOption;
   points: DataPoint[];
   /**
+   * 数据点个数 —— **读点数量的唯一入口**。
+   *
+   * 列存（虚拟）系列的 `points` 是空的，`points.length` 会得到 0
+   * （那会让整条系列被当成「没有数据」）。
+   */
+  pointCount: number;
+  /**
    * 按下标取数据点 —— **读数据点的唯一入口**。
    *
    * 普通系列就是 `points[index]`（同一个对象，逐字不变，越界同样返回 undefined）；

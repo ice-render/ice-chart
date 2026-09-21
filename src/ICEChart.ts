@@ -423,7 +423,8 @@ export class ICEChart {
   private numericXValues(): number[] {
     const set = new Set<number>();
     for (const series of this.norm.series) {
-      for (const point of series.points) {
+      for (let i = 0; i < series.pointCount; i++) {
+        const point = series.pointAt(i);
         const value = Number(point.xValue);
         if (isFinite(value)) set.add(value);
       }
@@ -799,7 +800,7 @@ export class ICEChart {
     const currentlyHidden = !!this.hiddenSlices[key];
     const nextHidden = forceSelected === undefined ? !currentlyHidden : !forceSelected;
     this.hiddenSlices[key] = nextHidden;
-    const point = series.points[dataIndex];
+    const point = series.pointAt(dataIndex);
     // 动画更新：其余扇区/阶段平滑挪位（被隐藏的那个收拢到 0 再消失）
     this.applyOption(this.option, { animate: true, preserveView: true });
     this.emit('legend:toggle', {
@@ -1635,7 +1636,7 @@ export class ICEChart {
       });
       component.barSlot = slots[series.id] || { index: 0, count: 1 };
       component.chartTheme = norm.theme;
-      component.state.ariaLabel = `${series.name} 系列，共 ${series.points.length} 个数据点`;
+      component.state.ariaLabel = `${series.name} 系列，共 ${series.pointCount} 个数据点`;
       component.updateSeries(series, !!animate && !this.viewState.x, !!this.domainTransition);
       if (series.type === 'pie' || series.type === 'funnel') {
         component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));
@@ -1889,7 +1890,8 @@ export function hiddenSliceIndexes(norm: NormalizedOption, seriesId: string): nu
   const out: number[] = [];
   const series = norm.series.find((s) => s.id === seriesId);
   if (!series) return out;
-  for (const point of series.points) {
+  for (let i = 0; i < series.pointCount; i++) {
+    const point = series.pointAt(i);
     if (norm.hiddenSlices[`${seriesId}#${point.index}`]) out.push(point.index);
   }
   return out;

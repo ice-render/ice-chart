@@ -407,6 +407,7 @@ function buildSeries(
       color,
       option,
       points,
+      pointCount: points.length,
       // 普通系列：读点就是 points 的直读，与迁移前逐字等价（列存系列在 Phase 2 步骤 3 换实现）。
       pointAt: arrayPointAt(points),
       hasExplicitX,
