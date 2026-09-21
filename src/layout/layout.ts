@@ -109,6 +109,23 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     height: Math.max(1, Math.round(bottom - top)),
   };
 
+  // x 轴标签抽稀：**必须等绘图区宽度定下来**再做（第一次建比例尺时用的是画布宽度，
+  // y 轴那一截还没扣掉；按画布宽度抽稀会把可用宽度多算 7%~11%，两个标签刚好贴住）。
+  // 两侧的余量也一起给它：绘图区左边只有 margin+坐标轴那点地方，右首标签放不下会被画布切掉。
+  if (showX) {
+    thinXAxisLabels(
+      xAxisLayout,
+      {
+        axisLength: plot.width,
+        leftRoom: plot.x,
+        rightRoom: Math.max(0, canvas.width - plot.x - plot.width),
+      },
+      ctx,
+      norm.theme.fontSize,
+      norm.theme.fontFamily
+    );
+  }
+
   // 极坐标：在可用区域里取最大的圆，并把绘图区收缩成圆的外接正方形
   let polar: { cx: number; cy: number; radius: number } | null = null;
   if (norm.kind === 'polar' || norm.kind === 'radar' || norm.kind === 'gauge' || norm.kind === 'liquid') {
@@ -231,22 +248,11 @@ function buildAxisLayout(
   // 刻度标签按**可用像素**稀释（2026-09-14）：类别轴的刻度数等于数据点数
   // （30 个点的折线就是 30 个刻度），全画出来会挤成一团。这里按「标签宽度 + 间隔」
   // 算一个步长，只保留整步长上的标签；刻度线照画。
-  if (axis === 'x' && ticks.length > 2 && maxLabelWidth > 0) {
-    // 注意：Chart 的 Scale 把区间存成 `range` **属性**（不是 d3 那种方法），两种都兼容
-    const range = typeof scale.range === 'function' ? scale.range() : scale.range;
-    const axisLength = range && range.length >= 2 ? Math.abs(range[1] - range[0]) : 0;
-    if (axisLength > 0) {
-      const spacing = axisLength / (ticks.length - 1 || 1);
-      // 经验值 64px：低于这个间隔数字标签即使不重叠也「吵」（30 个刻度会挤成一片编号）
-      const minGap = Math.max(maxLabelWidth + 10, 64);
-      if (spacing < minGap) {
-        const keepEvery = Math.ceil(minGap / spacing);
-        for (let i = 0; i < labels.length; i++) {
-          if (i % keepEvery !== 0) labels[i] = '';
-        }
-      }
-    }
-  }
+  //
+  // ⚠️ 抽稀**不能在这里做**（2026-09-21）：函数的入参 `scale` 是在 `computeLayout` 开头
+  // 用**画布宽度**建的，那时绘图区宽度还没算出来（要等 y 轴占位定下来）。按画布宽度抽稀
+  // 会把可用宽度多算 7%~11%（多出来的正好是 y 轴那一截），实际排下来每两个标签就贴住一点。
+  // 所以抽稀挪到绘图区算完之后，见 `thinXAxisLabels`。
 
   const rotate = Math.abs(Number(axisOption.labelRotate) || 0);
   const radians = (rotate * Math.PI) / 180;
@@ -262,6 +268,73 @@ function buildAxisLayout(
     nameWidth: axis === 'x' ? nameWidth : 0,
     nameHeight: name ? fontSize * 1.4 : 0,
   };
+}
+
+/**
+ * x 轴标签抽稀（**唯一一处**，`Axis` 组件不再自己算一遍）。
+ *
+ * 判据是「相邻两个标签的像素间隔 ≥ max(标签宽度 + 10, 64)」—— 64px 是舒适间隔，
+ * 低于这个值数字标签即使不重叠也「吵」（30 个刻度会挤成一片编号）。
+ *
+ * 两个必须这么写的地方：
+ * 1. **间距要用真实值**，不能给 1px 之类的地板：间距 0.24px/根时 `ceil(64 / 1)` 会得到
+ *    「88 根一跳」，而正确值是 380 根一跳 —— 差一个数量级，标签直接糊成一条色带。
+ * 2. **末尾那根单独判**：离前一个保留的标签够远就补回来，太近就把前一个让掉 ——
+ *    直接画末尾会让最后两个标签贴在一起（奇偶根数一换，末端就挤一对，实测踩到）。
+ */
+export function thinXAxisLabels(
+  axisLayout: AxisLayout,
+  geometry: { axisLength: number; leftRoom?: number; rightRoom?: number },
+  ctx: any,
+  fontSize: number,
+  fontFamily: string
+): void {
+  const ticks = axisLayout.ticks;
+  const labels = axisLayout.labels;
+  const axisLength = geometry.axisLength;
+  if (!ticks || ticks.length <= 2 || !axisLength || axisLength <= 0) return;
+  // 量宽度按样本走：类目轴上标签宽度基本一致，全量 measureText 是 O(类目数)
+  // （缩到几千根时一次布局要量几千次，白花时间）
+  const sampleStep = Math.max(1, Math.floor(ticks.length / 64));
+  let maxLabelWidth = 0;
+  for (let i = 0; i < labels.length; i += sampleStep) {
+    if (!labels[i]) continue;
+    const w = measureTextWidth(ctx, labels[i], fontSize, fontFamily);
+    if (w > maxLabelWidth) maxLabelWidth = w;
+  }
+  if (maxLabelWidth <= 0) return;
+  const minGap = Math.max(maxLabelWidth + 10, 64);
+  const spacing = axisLength / (ticks.length - 1 || 1);
+  if (spacing >= minGap) return;
+  const keepEvery = Math.max(1, Math.ceil(minGap / spacing));
+  const keep = new Set<number>();
+  for (let i = 0; i < ticks.length; i += keepEvery) keep.add(i);
+  const last = ticks.length - 1;
+  if (last > 0 && !keep.has(last)) {
+    const prev = last - (last % keepEvery);
+    if ((last - prev) * spacing >= minGap) {
+      keep.add(last);
+    } else {
+      keep.delete(prev);
+      keep.add(last);
+    }
+  }
+  // 首末那两颗标签**放不下就丢掉**，不往里推 —— 推右会让它压住下一个标签
+  // （实测：左端 `09-15 17:33` 被推右 27px，正好盖住第二个标签的开头，看着像糊在一起）。
+  // 丢掉只让最边上空一格，其余标签都是完整的，时间轴上这是常态。
+  const half = maxLabelWidth / 2;
+  const leftRoom = Number(geometry.leftRoom) || 0;
+  const rightRoom = Number(geometry.rightRoom) || 0;
+  const kept = Array.from(keep).sort((a, b) => a - b);
+  if (kept.length) {
+    const first = kept[0];
+    if (first * spacing - half < -leftRoom) keep.delete(first);
+    const end = kept[kept.length - 1];
+    if (end * spacing + half > axisLength + rightRoom) keep.delete(end);
+  }
+  for (let i = 0; i < labels.length; i++) {
+    if (!keep.has(i)) labels[i] = '';
+  }
 }
 
 function buildTitleLayout(norm: NormalizedOption): TitleLayout | null {

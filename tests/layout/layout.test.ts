@@ -94,4 +94,29 @@ describe('computeLayout', () => {
     const withoutAxis = layoutOf({ xAxis: { show: false }, yAxis: { show: false }, series: [{ type: 'line', data: [1, 2] }] }).layout;
     expect(withoutAxis.plot.width).toBeGreaterThan(withAxis.plot.width);
   });
+
+  it('类目密到亚像素级时，x 轴标签按「标签宽度 + 间隔」稀释（不会糊成一条色带）', () => {
+    // 回归：缩放到 3565 根时（约 0.24px/根），Axis 组件以前会**自己再算一遍**抽稀步长，
+    // 而且给间距兜了 1px 的下限（`Math.max(1, slot)`）—— 步长从 380 根变成 88 根，
+    // 79.5px 宽的标签按 20.7px 的间隔画出去，末端糊成一条色带。
+    // 现在抽稀只有一处（这里），下面同时盯住「间距」和「数量」。
+    const data = Array.from({ length: 4000 }, (_, i) => i % 5);
+    const { layout } = layoutOf({ xAxis: { type: 'category' }, series: [{ type: 'line', data }] });
+    const ticks = layout.xAxisLayout.ticks;
+    const labels = layout.xAxisLayout.labels;
+    expect(ticks.length).toBe(4000);
+
+    const kept = labels.map((text, i) => ({ text, i })).filter((row) => row.text);
+    expect(kept.length).toBeGreaterThan(2);
+    // 数量：一屏最多 plotWidth / 64 个（经验间隔）
+    expect(kept.length).toBeLessThanOrEqual(Math.ceil(layout.plot.width / 64) + 1);
+
+    // 间距：相邻保留标签的像素距离 ≥ 64（两端也不许挤）
+    const spacing = layout.plot.width / (ticks.length - 1);
+    for (let k = 1; k < kept.length; k++) {
+      expect((kept[k].i - kept[k - 1].i) * spacing).toBeGreaterThanOrEqual(64 - 1e-6);
+    }
+    // 末尾那根必须也在保留名单里（时间轴右边要能读出「现在」）
+    expect(kept[kept.length - 1].i).toBe(ticks.length - 1);
+  });
 });

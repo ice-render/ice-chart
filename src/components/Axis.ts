@@ -3,7 +3,6 @@ import type { ChartTheme } from '../types';
 import type { AxisLayout, ChartLayout, InternalAxis } from '../internal';
 import type { Rect } from '../internal';
 import { formatTick } from '../scale';
-import { measureTextWidth } from '../util/text';
 import { shouldAnimate } from '../animation/motion';
 
 const TICK_LENGTH = 4;
@@ -68,7 +67,7 @@ export class Axis extends ChartComponent {
     return this.orientation === 'x' ? layout.xAxisLayout : layout.yAxes[this.axisIndex] || layout.yAxisLayout;
   }
 
-  /** 当前刻度 + 目标位置 + 标签（抽稀规则与绘制时完全一致，两边共用这一份）。 */
+  /** 当前刻度 + 目标位置 + 标签（抽稀规则见 `buildAxisLayout`，那边是唯一来源）。 */
   private tickEntries(): AxisTickMark[] | null {
     const axis = this.axis;
     const layout = this.layout;
@@ -78,33 +77,21 @@ export class Axis extends ChartComponent {
     const plot = layout.plot;
     const axisLayout = this.axisLayoutOf(layout);
     const ticks = axisLayout.ticks;
-    const fontSize = this.theme ? this.theme.fontSize : 12;
-    const fontFamily = this.theme ? this.theme.fontFamily : 'sans-serif';
+    const layoutLabels = axisLayout.labels || [];
 
-    // 标签抽稀：类目多的时候逐类目画标签会糊成一片，按可用宽度跳着画
-    let labelStride = 1;
-    if (this.orientation === 'x' && ticks.length > 1) {
-      let maxLabel = 0;
-      for (const text of axisLayout.labels) {
-        const w = measureTextWidth(this.ctx, text, fontSize, fontFamily);
-        if (w > maxLabel) maxLabel = w;
-      }
-      const slot = plot.width / ticks.length;
-      // 舒适间隔 64px（2026-09-14 调整）：原来只要「标签宽度 + 8」不超槽宽就不稀释，
-      // 于是 30 个刻度的数字标签虽然不重叠、也会挤成一片编号。
-      const need = Math.max(maxLabel + 8, 64);
-      if (need > slot) labelStride = Math.ceil(need / Math.max(1, slot));
-    }
-
+    // 抽稀**只认 layout 的那张表**（`labels[i] === ''` 就是不画）。2026-09-21 之前这里
+    // 又按 `plot.width / ticks.length` 自己算了一遍步长，和 layout 的公式长得一样但边界
+    // 处理不同：密度一高两边就打架 —— 实测 3565 根时 layout 只留 11 个标签，这里留下 42 个，
+    // 79.5px 宽的标签按 20.7px 的间隔画出去，末端糊成一条色带（那份代码还有个
+    // `Math.max(1, slot)` 的下限：间距 0.24px 时它按 1px 算，于是步长从 380 根变成 88 根）。
     const marks: AxisTickMark[] = [];
     for (let i = 0; i < ticks.length; i++) {
       const mapped = scale.map(ticks[i]);
       const pos = this.orientation === 'x' ? plot.x + mapped : plot.y + mapped;
       if (!isFinite(pos)) continue;
       const label = formatTick(ticks[i], scale, i, option.formatter) || '';
-      const isLast = i === ticks.length - 1;
-      const drawn = !!label && !(labelStride > 1 && i % labelStride !== 0 && !isLast);
-      marks.push({ key: String(ticks[i]), pos, label, drawn });
+      const kept = layoutLabels.length === ticks.length ? layoutLabels[i] !== '' : true;
+      marks.push({ key: String(ticks[i]), pos, label, drawn: !!label && kept });
     }
     return marks;
   }

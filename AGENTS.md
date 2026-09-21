@@ -125,6 +125,29 @@ static 常量/字段  →  static 方法  →  实例字段  →  构造函数  
   现在的规则：一端越界 → 整窗贴着数据边缘滑、**跨度按当前窗口（`internal.domain.length - 1`）
   保持不变**；两端都越界（这张图表达不出来）→ **保持原窗口**，宁可这一帧不动，
   也不能跳到整段。回归点：`chart.test.ts` 的「clamps a category window that runs past the data」。
+- **缩放有上下限，口径是「每根多少像素」**（2026-09-21 加，别改回去）：`interaction.zoom.minBarSpacing`
+  （默认 0.5px/根）/ `maxBarSpacing`（默认 0 = 自动 → 绘图区宽度的一半，等价「一屏最少两根」），
+  实现在 `util/zoomLimit.ts`（`clampBarCount` / `barCountRange`）。
+  为什么不能用「占数据域的百分之几」：那个比例会随**图上载入了多少根**漂移。K 线页实测：
+  缩到底到过 **0.24px/根**（一根占不到一个像素，整片糊成色带），放大那头卡在「数据域 5%」，
+  载入根数一变限制就跟着变。改成 px/根 之后：缩到底 = 0.5px/根（形状还看得出来），
+  放到头 = 半幅一根（3 根左右铺满）。
+  限制**只约束手势缩放**（`source === 'zoom' | 'brush'`）：滚轮那条路自己算的时候就夹过
+  （`zoomDomain` 的 band 分支），`clampAxisDomain` 里再兜一层别的入口；程序化 `setDomain`
+  与联动回显（`source: 'api' | 'link'`）**不受限** —— 「回到最新」钉最后 count 根必须指哪打哪，
+  联动要的是两张图窗口严格一致。回归点：`interaction/zoom-limit.test.ts`。
+- **x 轴标签抽稀只有一处**（2026-09-21 修，别改回去）：`buildAxisLayout` 出表（`thinXAxisLabels`），
+  `Axis` 组件只按 `axisLayout.labels[i] === ''` 决定画不画。三件事一起记住：
+  1. **间距要用真实值**，不许给 `Math.max(1, slot)` 这类地板：间距 0.24px 时它按 1px 算，
+     步长从「380 根一跳」变成「88 根一跳」，实测 3565 根时画了 42 个标签、79.5px 宽的标签
+     按 20.7px 的间隔排出去 → 末端糊成一条色带。
+  2. **要按绘图区宽度算**，不是画布宽度：比例尺是 `computeLayout` 开头用画布宽度建的
+     （那时 y 轴占位还没定），用画布宽度会把可用宽度多算 7%~11%，两个标签刚好贴住。
+     所以抽稀挪到绘图区算完之后。
+  3. **首末标签放不下就整颗丢掉**，不往里推 —— 推右会压住邻居（实测左端标签推 27px
+     正好盖住第二个标签的开头）。
+  回归点：`components/axis-labels.test.ts`（盯真画出去的 `lastTicks[].drawn`）、
+  `layout/layout.test.ts`（盯间距）。
 - **悬停的三条铁律**（2026-09-15 / 2026-09-21 修，别改回去）：
   1. **画布量不到尺寸（`canvasWidth/Height` 为 0）＝ 指针不在本图上，判 `false`**。
      引擎的原生监听挂在 **window** 上，同一页里每张图都会收到整页的事件，`isOverCanvas`
