@@ -408,7 +408,7 @@ export class ICEChart {
       axis === 'x' && (source === 'zoom' || source === 'brush')
         ? this.guardInteractiveXWindow(domain)
         : domain;
-    const clamped = this.clampDomain(axis, guarded);
+    const clamped = this.clampDomain(axis, guarded, source);
     if (!clamped) return this;
     if (axis === 'x') this.viewState.x = clamped as [any, any];
     else this.viewState.y = clamped as [any, any];
@@ -855,7 +855,7 @@ export class ICEChart {
   public setAxisDomain(index: number, domain: any[], source = 'api'): this {
     if (index === 0) return this.setDomain('y', domain, source);
     if (this.destroyed) return this;
-    const clamped = this.clampAxisDomain(index, domain);
+    const clamped = this.clampAxisDomain(index, domain, source);
     if (!clamped) return this;
     this.viewState.yAxes[index] = clamped as [any, any];
     this.rebuild(false);
@@ -1731,13 +1731,13 @@ export class ICEChart {
     };
   }
 
-  private clampDomain(axis: 'x' | 'y', domain: any[]): any[] | null {
-    if (axis === 'y') return this.clampAxisDomain(0, domain);
-    return this.clampAxisDomain(-1, domain);
+  private clampDomain(axis: 'x' | 'y', domain: any[], source?: string): any[] | null {
+    if (axis === 'y') return this.clampAxisDomain(0, domain, source);
+    return this.clampAxisDomain(-1, domain, source);
   }
 
   /** index = -1 表示 x 轴，>=0 表示对应的 y 轴。 */
-  private clampAxisDomain(index: number, domain: any[]): any[] | null {
+  private clampAxisDomain(index: number, domain: any[], source?: string): any[] | null {
     const full = index < 0 ? this.fullXDomain : this.fullYDomains[index];
     if (!full || full.length < 2 || !domain || domain.length < 2) return null;
     const internal = index < 0 ? this.norm.xAxis : this.norm.yAxes[index];
@@ -1758,12 +1758,35 @@ export class ICEChart {
     }
     const f0 = Number(full[0]);
     const f1 = Number(full[1]);
-    const d0 = Math.max(f0, Number(domain[0]));
-    const d1 = Math.min(f1, Number(domain[1]));
-    if (!isFinite(d0) || !isFinite(d1) || d1 <= d0) return null;
+    const raw0 = Number(domain[0]);
+    const raw1 = Number(domain[1]);
+    if (!isFinite(raw0) || !isFinite(raw1) || raw1 <= raw0) return null;
     const fullSpan = f1 - f0;
     const minSpan = fullSpan * 0.001;
-    if (d1 - d0 < minSpan) return null;
+    if (raw1 - raw0 < minSpan) return null;
+    if (source === 'pan') {
+      // **平移要保住窗口跨度**，不能像下面那样与数据范围求交 ——
+      // 求交会把「平移」悄悄退化成「缩放」：窗口贴住数据边界时一端被夹住、另一端继续走。
+      // 实测（K 线页纵向拖 120px）：量程从 [41100,41700] 变成 [41100,41449]，
+      // 顶端不动、底端上移 —— 看着既不是「移」、方向还是反的。
+      // 这里只要求窗口和数据范围**至少交叠 1/4 个窗口**，免得一拖就把画面拖空。
+      const span = raw1 - raw0;
+      const need = span * 0.25;
+      let d0 = raw0;
+      let d1 = raw1;
+      if (d1 < f0 + need) {
+        d0 += f0 + need - d1;
+        d1 = f0 + need;
+      }
+      if (d0 > f1 - need) {
+        d1 -= d0 - (f1 - need);
+        d0 = f1 - need;
+      }
+      return [d0, d1];
+    }
+    const d0 = Math.max(f0, raw0);
+    const d1 = Math.min(f1, raw1);
+    if (d1 <= d0 || d1 - d0 < minSpan) return null;
     return [d0, d1];
   }
 

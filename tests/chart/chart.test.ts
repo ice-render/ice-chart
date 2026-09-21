@@ -215,6 +215,35 @@ describe('ICEChart（引擎集成）', () => {
     expect(idx(after[0])).toBeGreaterThanOrEqual(0);
   });
 
+  it('pans the y domain downward when dragging down（纵向跟着手走，且是平移不是缩放）', async () => {
+    // 回归两件事：
+    // 1. y 轴的「值越大越靠上」与屏幕反向，早先沿用 x 的符号会让纵向拖动**方向整体反过来**；
+    // 2. 窗口与数据范围求交会把平移退化成缩放（贴住边界时一端被夹住、另一端继续走）——
+    //    实测 K 线页纵向拖 120px 量程从 [41100,41700] 变成 [41100,41449]，看着像「缩」。
+    const c = await mount({
+      series: [{ id: 'a', type: 'line', data: [10, 30, 20, 45, 35, 25, 15] }],
+      interaction: { pan: { enabled: true, axes: 'y' }, zoom: false, brush: false },
+    });
+    const full = c.fullDomain('y').map(Number);
+    const span = full[1] - full[0];
+    const mid = (full[0] + full[1]) / 2;
+    c.setDomain('y', [mid - span * 0.2, mid + span * 0.2]);
+    const before = c.getDomain('y').map(Number);
+    const plot = c.layout.plot;
+    const midX = plot.x + plot.width / 2;
+    // 指针**下移** = 内容下移 = 数据窗口上移（值变大）。
+    // 幅度要够大，大到窗口会被推出数据范围 —— 否则这条用例照不到「退化成缩放」那半。
+    c.controller.handlePointerDown(midX, plot.y + plot.height * 0.1);
+    c.controller.handlePointerMove(midX, plot.y + plot.height * 0.95);
+    c.controller.handlePointerUp(midX, plot.y + plot.height * 0.95);
+    const after = c.getDomain('y').map(Number);
+
+    expect(after[0]).toBeGreaterThan(before[0]);
+    expect(after[1]).toBeGreaterThan(before[1]);
+    // 跨度不变 → 是平移，不是缩放
+    expect(after[1] - after[0]).toBeCloseTo(before[1] - before[0], 6);
+  });
+
   it('navigates data points with the keyboard and emits item:hover', async () => {
     const c = await mount();
     const events: any[] = [];

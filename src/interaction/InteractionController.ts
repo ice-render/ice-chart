@@ -1035,7 +1035,12 @@ export class InteractionController {
       return [all[nextFrom], all[nextFrom + count]];
     }
     const span = Number(domain[1]) - Number(domain[0]);
-    const shift = (-deltaPixels / Math.max(1, size)) * span;
+    // 屏幕方向 → 数据方向的符号：内容要**跟着手走**。
+    // x 轴「值越大越靠右」与屏幕同向；y 轴「值越大越靠上」与屏幕**反向** ——
+    // 用同一个符号会让纵向拖动的方向整个反过来（实测用户一眼就看出「Y 轴方向反了」）。
+    // 类目轴不走这里：band 的像素方向对两个轴都是「下标越大越靠下/右」，所以那边不用翻。
+    const forward = axis === 'x' ? -1 : 1;
+    const shift = ((forward * deltaPixels) / Math.max(1, size)) * span;
     return [Number(domain[0]) + shift, Number(domain[1]) + shift];
   }
 
