@@ -39,6 +39,10 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
    遮挡关系、zIndex、`display:false`、`interactive:false` 全部由引擎统一保证；重写一套必然与渲染漂移。
 2. **像素缓存唯一**：`rebuildPixels()` 是点集像素的唯一来源，渲染与命中都消费它。
    任何「渲染时另算一遍坐标」的写法都会让「看得见的点」与「点得到的点」分叉。
+   **例外只有虚拟（列存）系列**（`virtual: true` 的 scatter，2026-09-21）：它不物化像素缓存
+   （100 万点的 `pixels` + `effective` + `itemProgress` 就是 40MB，省下的内存会被缓存吃回去），
+   渲染与命中都从**列 + 同一份比例尺**现算 —— 同一处公式、同一份数据，不存在两套坐标；
+   换来的代价见「虚拟（列存）系列」一节。除它之外，一律照旧走像素缓存。
 3. **组件的 `doRender()` 必须自己 `ctx.beginPath()`**。引擎的脏矩形局部重绘会在 ctx 上留下
    `clip` 用的 rect 路径，直接 `ctx.stroke()` 会把那条残留路径一起描出来 ——
    表现为画布边缘莫名多出一圈与最后绘制的系列同色的线。`ICEPath` 系组件因为有独立 Path2D 才不需要担心。
@@ -296,6 +300,27 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
 - **探针/截图脚本的视口宽度必须 ≥ 内容设计宽**：悬停实测原来用 1280 的视口，
   而大屏设计宽是 1572 —— 最右侧的面板在视口外，鼠标移过去不产生事件，
   探针会偶发报「hoverIndex: null」，看起来像图表坏了，其实是探针够不着。
+
+## 虚拟（列存）系列（改数据点存储 / 命中路径前必读）
+
+`series.virtual: true`（**目前只支持 `scatter`**）是「100 万点也要能拖」的那条路：
+不建「每点一个 `DataPoint`」，只保留 x / y（/ size）几条列。
+
+- **读点只有三个入口**：`pointCount`（数量）、`pointAt(i)`（按需合成，断点仍是 `null`）、
+  标量访问器 `xValueAt / yValueAt / baseAt / topAt / sizeAt`（逐点绘制与插值的循环走这组）。
+  **不许再写 `series.points[...]`**：虚拟系列的 `points` 是空的，直读会静默少画 / 提示框空；
+  访问器闭包捕获的是**建系列时那一个数组**，要改点必须就地改，别给 `points` 重新赋值。
+- **原始 `data` 会被释放**（这是省内存的大头，百万级元组自己就占 40~70MB）：归一化建完列
+  就把 `option.series[i]` 换成不含 data 的副本。列存缓存在 `ICEChart.virtualColumns`
+  （一次 `applyOption` 会归一化两遍，第二遍靠它复用）。
+- **不物化按点缓存**：`pixels` / `effective` / `itemProgress` 光缓存就是 40MB，
+  所以虚拟系列的像素与命中都从「列 + 同一份比例尺」现算（渲染按值空间二分取可见窗口 +
+  同一条密度抽稀规则；命中按列二分 + 邻域比距离）。这是铁律 2 唯一的例外，理由见铁律 2。
+- **代价要一直保持显式**（不许静默降级）：快照里没有数据 → `restore()` 直接报错；
+  `appendData` 报错（改 `setData`）；非 scatter / 类目轴 / 堆叠 / 列式 data 配非 virtual 系列
+  一律抛错。相应的门禁：`tests/option/normalize.test.ts`、`tests/components/virtual-scatter.test.ts`、
+  `tests/chart/virtual-scatter.test.ts`。
+- 示例页 `examples/large-data-scatter-virtual.html`（100 万点，列式输入）。
 
 ## 序列化契约（改持久化相关代码前必读）
 

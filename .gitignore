@@ -9,5 +9,7 @@ coverage
 examples/vendor
 .audit
 .hover-sweep
+.audit-baseline
+.hover-sweep-baseline
 test-results
 playwright-report

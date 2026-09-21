@@ -6,6 +6,15 @@
 
 ### 新增
 
+- **虚拟（列存）系列：`virtual: true` 的散点不再建「每点一个对象」**。100 万点原来要
+  1M 个 `DataPoint` + 1M 个原始数据项，堆 125MB、命中 0.8ms；现在图表只保留
+  x / y（/ size）几条列，读点时才按需合成 —— 同一把尺子实测 **堆 125.2MB → 2.2MB、
+  命中 p50 0.8ms → 0.00ms**，平移维持 60fps（16.7ms/帧，没有回退）。
+  大数据推荐直接给列：`{ type: 'scatter', virtual: true, data: { x: Float64Array, y: Float64Array } }`
+  （`Float64Array` 会被**直接采用**，不再复制一份）。
+  代价都是显式的，不静默降级：**不进 option 快照**（`restore()` 会报错而不是还你一张空图）、
+  提示框的 `params.data` 为空、`appendData` 报错（改用 `setData`）、只支持数值型 x 的散点
+  （类目轴 / 堆叠 / 其它类型一律报错）。示例见 `examples/large-data-scatter-virtual.html`。
 - **垂直网格线 `grid.x` 落在标签正下方（跟 x 轴抽稀同一批位置）**：以前打开 `grid.x` 是
   **每个刻度一条**竖线 —— 而类目轴的 `scale.ticks()` 会返回整个 domain，视窗里 120 根就是
   120 条线，画出来是一片栅栏（实测截图确认）。现在网格读的是 x 轴布局表里**真画出来的那几颗**

@@ -1,6 +1,10 @@
-# 大数据量散点的虚拟化（Phase 1 已落地 / Phase 2 待做）
+# 大数据量散点的虚拟化（Phase 1 / Phase 2 都已落地）
 
-> 施工图与验收标准。**新会话请从这里开始读**，不要重新调研。
+> 施工图与验收标准。**Phase 1 / Phase 2 都已落地**（结论、实测与取舍都在下面），
+> 新会话请从这里开始读，不要重新调研。
+>
+> 还没做的：虚拟系列目前只覆盖 `scatter`（line / area 的列存没有需求驱动，先不做）；
+> `appendData` 的增量绘制仍未实现（虚拟系列干脆报错，让调用方走 `setData`）。
 
 ## 背景与目标
 
@@ -24,30 +28,43 @@
 
 复现脚本：`/tmp/scatter-1m-v2.cjs`（真机 Chrome + CDP，页内实建 1M 散点）。
 
-## Phase 2（待做：把 `points` 换成列存）
+## Phase 2（✅ 已完成，`main` 之上的 4 个提交：适配层 → 批次 A → 批次 B/C → 列存）
 
-**读取点分布（实测，`grep -rc '\.points' src`）**
+分四步走（每步都停在「全绿」），提交见本仓 `feat/scatter-column-store` 分支：
 
-| 批次 | 文件（读取点数量） |
-|---|---|
-| A · 热路径 | `interaction/InteractionController.ts`(10)、`interaction/HitResolver.ts`(4)、`ICEChart.ts`(4) |
-| B · 建模与渲染 | `option/normalize.ts`(14，含 `buildPoints`)、`components/series/SeriesBase.ts`(10) |
-| C · 其余 | `Boxplot`(7)/`Pie`(6)/`Heatmap`(6)/`Bar`(6)/`Liquid`(5)/`Funnel`(5)/`Gauge`(4)/`Waterfall`(3)、`a11y.ts`(5) |
+1. `refactor(series)`: 加 `InternalSeries.pointAt` 适配层 + 契约测试（零行为变化）。
+2. `refactor(series)`: 批次 A 热路径 18 处（InteractionController / HitResolver / ICEChart）走向适配层，
+   并补 `pointCount` —— 列存系列的 `points` 是空的，`points.length` 会把整条系列当成「没有数据」。
+3. `refactor(series)`: 批次 B/C 的 82 处直读清零（组件 / a11y / layout / normalize），
+   同时补**标量访问器** `xValueAt / yValueAt / baseAt / topAt / sizeAt`：
+   逐点绘制与插值的循环只取标量，否则缩放时每帧要为 100 万点各 new 一个 `DataPoint`。
+4. `feat(scatter)`: 真正不建 `points` —— `virtual: true` 的散点建列存、释放原始 data、
+   不物化像素与动画缓存，渲染与命中都从列现算。
 
-**三步走（每步都能停在"全绿"）**
+**实测（同一把尺子，100 万点，真机 Chromium；`/tmp/ice-virtual-measure.mjs`）**
 
-1. **加适配层**（不改任何调用点）：`InternalSeries.pointAt(i)` —— 普通系列 `return points[i]`（逐字不变），
-   列存系列按需合成 `{ xValue, yValue, raw }`（与 `buildPoints` 现在产出的字段逐一对齐）。
-   验证：`npm test`（407 条）全绿 = "适配层零行为变化"。
-2. **批次 A 迁移**：18 处 `series.points[...]` → `series.pointAt(...)`。仍是纯重构（功能/内存都不变），跑 `npm test` 全绿。
-3. **真正不建 `points`**：`normalize` 在 `series.virtual === true` 时流式建 `Float64Array` 列 + 算域，
-   `points` 留空。最后跑 `verify:full` + 1M 对照 + 普通系列逐像素对照，一次性提交。
+| 口径 | 普通（元组 + DataPoint） | 虚拟（列存） |
+|---|---|---|
+| 堆（CDP `Runtime.getHeapUsage`，GC 后） | 125.2 MB | **2.2 MB** |
+| `points.length` / `pointCount` | 1,000,000 / 1,000,000 | **0** / 1,000,000 |
+| `pixels.length` | 2,000,000 | **0** |
+| 命中 p50 / p95 | 0.8 ms / 1.1 ms | **0.00 ms / 0.00 ms** |
+| 平移 p50 / p95（60 帧拖拽） | 16.7 ms / 17.5 ms | 16.7 ms / 17.4 ms（都在 60fps 上限） |
+| 构建 | 752 ms | 640 ms |
 
-**纪律**：只有 `normalize`（建列存）与 `pointAt`（合成）两处允许 `new DataPoint`；其余读取一律走 `pointAt`。
-半迁移状态（`points` 已空但仍有站点直读）会造成**静默少画/提示框空**，禁止提交。
+**交付的用法**（大数据推荐直接给列，图表直接采用、不复制）：
 
-**验收**：1M 散点堆 **150.9MB → ≤30MB**、命中 **4.2ms → ≤1ms**、平移保持 8.4ms；
-普通（非 virtual）系列逐像素不变；407 单测 + 36 e2e 全绿。
+```js
+series: [{ type: 'scatter', virtual: true, data: { x: Float64Array, y: Float64Array } }]
+```
+
+**取舍（都做成显式报错，不静默降级）**：数据不进 option 快照（`restore()` 报错）、
+提示框 `params.data` 为空、`appendData` 报错（改 `setData`）、只支持数值型 x 的 scatter。
+示例页 `examples/large-data-scatter-virtual.html`；铁律层面的说明见 `AGENTS.md`
+「虚拟（列存）系列」一节。
+
+**门禁**：`verify:full`（47 套 423 条单测 + 37 条 e2e）、`audit:interactions`（322 步 0 问题）、
+`audit:hover`（396 项 0 失败、像素缓存新鲜、无 console 报错）。
 
 ## 相关参考
 
