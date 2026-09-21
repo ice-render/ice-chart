@@ -9,6 +9,7 @@ import type { PlotArea } from '../components/PlotArea';
 import type { Tooltip } from '../components/Tooltip';
 import { HitResolver, valueDistance, type HitHost, type TargetInfo } from './HitResolver';
 import { clamp } from '../util/math';
+import { clampBarCount } from '../util/zoomLimit';
 
 /** 交互层需要的图表宿主能力，由 ICEChart 实现。 */
 export interface InteractionHost extends HitHost {
@@ -1223,6 +1224,15 @@ export class InteractionController {
     return true;
   }
 
+  /**
+   * 一次手势缩放后的新窗口。
+   *
+   * 两套限制口径**按轴分开**：
+   * - **类目轴**（K 线 / 时间轴）按「每根多少像素」夹（`minBarSpacing` / `maxBarSpacing`，
+   *   见 `util/zoomLimit`）—— 这才是主流看盘软件的口径，而且不随「图上载入了多少根」
+   *   漂移（早先按「数据域的 5%~100%」算：缩到底能到 0.24px/根，一根都占不到一个像素）。
+   * - **连续轴**（价格轴这类）仍按「占完整数据域的比例」（`minSpan` / `maxSpan`）。
+   */
   private zoomDomain(axis: 'x' | 'y', anchorPixel: number, factor: number): [any, any] | null {
     const internal = this.host.norm[axis === 'x' ? 'xAxis' : 'yAxis'];
     const scale = internal.scale;
@@ -1231,7 +1241,8 @@ export class InteractionController {
     const minSpan = Number(zoomOption && zoomOption.minSpan) || 0.05;
     const maxSpan = Number(zoomOption && zoomOption.maxSpan) || 1;
     const full = this.host.fullDomain(axis);
-    const size = axis === 'x' ? this.host.layout.plot.width : this.host.layout.plot.height;
+    const plot = this.host.layout.plot;
+    const size = axis === 'x' ? plot.width : plot.height;
 
     if (scale.isBand()) {
       const all = full;
@@ -1242,10 +1253,8 @@ export class InteractionController {
       const to = all.indexOf(current[current.length - 1]);
       const currentCount = Math.max(2, to - from + 1);
       const anchorRatio = clamp(anchorPixel / Math.max(1, size), 0, 1);
-      let nextCount = Math.round(
-        clamp(currentCount / factor, Math.max(2, Math.ceil(n * minSpan)), Math.floor(n * maxSpan))
-      );
-      nextCount = Math.min(nextCount, n);
+      // 缩放比例限制：一屏最多放到 minBarSpacing 那么密、最少留 maxBarSpacing 那么粗
+      const nextCount = Math.min(n, clampBarCount(Math.round(currentCount / factor), plot.width, zoomOption));
       const anchorIndex = from + anchorRatio * (currentCount - 1);
       let nextFrom = Math.round(anchorIndex - anchorRatio * (nextCount - 1));
       nextFrom = clamp(nextFrom, 0, Math.max(0, n - nextCount));

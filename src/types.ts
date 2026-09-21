@@ -469,6 +469,27 @@ export interface ZoomInteractionOption {
   wheelFactor?: number;
   /** data：直接改数据域；viewport：调用 ice.setViewport 做视图缩放。 */
   mode?: 'data' | 'viewport';
+  /**
+   * **缩放的上下限**（类目轴 / 时间轴），单位是「每根占多少像素」——
+   * 这就是主流看盘软件的口径：`minBarSpacing` 管「最多能缩到多密」，
+   * `maxBarSpacing` 管「最多能放到多粗」。
+   *
+   * 默认 `minBarSpacing = 0.5`（再密就一根都占不到一个像素，整片糊成色带）、
+   * `maxBarSpacing = 0`（= 自动，取绘图区宽度的一半，也就是「一屏最少两根」）。
+   * 0.5 / 半幅这两个默认值跟主流轻量图表库的默认口径一致。
+   *
+   * 只约束**手势缩放**（滚轮 / 双指 / 框选缩放到区间）；程序化 `setDomain` 与联动回显
+   * 不受限 —— 那是应用自己的窗口（比如「回到最新」钉最后 240 根），必须指哪打哪。
+   */
+  minBarSpacing?: number;
+  maxBarSpacing?: number;
+  /**
+   * **连续轴**（数值轴）的缩放下限 / 上限，占完整数据域的比例，默认 0.05 / 1。
+   *
+   * 类目轴不看这两个 —— 它按上面的 px/根 管（`minBarSpacing` / `maxBarSpacing`）。
+   */
+  minSpan?: number;
+  maxSpan?: number;
 }
 
 export interface PanInteractionOption {

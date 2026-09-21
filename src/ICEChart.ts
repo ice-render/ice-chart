@@ -31,6 +31,7 @@ import type { SeriesBase } from './components/series/SeriesBase';
 import { InteractionController } from './interaction/InteractionController';
 import { Emitter } from './util/emitter';
 import { clamp } from './util/math';
+import { clampBarCount } from './util/zoomLimit';
 import { A11yMirror, buildDataNodes, buildDataTable, chartTitle, type A11yTreeOptions, type DataTable } from './a11y';
 import { layoutSankey } from './layout/sankey';
 import { layoutTreemap } from './layout/treemap';
@@ -1768,6 +1769,23 @@ export class ICEChart {
         to = t;
       }
       if (to - from < 1) return null;
+      if (source === 'zoom' || source === 'brush') {
+        // **手势缩放要过缩放比例限制**（px/根，见 util/zoomLimit）。
+        // 滚轮那条路径自己算的时候就夹过了，这里兜住别的入口（框选缩放到区间、外部直接
+        // 调 `setDomain('x', […], 'zoom')`）—— 否则「限制」只对滚轮生效，换个入口就能
+        // 缩到 0.24px/根。夹的时候**保住窗口中心**，再贴一次数据边缘。
+        const count = to - from + 1;
+        const zoomOpt: any = this.norm.option.interaction && this.norm.option.interaction.zoom;
+        const limit = clampBarCount(count, this.layout.plot.width, zoomOpt && zoomOpt !== false ? zoomOpt : undefined);
+        if (limit !== count) {
+          const center = (from + to) / 2;
+          let nextFrom = Math.round(center - (limit - 1) / 2);
+          nextFrom = Math.max(0, Math.min(nextFrom, all.length - limit));
+          from = Math.max(0, nextFrom);
+          to = Math.min(all.length - 1, from + limit - 1);
+          if (to - from < 1) return null;
+        }
+      }
       return [all[from], all[to]];
     }
     const f0 = Number(full[0]);
