@@ -486,7 +486,19 @@ export interface BrushInteractionOption {
 }
 
 export interface InteractionOption {
-  hover?: { enabled?: boolean; mode?: 'nearest-x' | 'item'; dimOthers?: boolean };
+  hover?: {
+    enabled?: boolean;
+    mode?: 'nearest-x' | 'item';
+    dimOthers?: boolean;
+    /**
+     * 悬停时是否在数据点上画标记（圆环 / 柱形描边），默认 `true`。
+     *
+     * 关掉它适用于「照着主流看盘软件做十字准星」的场景：标记是一圈**半透明白**填充 +
+     * 彩色描边，落在蜡烛上会遮住正要看的那一根；而且 `mode: 'nearest-x'` 时同一列里
+     * 每个系列各画一个，比准星本身还抢眼。此时「读到哪一根」由准星 + 抬头承担。
+     */
+    mark?: boolean;
+  };
   select?: { enabled?: boolean; mode?: 'single' | 'multiple'; toggle?: boolean };
   brush?: BrushInteractionOption | false;
   zoom?: ZoomInteractionOption | false;

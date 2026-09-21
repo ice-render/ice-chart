@@ -238,6 +238,26 @@ describe('交互外观审计', () => {
     expect(c.legend!.hoverIndex).toBe(0);
   });
 
+  it('interaction.hover.mark = false 时不画悬停标记（只留准星）', async () => {
+    // 标记环是一圈半透明白填充：落在蜡烛上会遮住正要看的那一根，
+    // 而 axis 悬停时同一列里每个系列各画一个。只做十字准星的场景要能关掉。
+    const marked = await mount(OPTION);
+    marked.controller.handlePointerMove(...pointScreen(marked, 0, 3));
+    expect(marked.highlight!.hoverItems.length).toBeGreaterThan(0);
+
+    marked.destroy();
+    chart = null;
+    const plain = await mount({
+      ...OPTION,
+      interaction: { ...OPTION.interaction, hover: { enabled: true, mark: false } },
+    });
+    plain.controller.handlePointerMove(...pointScreen(plain, 0, 3));
+    // 悬停本身照常生效（准星在），只是不画标记
+    expect(plain.controller.hover).not.toBeNull();
+    expect(plain.crosshair!.pixelX).not.toBeNull();
+    expect(plain.highlight!.hoverItems).toHaveLength(0);
+  });
+
   it('准星跟随时长与 animation.update.duration 无关（默认 90ms）', async () => {
     const c = await mount({ ...OPTION, animation: { update: { duration: 420 } } });
     expect(c.crosshair!.followDuration).toBe(90);

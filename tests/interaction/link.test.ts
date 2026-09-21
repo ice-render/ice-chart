@@ -46,6 +46,41 @@ describe('linkCharts（跨图联动）', () => {
     handle.unlink();
   });
 
+  it('keeps the source hover when a linked chart drops its echoed hover', async () => {
+    // 回归：被联动**回显**出悬停的 B 自己把悬停收掉时会抛 item:leave ——
+    // 以前这会顺着联动把 A 真正的悬停也清掉，表现是十字准星的竖线一闪就没了。
+    // 回显之死不是「离开」，只有源头发的 leave 才算。
+    const [a, b] = await twoCharts();
+    const handle = linkCharts([a, b], { hover: true, zoom: false, brush: false });
+    const plot = a.layout.plot;
+    const pixel = a.seriesComponents[0].pixelAt(3)!;
+    a.controller.handlePointerMove(plot.x + pixel[0], plot.y + pixel[1]);
+    expect(a.controller.hover).not.toBeNull();
+    expect(b.controller.hover).not.toBeNull();
+
+    // B 收掉回显出来的悬停（应用层 clearHover / 它自己的指针离开都走这条路）
+    b.clearHover();
+    expect(b.controller.hover).toBeNull();
+    // A 是源头，悬停必须还在（准星竖线不能消失）
+    expect(a.controller.hover).not.toBeNull();
+    expect(a.crosshair!.pixelX).not.toBeNull();
+    handle.unlink();
+  });
+
+  it('clears echoed hover when the source itself leaves', async () => {
+    const [a, b] = await twoCharts();
+    const handle = linkCharts([a, b], { hover: true, zoom: false, brush: false });
+    const plot = a.layout.plot;
+    const pixel = a.seriesComponents[0].pixelAt(3)!;
+    a.controller.handlePointerMove(plot.x + pixel[0], plot.y + pixel[1]);
+    expect(b.controller.hover).not.toBeNull();
+    // 源头自己离开画布 → 回显也必须跟着收掉，否则副图会一直挂着准星
+    a.controller.handlePointerMove(-5, -5);
+    expect(a.controller.hover).toBeNull();
+    expect(b.controller.hover).toBeNull();
+    handle.unlink();
+  });
+
   it('mirrors zoom across charts', async () => {
     const [a, b] = await twoCharts();
     const handle = linkCharts([a, b], { hover: false, zoom: true, brush: false });

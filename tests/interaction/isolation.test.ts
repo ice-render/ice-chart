@@ -65,6 +65,30 @@ describe('多图事件隔离', () => {
     expect(chart.controller.hover).toBeNull();
   });
 
+  it('keeps an externally mirrored hover when the pointer is outside its canvas', async () => {
+    // 跨 pane 十字准星的关键：被联动按 x 值**回显**出悬停的图，本身并没有指针悬停。
+    // 同一次 mousemove 会派发到它，它判定「指针不在我身上」→ 以前就把回显删掉了，
+    // 于是竖线永远只在指针所在的那一块出现，另外两块怎么都画不出准星。
+    const [a, b] = [await mount(), await mount()];
+    const plot = a.layout.plot;
+    const pixel = a.seriesComponents[0].pixelAt(3)!;
+    a.controller.handlePointerMove(plot.x + pixel[0], plot.y + pixel[1]);
+    // 联动回显走的就是这条公开入口：按 x **数据值**而不是像素
+    b.showHoverAtValue((a.norm.series[0] as any).points[3].xValue);
+    expect(b.controller.hover).not.toBeNull();
+    expect(b.controller.externalHover).toBe(true);
+
+    // 指针在别处（B 的画布不在这个坐标上）→ 这个悬停不是本图指针放的，不能动
+    b.controller.handlePointerMove(-5, -5);
+    expect(b.controller.hover).not.toBeNull();
+    expect(b.crosshair!.pixelX).not.toBeNull();
+
+    // 只能由放它上来的那一方收回
+    b.clearHover();
+    expect(b.controller.hover).toBeNull();
+    expect(b.controller.externalHover).toBe(false);
+  });
+
   it('never treats a not-laid-out canvas (display:none) as hovered', async () => {
     const chart = await mount();
     // 切页之后被藏起来的图：引擎量不到尺寸，canvasWidth/Height 归零

@@ -99,7 +99,7 @@ static 常量/字段  →  static 方法  →  实例字段  →  构造函数  
   `fill()` 方法覆盖成字符串，运行时抛 `this.ctx.fill is not a function`（踩过）。
 - **交互要给图元让路**：`InteractionController` 的按下处理必须在命中图元时提前返回，
   否则「拖注释」会变成「拖画布」（框选 / 平移抢走拖拽）。
-- **悬停的两条铁律**（2026-09-15 修，别改回去）：
+- **悬停的三条铁律**（2026-09-15 / 2026-09-21 修，别改回去）：
   1. **画布量不到尺寸（`canvasWidth/Height` 为 0）＝ 指针不在本图上，判 `false`**。
      引擎的原生监听挂在 **window** 上，同一页里每张图都会收到整页的事件，`isOverCanvas`
      是唯一的"这事件不属于我"闸门。切页时被 `display:none` 藏起来的图尺寸为 0，早先这里
@@ -111,6 +111,15 @@ static 常量/字段  →  static 方法  →  实例字段  →  构造函数  
      （用户没有任何办法弄掉）。回归点：`tests/interaction/isolation.test.ts` 里
      「clears its own hover when the pointer leaves the canvas」与
      「never treats a not-laid-out canvas (display:none) as hovered」。
+  3. **指针只能收自己放上去的悬停**（`controller.externalHover`），
+     外部（`showHoverAtValue` / 联动回显）放上来的由放它的那一方收回。
+     上面第 1 条说明一次 mousemove 会派发到整页每一张图：被联动**回显**出悬停的图
+     本身并没有指针悬停，它判定"指针不在我身上"就会把回显删掉 —— 三块 pane 的 K 线图
+     实测：竖线永远只在指针所在的那一块出现，跨 pane 的十字准星根本做不出来。
+     回归点：「keeps an externally mirrored hover when the pointer is outside its canvas」。
+     配套的还有 `ChartLink`：**回显之死不是"离开"**，只有源头图自己发的 `item:leave`
+     才许清别人（`link.test.ts` 的「keeps the source hover when a linked chart drops
+     its echoed hover」）。
 
 ## 分支与发版约定（家族铁律，2026-09-13 确立）
 

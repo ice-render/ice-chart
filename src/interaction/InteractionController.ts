@@ -84,6 +84,15 @@ let activeController: InteractionController | null = null;
 export class InteractionController {
   public host: InteractionHost;
   public hover: { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn } | null = null;
+  /**
+   * 当前悬停是不是**外部**放上来的（`showHoverAtValue`：多图联动回显 / 编程式驱动）。
+   *
+   * 为什么要区分：没接住指针的图在 `handlePointerMove` 里会清掉悬停，但那个动作的语义是
+   * 「我这儿没有指针悬停了」，而不是「把别人给的状态删掉」。外部按 x 值放上来的悬停
+   * 该由放它的那一方（联动）收回 —— 否则被回显的图会在**同一次 mousemove** 里立刻自清。
+   * 三块 pane 的 K 线图实测：竖线永远只在指针所在的那一块出现，跨 pane 的十字准星做不出来。
+   */
+  public externalHover = false;
   public selection: Array<{ seriesId: string; dataIndex: number }> = [];
   public resolver: HitResolver;
   private drag: DragState = null;
@@ -255,7 +264,7 @@ export class InteractionController {
         this.setHover(null);
         return;
       }
-      this.setHover({ kind: 'item', item });
+      this.setHover({ kind: 'item', item }, this.externalHover);
       return;
     }
     const item = this.resolver.nearestByXValue(current.column.xValue);
@@ -272,7 +281,7 @@ export class InteractionController {
       this.setHover(null);
       return;
     }
-    this.setHover({ kind: 'axis', column });
+    this.setHover({ kind: 'axis', column }, this.externalHover);
   }
 
   public resolveTarget(screenX: number, screenY: number): TargetInfo {
@@ -289,7 +298,9 @@ export class InteractionController {
     // 高亮环）必须主动收起 —— 否则鼠标划出去之后提示框会一直挂在画面上，用户没有任何
     // 办法把它弄掉（画布外不再产生让本图重新取悬停的坐标）。
     if (!this.isOverCanvas(screenX, screenY)) {
-      if (this.hover) this.setHover(null);
+      // 只收自己放上去的悬停。外部（联动）按 x 值放上来的由放它的那一方收回，
+      // 这里清掉的话，被回显的图会在同一次 mousemove 里立刻把回显删掉。
+      if (this.hover && !this.externalHover) this.setHover(null);
       return;
     }
     this.updateHover(screenX, screenY);
@@ -344,7 +355,15 @@ export class InteractionController {
     }
   }
 
-  public setHover(next: { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn } | null): void {
+  /**
+   * 设定悬停。`external` 标记这次悬停是不是外部（联动 / 编程式）放上来的，
+   * 见 `externalHover`：指针自己产生的悬停可以被指针收回，外部的不能。
+   */
+  public setHover(
+    next: { kind: 'item'; item: ActiveItem } | { kind: 'axis'; column: ActiveColumn } | null,
+    external = false
+  ): void {
+    this.externalHover = next ? external : false;
     const had = !!this.hover;
     this.hover = next;
     if (!next) {
@@ -374,9 +393,7 @@ export class InteractionController {
     this.syncSeriesHover(items);
     const highlight = this.host.highlight;
     if (highlight) {
-      highlight.setHover(
-        items.map((item) => this.markFor(item))
-      );
+      highlight.setHover(this.hoverMarkEnabled() ? items.map((item) => this.markFor(item)) : []);
     }
     const crosshair = this.host.crosshair;
     if (crosshair) {
@@ -688,6 +705,18 @@ export class InteractionController {
     if (this.host.highlight) this.host.highlight.setHover([]);
     if (this.host.crosshair) this.host.crosshair.hide();
     if (this.host.tooltip) this.host.tooltip.hide();
+  }
+
+  /**
+   * 悬停时是否在数据点上画标记，由 `interaction.hover.mark` 控制（默认开）。
+   *
+   * 标记环是一圈**半透明白**填充 + 彩色描边：落在蜡烛上会遮住正要看的那一根，
+   * 而且 `mode: 'nearest-x'` 时同一列里每个系列各画一个，比准星本身还抢眼。
+   * 只做十字准星（主流看盘软件的做法）时可以关掉。
+   */
+  private hoverMarkEnabled(): boolean {
+    const interaction = this.host.norm.option.interaction;
+    return !(interaction && interaction.hover && interaction.hover.mark === false);
   }
 
   /** 把「当前悬停的数据项」下发给系列：图元自己会做放大/外移等反馈动画。 */
@@ -1291,7 +1320,7 @@ export class InteractionController {
   /** 外部（联动）驱动：在指定 x 数据值上显示悬停。 */
   public showHoverAtValue(xValue: any): void {
     const item = this.resolver.nearestByXValue(xValue);
-    if (item) this.setHover({ kind: 'item', item });
+    if (item) this.setHover({ kind: 'item', item }, true);
   }
 
   public clearHover(): void {

@@ -21,10 +21,23 @@ export function linkCharts(charts: ICEChart[], option: ChartLinkOption = {}): Ch
   const linkZoom = option.zoom !== false;
   const linkBrush = option.brush !== false;
   const listeners: Array<() => void> = [];
+  /**
+   * 最近一次**由真实指针**触发悬停的图表，也就是这轮联动回显的源头。
+   *
+   * 为什么必须记：联动是把悬停**回显**给同组其它图表，那些图本身并没有指针悬停。
+   * 而一次 mousemove 会依次到达组内每一张图，没接住指针的图会判定「指针已离开画布」
+   * 而清掉悬停并抛 `item:leave`。如果照单全收，这回「回显之死」就会顺着联动把源头
+   * 那张图真正的悬停一起清掉 —— 表现是鼠标在 K 线上移动时**竖线一闪就没了**
+   * （多 pane K 线图实测：价格 pane 的 `controller.hover` 恒为 null；只要 unlink 就正常）。
+   *
+   * 所以只认源头图自己发的 `item:leave`：回显死掉不算离开。
+   */
+  let origin: ICEChart | null = null;
 
   for (const chart of charts) {
     const onHover = (params: DataPointParams) => {
       if (!linkHover || !params) return;
+      origin = chart;
       for (const other of charts) {
         // silent：联动的回显不能再往外广播，否则 A→B→A 会无限递归
         if (other !== chart) other.silent(() => other.showHoverAtValue(params.xValue));
@@ -32,6 +45,9 @@ export function linkCharts(charts: ICEChart[], option: ChartLinkOption = {}): Ch
     };
     const onLeave = () => {
       if (!linkHover) return;
+      // 不是源头发的 leave（只是上一轮回显被清掉）→ 不能反过来清掉源头
+      if (origin !== chart) return;
+      origin = null;
       for (const other of charts) {
         if (other !== chart) other.silent(() => other.clearHover());
       }
