@@ -49,7 +49,6 @@ const pages = [
   'live-stream',
   'dashboard',
   'dashboard-iot',
-  'dashboard-market',
   'dashboard-energy',
   'dashboard-logistics',
   'dashboard-lab',
