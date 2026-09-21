@@ -12,6 +12,7 @@ function points(values: number[]): DataPoint[] {
 }
 
 function makeSeries(type: any, values: number[], extra: any = {}): InternalSeries {
+  const data = points(values);
   return {
     id: 's',
     index: 0,
@@ -19,7 +20,8 @@ function makeSeries(type: any, values: number[], extra: any = {}): InternalSerie
     name: 'S',
     color: '#3B82F6',
     option: { type, data: values, ...extra },
-    points: points(values),
+    points: data,
+    pointAt: (index: number) => data[index],
     hasExplicitX: false,
     hidden: false,
   };

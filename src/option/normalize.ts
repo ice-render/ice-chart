@@ -1,5 +1,6 @@
 import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
+import { arrayPointAt } from '../internal';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
@@ -406,6 +407,8 @@ function buildSeries(
       color,
       option,
       points,
+      // 普通系列：读点就是 points 的直读，与迁移前逐字等价（列存系列在 Phase 2 步骤 3 换实现）。
+      pointAt: arrayPointAt(points),
       hasExplicitX,
       hidden: false,
       axisIndex: 0,

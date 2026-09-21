@@ -56,6 +56,16 @@ export interface InternalSeries {
   color: string;
   option: SeriesOption;
   points: DataPoint[];
+  /**
+   * 按下标取数据点 —— **读数据点的唯一入口**。
+   *
+   * 普通系列就是 `points[index]`（同一个对象，逐字不变，越界同样返回 undefined）；
+   * 列存（虚拟）系列把 `points` 留空，由这里现场合成一个 `DataPoint`，
+   * 于是调用方不必知道数据是以数组还是以列存形式存着的。
+   *
+   * 新增读点的地方一律走这里，不要直接下标 `points`。
+   */
+  pointAt(index: number): DataPoint;
   /** 数据里是否显式提供了 x（决定类目轴的类目来源）。 */
   hasExplicitX: boolean;
   /** 该系列是否被图例隐藏。 */
@@ -92,6 +102,16 @@ export interface InternalSeries {
     message: string;
     position?: number;
   }>;
+}
+
+/**
+ * 数组式 `pointAt`：普通系列（`points` 齐备）用，与 `points[index]` 逐字等价。
+ *
+ * 放在这里是为了让「读点」这件事只有一处实现：归一化建点、组件读点都走它，
+ * 列存系列只需要在建系列时换一个取点实现（Phase 2 步骤 3）。
+ */
+export function arrayPointAt(points: DataPoint[]): (index: number) => DataPoint {
+  return (index: number): DataPoint => points[index];
 }
 
 export interface InternalAxis {

@@ -16,6 +16,7 @@ function makeSeries(type: any, values: number[], extra: any = {}): InternalSerie
     color: '#3B82F6',
     option: { type, data: values, ...extra },
     points,
+    pointAt: (index: number) => points[index],
     hasExplicitX: false,
     hidden: false,
     axisIndex: 0,

@@ -93,3 +93,37 @@ describe('toSerializableOption', () => {
     expect(JSON.parse(JSON.stringify(serializable)).series[0].name).toBe('A');
   });
 });
+
+describe('InternalSeries.pointAt', () => {
+  it('is the very same object as points[index] for a plain series', () => {
+    const norm = normalizeOption({ series: [{ id: 'a', type: 'line', data: [1, 2, 3] }] });
+    const series = norm.series[0];
+    expect(series.pointAt(0)).toBe(series.points[0]);
+    expect(series.pointAt(2)).toBe(series.points[2]);
+    // 越界与 points[index] 同语义（undefined），调用方照老写法判真假即可
+    expect(series.pointAt(3)).toBeUndefined();
+    expect(series.pointAt(-1)).toBeUndefined();
+  });
+
+  it('exposes exactly the fields a column-store series has to synthesize', () => {
+    const norm = normalizeOption({ series: [{ id: 'a', type: 'line', data: [[10, 1]] }] });
+    const point = norm.series[0].pointAt(0);
+    expect(Object.keys(point)).toEqual(['index', 'xValue', 'y', 'raw', 'base', 'top', 'name', 'size']);
+    expect(point).toMatchObject({ index: 0, xValue: 10, y: 1, base: 0, top: 1 });
+  });
+
+  it('sees the in-place edits done after buildPoints（堆叠基线 / 轴类目回填）', () => {
+    const norm = normalizeOption({
+      xAxis: { type: 'category', data: ['一', '二', '三'] },
+      series: [
+        { id: 'a', type: 'bar', stack: 's', data: [1, 2, 3] },
+        { id: 'b', type: 'bar', stack: 's', data: [10, 20, 30] },
+      ],
+    });
+    const [a, b] = norm.series;
+    expect(a.pointAt(1).xValue).toBe('二');
+    expect(b.pointAt(1)).toMatchObject({ base: 2, top: 22 });
+    // 无论中间被改过多少次，读点仍然是 points 里那一个对象
+    expect(b.pointAt(1)).toBe(b.points[1]);
+  });
+});
