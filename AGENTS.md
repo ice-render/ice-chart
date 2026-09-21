@@ -303,8 +303,14 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
 
 ## 虚拟（列存）系列（改数据点存储 / 命中路径前必读）
 
-`series.virtual: true`（支持 `scatter` / `line` / `area`）是「100 万点也要能拖」的那条路：
-不建「每点一个 `DataPoint`」，只保留 x / y（/ size）几条列。
+`series.virtual: true`（支持 `scatter` / `line` / `area` / `heatmap`）是「100 万点也要能拖」的那条路：
+不建「每点一个 `DataPoint`」，只保留列。两类形态：
+
+- **数值列**（scatter / line / area）：`SeriesColumns`（x / y（/ size）几条 `Float64Array`）；
+- **稠密矩阵**（heatmap）：`SeriesGrid`（行列类目 + 行优先值矩阵，NaN = 空格）。
+  热力图的收益有一半来自「承认它是矩阵」：**命中退化成类目查表 + 下标运算（O(1)）**，
+  不再是逐格比矩形；亚像素时按**屏幕像素块聚合**（块内取最大值，热点不被抹平），
+  聚合结果按几何键缓存。稀疏数据别开 virtual（归一化按密度报错）。
 
 - **读点只有三个入口**：`pointCount`（数量）、`pointAt(i)`（按需合成，断点仍是 `null`）、
   标量访问器 `xValueAt / yValueAt / baseAt / topAt / sizeAt`（逐点绘制与插值的循环走这组）。
@@ -317,7 +323,8 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   所以虚拟系列的像素与命中都从「列 + 同一份比例尺」现算。共用内核在 `SeriesBase`
   （`syncVirtualMeta` / `virtualVisibleWindow` / `virtualPixelAt` / `virtualNearestIndexAtX`），
   各类型的差异只在「怎么把窗口画出来」：散点是密度抽稀后逐点画，
-  折线 / 面积按像素列分桶保留**首 / 最低 / 最高 / 末**（折线丢极值就是撒谎）。
+  折线 / 面积按像素列分桶保留**首 / 最低 / 最高 / 末**（折线丢极值就是撒谎），
+  热力图走矩阵那条（窗口裁剪 + 像素块聚合）。
   这是铁律 2 唯一的例外，理由见铁律 2。
 - **冷路径同样不许全量扫**：能问列的就别遍历点。两条已经修过的：
   ① 交互窗口兜底（`numericXProbe`）原来把全部 x 值去重排序，100 万点每滚一次轮 60ms，
@@ -325,10 +332,11 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   超限按等步长抽样并在 caption 里写明（少给内容必须说出来）。
   新增「看一眼就完」的冷路径时先问一句：这件事需要知道**每一个点**吗？
 - **代价要一直保持显式**（不许静默降级）：快照里没有数据 → `restore()` 直接报错；
-  `appendData` 报错（改 `setData`）；非 scatter / 类目轴 / 堆叠 / 列式 data 配非 virtual 系列
-  一律抛错。相应的门禁：`tests/option/normalize.test.ts`、`tests/components/virtual-scatter.test.ts`、
-  `tests/chart/virtual-scatter.test.ts`。
-- 示例页 `examples/large-data-virtual-series.html`（100 万点，列式输入）。
+  `appendData` 报错（改 `setData`）；数值列系列要数值型 x（类目轴、堆叠一律抛错）、
+  虚拟热力图反而要求类目轴且密度够高（太稀疏报错）。相应的门禁：
+  `tests/option/normalize.test.ts`、`tests/components/virtual-*.test.ts`、`tests/chart/virtual-series.test.ts`。
+- 示例页：`examples/large-data-virtual-series.html`（100 万点，散点 + 折线共用一份列）、
+  `examples/heatmap.html`（第二张图是 100 万格矩阵热力图）。
 
 ## 序列化契约（改持久化相关代码前必读）
 
