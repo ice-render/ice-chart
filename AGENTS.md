@@ -145,9 +145,15 @@ static 常量/字段  →  static 方法  →  实例字段  →  构造函数  
      （那时 y 轴占位还没定），用画布宽度会把可用宽度多算 7%~11%，两个标签刚好贴住。
      所以抽稀挪到绘图区算完之后。
   3. **首末标签放不下就整颗丢掉**，不往里推 —— 推右会压住邻居（实测左端标签推 27px
-     正好盖住第二个标签的开头）。
+    正好盖住第二个标签的开头）。
+  4. **垂直网格线（`grid.x`）读的也是这张表**（`labels[i] === ''` 的不要），不是
+    `scale.ticks(5)` —— 类目轴的 `ticks()` 无视参数、返回整个 domain，那样打开 `grid.x`
+    是每个类目一条线（120 根 = 120 条，实测就是一片栅栏）。所以 **`show: false` 的 x 轴
+    也要出这张表**（只是 `labelWidth/Height` 归零、Axis 不画）：多 pane 里上面几块常藏掉
+    x 轴，网格却要和下面那块对齐成方格。
   回归点：`components/axis-labels.test.ts`（盯真画出去的 `lastTicks[].drawn`）、
-  `layout/layout.test.ts`（盯间距）。
+  `layout/layout.test.ts`（盯间距）、`chart/grid-x.test.ts`（盯网格与标签同一批位置，
+  含隐藏轴的两种情形）。
 - **悬停的三条铁律**（2026-09-15 / 2026-09-21 修，别改回去）：
   1. **画布量不到尺寸（`canvasWidth/Height` 为 0）＝ 指针不在本图上，判 `false`**。
      引擎的原生监听挂在 **window** 上，同一页里每张图都会收到整页的事件，`isOverCanvas`

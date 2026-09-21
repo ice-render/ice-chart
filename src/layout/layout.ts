@@ -112,7 +112,9 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   // x 轴标签抽稀：**必须等绘图区宽度定下来**再做（第一次建比例尺时用的是画布宽度，
   // y 轴那一截还没扣掉；按画布宽度抽稀会把可用宽度多算 7%~11%，两个标签刚好贴住）。
   // 两侧的余量也一起给它：绘图区左边只有 margin+坐标轴那点地方，右首标签放不下会被画布切掉。
-  if (showX) {
+  // 抽稀对**隐藏的 x 轴**同样要做：垂直网格线读的就是这张表（`labels[i] === ''` = 不画）。
+  // 轴藏起来了只是不画标签，网格该在哪还是在哪 —— 多 pane 的 x 轴都藏了，网格却要能对齐。
+  if (norm.kind === 'cartesian') {
     thinXAxisLabels(
       xAxisLayout,
       {
@@ -233,9 +235,10 @@ function buildAxisLayout(
   const axisOption = internal.option;
   const fontSize = norm.theme.fontSize;
   const fontFamily = norm.theme.fontFamily;
-  if (axisOption.show === false) {
-    return { ticks: [], labels: [], offset: 0, labelWidth: 0, labelHeight: 0, nameWidth: 0, nameHeight: 0 };
-  }
+  // ⚠️ `show: false` **不是**「这张表不出」：垂直网格线跟标签是同一批位置（抽稀过的），
+  // 轴藏起来的那些 pane 也得有这张表，否则网格只能退回「每个类目一条线」= 一片栅栏。
+  // 隐藏的轴只是**不占排版空间**（见下面把 width/height 归零），也不画（Axis 里早就拦了）。
+  const hidden = axisOption.show === false;
   const ticks = scale.ticks(axisOption.tickCount || 5);
   const labels: string[] = [];
   let maxLabelWidth = 0;
@@ -259,6 +262,9 @@ function buildAxisLayout(
   const rotatedHeight = maxLabelWidth * Math.sin(radians) + fontSize * 1.4;
   const name = axisOption.name || '';
   const nameWidth = name ? measureTextWidth(ctx, name, fontSize, fontFamily) : 0;
+  if (hidden) {
+    return { ticks, labels, offset: 0, labelWidth: 0, labelHeight: 0, nameWidth: 0, nameHeight: 0 };
+  }
   return {
     ticks,
     labels,

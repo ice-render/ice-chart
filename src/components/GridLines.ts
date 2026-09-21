@@ -10,6 +10,14 @@ export class GridLines extends ChartComponent {
   public yScale: Scale | null = null;
   /** 水平网格线：每个 y 轴一组（默认只有主轴画网格线）。 */
   public horizontal: Array<{ scale: Scale; ticks: any[]; index?: number }> = [];
+  /**
+   * 垂直网格线的刻度（由 `ICEChart` 从 **x 轴布局表**里取，抽稀掉的不要）。
+   *
+   * ⚠️ 不能退回 `xScale.ticks(5)`：类目轴的 `ticks()` **无视参数、直接返回整个 domain**，
+   * 视窗里 120 根就是 120 条竖线 —— 画出来是一片栅栏（实测）。网格跟标签必须是
+   * 同一批位置，这也是「网格线落在标签正下方」的既定口径。
+   */
+  public xTicks: any[] = [];
   public plot: Rect = { x: 0, y: 0, width: 0, height: 0 };
   public grid: GridOption = {};
   public theme: ChartTheme | null = null;
@@ -92,7 +100,8 @@ export class GridLines extends ChartComponent {
     }
     if (this.grid.x) {
       ctx.beginPath();
-      for (const tick of this.xScale.ticks(5)) {
+      const ticks = this.xTicks.length ? this.xTicks : this.xScale.ticks(5);
+      for (const tick of ticks) {
         const fallback = plot.x + this.xScale.map(tick);
         if (!isFinite(fallback)) continue;
         const x = this.snap(this.xTickPos(tick, fallback));
