@@ -19,7 +19,6 @@ export type BuiltinSeriesType =
   | 'scatter'
   | 'pie'
   | 'radar'
-  | 'candlestick'
   | 'heatmap'
   | 'sankey'
   | 'funnel'
@@ -348,8 +347,6 @@ export interface SeriesOption {
   clockwise?: boolean;
   /** 玫瑰图：radius（半径随数值）| area（面积随数值）。 */
   roseType?: 'radius' | 'area' | false;
-  /** K 线配色（默认红涨绿跌）。 */
-  candle?: { upColor?: string; downColor?: string; borderWidth?: number };
   /** 热力图配色（默认从浅到深）。 */
   heatmap?: { minColor?: string; maxColor?: string };
   /** 瀑布图配色与连接线（也可写在 option.waterfall 上，两者等价，series 优先）。 */
@@ -683,7 +680,7 @@ export interface ChartOption {
   labels?: ChartLabels;
   title?: TitleOption;
   xAxis?: AxisOption;
-  /** 单个 y 轴，或 y 轴数组（多轴叠加：涨跌幅用右轴、成交量用左轴之类）。 */
+  /** 单个 y 轴，或 y 轴数组（多轴叠加：双轴对比、双量纲并列之类）。 */
   yAxis?: AxisOption | AxisOption[];
   grid?: GridOption;
   legend?: LegendOption;

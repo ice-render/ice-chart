@@ -299,7 +299,6 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   scatter: '散点',
   pie: '扇形',
   radar: '雷达多边形',
-  candlestick: 'K 线',
   heatmap: '热力图单元',
   sankey: '桑基连线',
   funnel: '漏斗阶段',

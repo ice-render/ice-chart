@@ -4,6 +4,29 @@
 
 > 下一个版本发布前，改动在这里累积。
 
+## [0.28.0] - 2026-09-21
+
+### 变更（破坏性：移除内置 `candlestick` 系列与 OHLC 数据模型）
+
+金融交易类图表不属于本包的职责范围，已整体迁出到同族新包 **`ice-trading-chart`**。
+本包不再承载任何交易语义，破坏性点如下：
+
+- **删除内置系列类型 `candlestick`**：`BuiltinSeriesType`、系列注册表、公开导出
+  `CandlestickSeries` 全部移除。`series[].type: 'candlestick'` 在本包会**静默降级为折线**
+  （未注册类型兜底 `line`），要画 K 线请装 `ice-trading-chart` 并调用它的注册入口。
+- **删除 `DataPoint.ohlc`**：OHLC 不再是本包的数据模型概念。需要多值形态（影线极值之类）
+  的自定义系列，从 `DataPoint.raw` 自行解析原始数据项，并用显式 `yAxis.domain` 覆盖量程。
+- **删除 `SeriesOption.candle`**：涨跌配色改为自定义系列自己的 option 字段
+  （`InternalSeries.option` 按引用透传，未知字段会原样到达系列组件）。
+- **删除提示框里硬编码的「开盘 / 收盘 / 最低 / 最高」四行**：需要定制提示框行的自定义系列，
+  用公开的 `tooltip.formatter` 逃生舱承接。
+- 摘除 `normalize` 中与 K 线绑定的三处：`buildPoints` 的 OHLC 分支、
+  `resolveXAxisType` 的类目轴推断、`buildYDomain` 的影线极值入域。
+- 无障碍 `SERIES_ROLE_HINT` 去掉 `candlestick` 条目。
+
+> 序列化契约不变（`SNAPSHOT_VERSION` 仍为 1，快照只存 option）。含
+> `type: 'candlestick'` 的旧快照可以正常读入，但会按上面说的降级为折线。
+
 ## [0.27.1] - 2026-09-19
 
 ### 修复

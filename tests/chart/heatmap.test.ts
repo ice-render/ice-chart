@@ -5,25 +5,6 @@ import { mixColors } from '../../src/components/series/HeatmapSeries';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
 
-const CANDLE_OPTION: ChartOption = {
-  title: { text: '日 K' },
-  legend: { show: false },
-  xAxis: { type: 'category' },
-  yAxis: { name: '价格' },
-  series: [
-    {
-      id: 'k',
-      type: 'candlestick',
-      name: 'K 线',
-      data: [
-        [100, 110, 95, 115],
-        [110, 105, 100, 118],
-        [105, 120, 102, 125],
-      ],
-    },
-  ],
-};
-
 const HEATMAP_OPTION: ChartOption = {
   title: { text: '时段热度' },
   legend: { show: false },
@@ -43,18 +24,6 @@ const HEATMAP_OPTION: ChartOption = {
     },
   ],
 };
-
-describe('K 线（纯函数层）', () => {
-  it('parses [open, close, low, high] and includes wicks in the y domain', () => {
-    const norm = normalizeOption(CANDLE_OPTION);
-    expect(norm.xAxis.type).toBe('category');
-    const point = norm.series[0].points[0];
-    expect(point.ohlc).toEqual([100, 110, 95, 115]);
-    expect(point.y).toBe(110);
-    expect(norm.yAxis.domain[0]).toBeLessThanOrEqual(95);
-    expect(norm.yAxis.domain[1]).toBeGreaterThanOrEqual(125);
-  });
-});
 
 describe('热力图（纯函数层）', () => {
   it('turns the second data field into a category y axis', () => {
@@ -79,7 +48,7 @@ describe('热力图（纯函数层）', () => {
   });
 });
 
-describe('K 线 / 热力图（引擎集成）', () => {
+describe('热力图（引擎集成）', () => {
   let canvas: any;
   let chart: ICEChart | null = null;
 
@@ -101,29 +70,6 @@ describe('K 线 / 热力图（引擎集成）', () => {
     await chart.render();
     return chart;
   }
-
-  it('hits a candlestick inside its wick range and shows OHLC in the tooltip', async () => {
-    const c = await mount(CANDLE_OPTION);
-    const component = c.seriesComponents[0];
-    const pixel = component.pixelAt(1)!;
-    const sx = c.layout.plot.x + pixel[0];
-    const sy = c.layout.plot.y + pixel[1];
-    expect(c.ice.hitTest(sx, sy)).toBe(component);
-    expect(c.controller.resolveTarget(sx, sy).index).toBe(1);
-
-    c.controller.handlePointerMove(sx, sy);
-    const content = c.tooltip!.content!;
-    expect(content.rows.map((r) => r.name)).toEqual(['开盘', '收盘', '最低', '最高']);
-    expect(content.rows[0].value).toBe('110');
-  });
-
-  it('misses a candlestick well above its high', async () => {
-    const c = await mount(CANDLE_OPTION);
-    const component = c.seriesComponents[0];
-    const pixel = component.pixelAt(0)!;
-    const target = c.controller.resolveTarget(c.layout.plot.x + pixel[0], c.layout.plot.y + 2);
-    expect(target.index).toBe(-1);
-  });
 
   it('hits a heatmap cell and reports its category pair', async () => {
     const c = await mount(HEATMAP_OPTION);

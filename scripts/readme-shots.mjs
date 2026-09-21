@@ -19,11 +19,10 @@ const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ice-chart-shots-'));
 fs.mkdirSync(outDir, { recursive: true });
 
-/** 六个大屏的顺序与强调色（对比图的图例点用）。 */
+/** 五个大屏的顺序与强调色（对比图的图例点用）。 */
 const DASHBOARDS = [
   ['运营监控', 'dashboard.html', '#00e5ff'],
   ['设备监控', 'dashboard-iot.html', '#2ee6c5'],
-  ['行情监控', 'dashboard-market.html', '#f5a524'],
   ['能源调度', 'dashboard-energy.html', '#7c8cff'],
   ['物流调度', 'dashboard-logistics.html', '#ff7a45'],
   ['函数实验', 'dashboard-lab.html', '#a78bfa'],
@@ -63,7 +62,7 @@ const canvasBox = (page) =>
 // 头图：运营监控大屏（顶栏 + KPI + 前两行面板）。dsf 0.875 让 1600 的设计宽落成 1400 的文件宽。
 await shot('hero.png', 'dashboard.html', { width: 1600, height: 820, dsf: 0.875, wait: 2200 });
 
-// 六个大屏各拍一张（临时目录），再拼成一张对比图
+// 五个大屏各拍一张（临时目录），再拼成一张对比图
 for (const [index, [, file]] of DASHBOARDS.entries()) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
   await page.goto(`${baseUrl}/${file}`, { waitUntil: 'load' });

@@ -533,8 +533,8 @@
         <canvas id="graph" width="762" height="210"></canvas>
       </div>
       <div class="panel span6">
-        <div class="panel-title">实时负载 K 线<span class="meta">每 8 个采样一根 · 最后一根跳动</span></div>
-        <canvas id="candles" width="762" height="210"></canvas>
+        <div class="panel-title">实时负载峰值<span class="meta">每 8 个采样取一根峰值 · 最后一根跳动</span></div>
+        <canvas id="bars" width="762" height="210"></canvas>
       </div>
 
       <div class="footer">
@@ -552,8 +552,8 @@
       const $ = (id) => document.getElementById(id);
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
       const WINDOW = 180;
-      const CANDLE_TICKS = 8;
-      const CANDLE_COUNT = 40;
+      const BAR_TICKS = 8;
+      const BAR_COUNT = 40;
       const HEAT_COLS = 22;
       const HEAT_ROWS = ['华东', '华北', '华南'];
 
@@ -886,16 +886,16 @@
         ],
       });
 
-      const candles = [];
-      let building = null;
-      const candleData = () => candles.map((c) => [c.o, c.c, c.l, c.h]);
-      const candleChart = ICEChart.createChart('candles', {
+      const bars = [];
+      let bucket = null;
+      const barData = () => bars.slice();
+      const barChart = ICEChart.createChart('bars', {
         ...BASE,
         tooltip: { trigger: 'item' },
         xAxis: { type: 'category' },
         yAxis: { name: '负载', min: 20, max: 80 },
         animation: { enter: { duration: 400 }, update: { duration: 180, easing: 'linear' } },
-        series: [{ id: 'k', type: 'candlestick', name: '负载', data: [], barWidth: 0.5 }],
+        series: [{ id: 'k', type: 'bar', name: '峰值', data: [], barWidth: 0.5 }],
       });
 
       const prev = { qps: 0, users: 0, cpu: 0, latency: 0, errors: 0 };
@@ -934,17 +934,15 @@
         latency.appendData('lat', [[t, Math.round(state.latency)]], { maxPoints: WINDOW });
 
         const load = state.cpu;
-        if (!building) building = { o: load, c: load, l: load, h: load };
-        building.c = load;
-        building.h = Math.max(building.h, load);
-        building.l = Math.min(building.l, load);
-        if (t % CANDLE_TICKS === 0) {
-          candles.push({ ...building });
-          if (candles.length > CANDLE_COUNT) candles.shift();
-          building = null;
-          candleChart.setData('k', candleData());
+        if (bucket === null) bucket = load;
+        else bucket = Math.max(bucket, load);
+        if (t % BAR_TICKS === 0) {
+          bars.push(bucket);
+          if (bars.length > BAR_COUNT) bars.shift();
+          bucket = null;
+          barChart.setData('k', barData());
         } else {
-          candleChart.setData('k', candleData().concat([[building.o, building.c, building.l, building.h]]));
+          barChart.setData('k', barData().concat([bucket]));
         }
 
         if (t % 8 === 0) {
@@ -1061,7 +1059,7 @@
         graph,
         treemap,
         funnel,
-        candles: candleChart,
+        bars: barChart,
       };
       window.__link = link;
       window.__dashboardState = state;

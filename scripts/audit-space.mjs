@@ -49,7 +49,6 @@ const pages = [
   'live-stream',
   'dashboard',
   'dashboard-iot',
-  'dashboard-market',
   'dashboard-energy',
   'dashboard-logistics',
   'dashboard-lab',
@@ -224,7 +223,7 @@ for (const name of pages) {
     const canvasRatio = seriesW !== null && item.canvas[0] > 0 ? seriesW / item.canvas[0] : null;
     if (item.kind === 'cartesian' && item.seriesBox && item.plot) {
       const [px, py, pw, ph] = item.plot;
-      const baseline = item.series.some((s) => ['area', 'bar', 'waterfall', 'candlestick', 'boxplot', 'heatmap'].includes(s.type));
+      const baseline = item.series.some((s) => ['area', 'bar', 'waterfall', 'boxplot', 'heatmap'].includes(s.type));
       const gaps = {
         top: item.seriesBox.top - py,
         bottom: py + ph - item.seriesBox.bottom,

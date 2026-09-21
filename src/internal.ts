@@ -37,8 +37,6 @@ export interface DataPoint {
   color?: string;
   /** 第三维数值（气泡图的尺寸）。 */
   size?: number;
-  /** K 线的 [open, close, low, high]。 */
-  ohlc?: [number, number, number, number];
   /** 箱线图的 [min, Q1, median, Q3, max]。 */
   boxplot?: [number, number, number, number, number];
 }

@@ -18,7 +18,6 @@ const SRC = path.resolve(__dirname, '..', '..', 'src');
 const BUDGET: Record<string, number> = {
   'theme/chartTheme.ts': 26,
   'theme/chartEngineBridge.ts': 6,
-  'components/series/CandlestickSeries.ts': 2,
   'components/series/PieSeries.ts': 2,
   'components/series/SankeySeries.ts': 2,
   'components/series/TreemapSeries.ts': 2,

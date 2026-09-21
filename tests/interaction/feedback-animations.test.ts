@@ -379,7 +379,7 @@ describe('交互反馈动画', () => {
       expect(component.hitTestIndex(pixel[0] + radius - 1, pixel[1])).toBe(0);
     });
 
-    it('紧挨着的图元（热力图 / K 线 / 箱线图 / 树图）用叠加高亮，不自作主张改几何', async () => {
+    it('紧挨着的图元（热力图 / 箱线图 / 树图）用叠加高亮，不自作主张改几何', async () => {
       const cases: Array<{ name: string; option: ChartOption; index: number }> = [
         {
           name: 'heatmap',
@@ -401,27 +401,6 @@ describe('交互反馈动画', () => {
                   ['三', '甲', 5],
                 ],
               } as any,
-            ],
-          },
-        },
-        {
-          name: 'candlestick',
-          index: 2,
-          option: {
-            legend: { show: false },
-            xAxis: { type: 'category' },
-            yAxis: {},
-            series: [
-              {
-                id: 'k',
-                type: 'candlestick',
-                name: 'K',
-                data: [
-                  [10, 12, 9, 13],
-                  [12, 11, 10, 14],
-                  [11, 15, 11, 16],
-                ],
-              },
             ],
           },
         },

@@ -536,43 +536,6 @@ function buildPoints(
     }
     return { points, hasExplicitX: true };
   }
-  // K 线：每个数据项是 [open, close, low, high]
-  if (option.type === 'candlestick') {
-    for (let i = 0; i < raw.length; i++) {
-      const item = raw[i];
-      const tuple = Array.isArray(item)
-        ? item
-        : item && typeof item === 'object' && Array.isArray((item as any).value)
-          ? (item as any).value
-          : null;
-      if (!tuple || tuple.length < 4) {
-        points.push({ index: i, xValue: i, y: null, raw: item, base: 0, top: 0 });
-        continue;
-      }
-      const open = toNumber(tuple[0]);
-      const close = toNumber(tuple[1]);
-      const low = toNumber(tuple[2]);
-      const high = toNumber(tuple[3]);
-      const name = item && typeof item === 'object' && !Array.isArray(item) && (item as any).name !== undefined ? String((item as any).name) : undefined;
-      hasExplicitX = true;
-      points.push({
-        index: i,
-        xValue: name === undefined ? i : name,
-        y: close,
-        raw: item,
-        base: 0,
-        top: close === null ? 0 : close,
-        name,
-        ohlc: [
-          open === null ? 0 : open,
-          close === null ? 0 : close,
-          low === null ? 0 : low,
-          high === null ? 0 : high,
-        ],
-      });
-    }
-    return { points, hasExplicitX };
-  }
   // 热力图：数据项是 [x类目, y类目, 数值]
   if (option.type === 'heatmap') {
     for (let i = 0; i < raw.length; i++) {
@@ -733,7 +696,7 @@ function toNumber(value: any): number | null {
 function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear' | 'category' | 'time' | 'log' {
   if (option.type) return option.type;
   if (
-    series.some((s) => s.type === 'bar' || s.type === 'candlestick' || s.type === 'heatmap' || s.type === 'boxplot' || s.type === 'waterfall')
+    series.some((s) => s.type === 'bar' || s.type === 'heatmap' || s.type === 'boxplot' || s.type === 'waterfall')
   )
     return 'category';
   const values: any[] = [];
@@ -1012,7 +975,7 @@ function buildXDomain(
  * 数值/时间轴：窗口就是 [起始值, 结束值] 两个数。
  * **类目轴：窗口是两个类目，必须切成类目数组的一个区间** ——
  * 直接赋值成 `[起始类目, 结束类目]` 会把 36 个类目的轴塌缩成 2 个类目，
- * 表现是柱子/K 线突然变得极宽、刻度只剩两个（这是真实踩过的坑）。
+ * 表现是柱子突然变得极宽、刻度只剩两个（这是真实踩过的坑）。
  */
 function resolveXDomain(type: string, fullDomain: any[], window: [any, any] | null | undefined): any[] {
   if (!window) return fullDomain;
@@ -1075,10 +1038,6 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     }
     for (const p of s.points) {
       if (p.y !== null) values.push(p.y);
-      // K 线的影线（low/high）也要进数据域，否则影线会被裁掉
-      if (p.ohlc) {
-        values.push(p.ohlc[2], p.ohlc[3]);
-      }
       // 箱线图的须（min/max）也要进数据域
       if (p.boxplot) {
         values.push(p.boxplot[0], p.boxplot[4]);

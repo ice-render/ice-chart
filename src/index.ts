@@ -119,7 +119,6 @@ export { PieSeries } from './components/series/PieSeries';
 export type { PolarSeriesCoord } from './components/series/PieSeries';
 export { RadarSeries } from './components/series/RadarSeries';
 export type { RadarSeriesCoord } from './components/series/RadarSeries';
-export { CandlestickSeries } from './components/series/CandlestickSeries';
 export { HeatmapSeries, mixColors } from './components/series/HeatmapSeries';
 export { SankeySeries } from './components/series/SankeySeries';
 export type { SankeySeriesCoord } from './components/series/SankeySeries';

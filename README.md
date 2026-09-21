@@ -115,12 +115,12 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / candlestick / heatmap / sankey / funnel / gauge / boxplot / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
+| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / heatmap / sankey / funnel / gauge / boxplot / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter、**数据域留白 `padding`（默认 5%）** |
 | 图例 | top / bottom / left / right | **可点击切换系列 / 扇区显隐**并重算数据域 |
-| 提示框 | axis / item 触发器 | 画在画布内（不依赖 HTML 浮层）；K 线给 OHLC、桑基给流量 |
+| 提示框 | axis / item 触发器 | 画在画布内（不依赖 HTML 浮层）；箱线图给五数概括、桑基给流量 |
 | 十字准星 | x / y / xy | 带坐标轴数值标签；跟随时长按距离缩放（`crosshair.followDuration`，默认上限 90ms，`0` = 立即跟随） |
 | 悬停高亮 | 圆环 / 柱形描边 | 可配置 `dimOthers` 压暗其他系列 |
 | 选中 | single / multiple | 点击或键盘 Enter，抛出 `select:change` |
@@ -183,7 +183,6 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `scatter` | `data: [[x, y, size]]` + `symbolSizeRange` | 第三维映射成直径即气泡图；`symbolSize` 也可传函数 |
 | `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
 | `radar` | `radar.indicators` + `data: [数值...]` | 一个系列一个多边形，顶点命中 |
-| `candlestick` | `data: [[open, close, low, high]]` | 影线进数据域，提示框给 OHLC |
 | `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一组原始观测值 | 恰好 5 个数按五数概括解释，其它长度自动算分位数；命中覆盖整条须 |
 | `heatmap` | `data: [[x类目, y类目, 数值]]` | y 轴自动变类目轴，颜色线性插值 |
 | `waterfall` | `data: [{ name, value }]`，合计项标 `total: true` | 增/减/合计三色 + 连接虚线 |
@@ -214,19 +213,18 @@ chart.appendData('cpu', [[t, v1], [t2, v2]], { maxPoints: 180, animate: true });
   —— 监控场景用 120~300 点的窗口最划算。
 
 配套示例 [examples/live-stream.html](./examples/live-stream.html)：四条曲线共用一个数据发生器 ——
-滑动窗口折线 / 弹簧指针仪表盘 / 每 250ms 左移一列的滚动热力图 / 最后一根实时跳动的 K 线，
+滑动窗口折线 / 弹簧指针仪表盘 / 每 250ms 左移一列的滚动热力图 / 最后一根实时跳动的峰值柱形，
 外加暂停、1×/2×/4× 速度、注入尖峰与 fps 统计。
 
 ### 大屏（深色主题）
 
-同一个脚手架（[examples/assets/dash-kit.js](./examples/assets/dash-kit.js)）下**六个大屏案例**，
+同一个脚手架（[examples/assets/dash-kit.js](./examples/assets/dash-kit.js)）下**五个大屏案例**，
 每个只是「换一套视觉身份 + 换一张面板清单」：
 
 | 大屏 | 视觉身份 | 侧重 |
 | --- | --- | --- |
 | [运营监控](./examples/dashboard.html) | 青 | 12 张图共用一条数据流，跨图三路联动 + 告警亮边 |
-| [设备监控](./examples/dashboard-iot.html) | 青绿 | 水位球 / 设备状态热力 / 心跳 K 线 / 固件占比 |
-| [行情监控](./examples/dashboard-market.html) | 琥珀 + 红涨绿跌 | 分时 / 盘口六档 / 资金流桑基 / 换手水位球 |
+| [设备监控](./examples/dashboard-iot.html) | 青绿 | 水位球 / 设备状态热力 / 心跳峰值 / 固件占比 |
 | [能源调度](./examples/dashboard-energy.html) | 蓝紫 | 源网荷桑基 / 电量平衡瀑布 / **谐波合成（函数绘图）** |
 | [物流调度](./examples/dashboard-logistics.html) | 橙红 | 分拣漏斗 / 包裹流向 / 逐项配色的排名与时段柱 |
 | [函数实验](./examples/dashboard-lab.html) | 紫 | 参数扫动 / 极坐标 / 采样密度 / 表达式诊断 |
@@ -356,7 +354,7 @@ animation: {
   `chart.finishAnimations()` 可把当前动画一次性推到终态（截图 / 测试用）。
 
 各类型的入场形态：柱形从基线错峰长出、折线/面积从左到右画出来、气泡依次弹出、
-饼图/玫瑰图扇形依次扫开、雷达从中心展开、K 线从开盘价上下展开、箱线图从中位线展开、
+饼图/玫瑰图扇形依次扫开、雷达从中心展开、瀑布图逐段累加、箱线图从中位线展开、
 热力图沿对角线逐格浮现、漏斗从等宽收拢成漏斗、仪表盘指针扫到目标值（可配弹簧回弹）、
 桑基连线从源流向目标、矩形树图逐层展开、关系图从环形铺开**收敛到力布局结果**。
 
@@ -536,7 +534,7 @@ const restored = createChart('canvas-2', json);  // 还原：语义 / 窗口 / �
   │ ICEGroup(root)                                       │
   │  ├ PlotArea      绘图区背景 + 空白处交互面            │
   │  ├ GridLines     网格线                              │
-  │  ├ LineSeries / BarSeries / PieSeries / RadarSeries / CandlestickSeries / ...  ← containsLocalPoint 即数据命中判定
+  │  ├ LineSeries / BarSeries / PieSeries / RadarSeries / BoxplotSeries / ...  ← containsLocalPoint 即数据命中判定
   │  ├ Axis × N      坐标轴（多 y 轴）                   │
   │  ├ RadarGrid     雷达网格（仅雷达场景）              │
   │  ├ Title / Legend                                    │
@@ -556,14 +554,14 @@ npm run examples:serve      # http://localhost:5177
 ```
 
 示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、多 y 轴叠加、饼图 / 环形图 / 玫瑰图、雷达图、
-K 线与热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
-大数据量（5 万点降采样）、无障碍、跨图联动、迷你 MATLAB，以及 **6 个深色大屏**
-（运营 / 设备 / 行情 / 能源 / 物流 / 函数实验）。
+热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
+大数据量（5 万点降采样）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
+（运营 / 设备 / 能源 / 物流 / 函数实验）。
 
-六个大屏共用同一套脚手架（`examples/assets/dash-kit.js`：12 列栅格 + 面板组件 + 数据流主循环），
-每个大屏只换一套配色身份与面板清单 —— 底色与主色同源，是「同一个库、不同视觉身份」的六种样子：
+五个大屏共用同一套脚手架（`examples/assets/dash-kit.js`：12 列栅格 + 面板组件 + 数据流主循环），
+每个大屏只换一套配色身份与面板清单 —— 底色与主色同源，是「同一个库、不同视觉身份」的五种样子：
 
-![六个大屏案例](./docs/screenshots/dashboards.png)
+![五个大屏案例](./docs/screenshots/dashboards.png)
 
 每个示例页在图表下方都有两块面板：
 
@@ -655,7 +653,7 @@ node scripts/audit-space.mjs         # 104 张示例图：直角坐标占宽 ≥
 ## 路线图
 
 已落地：极坐标（饼图 / 玫瑰图）、雷达图、多 y 轴、dataZoom 滑块、LTTB 降采样与二分命中、
-无障碍（数据表镜像 + 播报）、K 线、热力图、桑基图、标注（目标线 / 异常点 / 目标区间）。
+无障碍（数据表镜像 + 播报）、热力图、桑基图、标注（目标线 / 异常点 / 目标区间）。
 
 后续候选：
 
