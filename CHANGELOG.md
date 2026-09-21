@@ -24,6 +24,22 @@
   稀疏数据不要开（归一化按密度报错，避免矩阵比点集还费）。
   示例见 `examples/large-data-virtual-series.html`（散点与折线共用同一份列）与
   `examples/heatmap.html`（第二张是 100 万格矩阵）。
+- **亿级数据：分块按需加载（`virtual: true` + `data: { sizes, rangeOf, yDomain, loadChunk }`）**。
+  图表只让「可见窗口覆盖的块」驻留（`maxResidentChunks`，LRU 淘汰），其余块可以根本不在内存里 ——
+  **内存与数据总量解耦**。实测 10 亿逻辑点（1 万块 × 10 万点、常驻 3 块）：
+  初始化 **3ms**、堆 **2.7MB**、数据点对象 0；平移到 9 亿点处换一批块，常驻数与堆不变。
+  `rangeOf` 与 `yDomain` 是**声明式必需**：前者让窗口定位不必先加载，后者让坐标轴不随加载漂移。
+  实现上踩到并修掉两个坑：① 窗口覆盖的块远多于驻留预算时**不能对窗口内每块都发请求**
+  （10 亿点全量视图覆盖 1 万块，全请求 = 1 万次加载 / 初始化 22 秒；改成按预算均匀取样后 3 次 / 3ms）；
+  ② 分块系列的**最近邻不能在全量下标上二分**（未驻留区间的 x 是 undefined，会一路走到头、命中判空），
+  改成「先用 x 值定位到块，再在驻留块内二分」。
+- **把列交给引擎的虚拟子源**：`chart.createVirtualSource(seriesId)` 返回引擎的
+  `VirtualChildSource`（`boxAt` / `forEachInBox` / `hitTest` / `paint` / `materialize`），
+  坐标是组件本地（= 绘图区）像素，把 `ICEVirtualLayer` 摆在绘图区上即可 ——
+  数据**不复制**，窗口裁剪 / 批量落墨 / 命中都归引擎，并白拿引擎侧的能力：
+  **命中即物化**（点一下就变成可拖的真图元）、SVG 导出、worker 镜像告警、对齐参考线。
+  实测 100 万点散点：落墨 **2.1ms/帧**、命中 **0.00ms**、堆 **2.1MB**。
+  示例见 `examples/large-data-virtual-series.html` 的第三张图。
 - **虚拟（列存）系列的实时流：`appendData` 走环形缓冲**。以前每次追加都要
   「concat 成新数组 → 整条重跑归一化 / 布局 / 重建像素」，成本随窗口线性长；
   现在容量 = 滑动窗口（`maxPoints`），满了覆盖最老的，每次追加就是

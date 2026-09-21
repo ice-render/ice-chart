@@ -331,12 +331,27 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   现在在单调列上二分；② 无障碍数据表默认封顶 200 行（`A11yTreeOptions.maxTableRows`），
   超限按等步长抽样并在 caption 里写明（少给内容必须说出来）。
   新增「看一眼就完」的冷路径时先问一句：这件事需要知道**每一个点**吗？
+- **亿级数据用分块按需加载**（`SeriesChunks`）：`data: { sizes, rangeOf, yDomain, loadChunk }`，
+  只驻留可见窗口覆盖的块（`maxResidentChunks`，LRU）。三条纪律：
+  ① `rangeOf` / `yDomain` **必须声明式**（前者让窗口定位不必先加载，后者让坐标轴不随加载漂移）；
+  ② 窗口覆盖的块远多于驻留预算时**按预算均匀取样**，不能对窗口内每块都发请求
+     （实测：10 亿点全量视图覆盖 1 万块，全请求 = 1 万次加载 / 初始化 22 秒；
+     取样后 3 次 / 3ms —— 与散点折线的密度抽稀同一条思路）；
+  ③ 分块系列的**最近邻不能在全量下标上二分**（未驻留区间的 `xValueAt` 是 undefined，
+     会一路走到头、命中判空）：先用 x 值定位到块，再在驻留块内二分。
+- **列可以交给引擎的虚拟子源**：`chart.createVirtualSource(seriesId)` 返回
+  `VirtualChildSource`（坐标是组件本地 = 绘图区像素），`ICEVirtualLayer` 摆在绘图区上即可；
+  数据**不复制**，窗口裁剪 / 批量落墨 / 命中归引擎，白拿「命中即物化」/ SVG 导出 /
+  对齐参考线。两点注意：`forEachInBox` 是 O(窗口项数)（100 万项全窗约 30ms，按需调用，
+  别每帧全窗扫）；`materialize` 只造组件，挂树由调用方做（引擎定的口径）。
 - **代价要一直保持显式**（不许静默降级）：快照里没有数据 → `restore()` 直接报错；
   `appendData` 报错（改 `setData`）；数值列系列要数值型 x（类目轴、堆叠一律抛错）、
   虚拟热力图反而要求类目轴且密度够高（太稀疏报错）。相应的门禁：
   `tests/option/normalize.test.ts`、`tests/components/virtual-*.test.ts`、`tests/chart/virtual-series.test.ts`。
 - 示例页：`examples/large-data-virtual-series.html`（100 万点，散点 + 折线共用一份列）、
-  `examples/heatmap.html`（第二张图是 100 万格矩阵热力图）。
+  `examples/heatmap.html`（第二张图是 100 万格矩阵热力图）、
+  `examples/live-stream.html`（第二张图是窗口 2 万点的列存实时流）、
+  `examples/large-data-virtual-series.html` 的第三张图（同一份列喂给引擎虚拟层）。
 
 ## 序列化契约（改持久化相关代码前必读）
 

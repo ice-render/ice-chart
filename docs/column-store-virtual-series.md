@@ -57,6 +57,26 @@ series: [{
 // 实时流：同一个 appendData，但追加进的是**环形缓冲**（maxPoints = 滑动窗口大小）
 chart.appendData('line', [[t, value]], { maxPoints: 20000 });
 
+// 亿级数据：分块按需加载（只驻留可见窗口覆盖的块）
+series: [{
+  type: 'line', virtual: true,
+  data: {
+    sizes: [1_000_000, 1_000_000, /* … 1 万块 = 100 亿点也行 */],
+    rangeOf: (i) => [i * 1e6, (i + 1) * 1e6 - 1],   // 声明式块范围：定位不用先加载
+    yDomain: [0, 100],                              // 声明式值域：坐标轴不随加载漂移
+    loadChunk: async (i) => ({ x, y }),             // 同步或异步；异步到货自动重绘
+    maxResidentChunks: 4,                           // 常驻上限（LRU）
+  },
+}]
+
+// 把列交给引擎的虚拟层（列不复制；命中即物化、SVG 导出等能力来自引擎）
+const source = chart.createVirtualSource('big');
+ice.addChild(new ICEVirtualLayer({
+  left: chart.layout.plot.x, top: chart.layout.plot.y,
+  width: chart.layout.plot.width, height: chart.layout.plot.height,
+  childSource: source,
+}));
+
 // 也收：元组数组（适合几十万级、应用侧本来就是数组的场景）
 series: [{ type: 'scatter', virtual: true, data: [[0, 1], [1, 3], ...] }]
 
@@ -88,6 +108,18 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
   数值列系列上不再 concat + 全量重建，而是「写 1 个槽位 + 挪一次起点」。
   与连续列是同一件事的两种物理布局，所以**共用同一组访问器** ——
   但它的物理下标 ≠ 逻辑下标，直读 `ring.x[i]` 会在绕回之后读到别的点。
+- **亿级数据是分块按需加载**（`SeriesChunks`）：`data: { sizes, rangeOf, yDomain, loadChunk }`，
+  图表只让「可见窗口覆盖的块」驻留（`maxResidentChunks`，LRU），未驻留的点读出来是「没有值」。
+  两条声明式要求不是洁癖：`rangeOf` 让窗口定位**不必先加载**，`yDomain` 让坐标轴**不随加载漂移**
+  （亿级数据不可能为了自动缩放把块全 load 一遍）。
+  另有一条实测教训：窗口覆盖的块数远大于驻留预算时，**不能对窗口内每块都发请求** ——
+  10 亿点缩到全量视图时窗口覆盖 1 万块，全请求 = 1 万次加载（初始化 22 秒），
+  现在按预算**均匀取样**（3 次、3ms），与散点/折线的密度抽稀是同一条思路。
+- **列可以直接交给引擎的虚拟子源**：`chart.createVirtualSource(seriesId)` 返回一个
+  `VirtualChildSource`（坐标是组件本地 = 绘图区像素，与引擎「容器局部」口径一致），
+  把 `ICEVirtualLayer` 摆在绘图区上就能让**引擎**负责窗口裁剪 / 批量落墨 / 命中，
+  并白拿引擎侧的能力：**命中即物化**（点一下变成可拖的真图元）、SVG 导出、
+  worker 镜像告警、对齐参考线。数据**不复制**，引擎读的就是图表那几条列。
 
 ## 4. 实测
 
@@ -129,6 +161,23 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 普通路的成本随窗口线性长（10 万点时 p95 15.1ms，一帧预算基本吃光），
 环形缓冲几乎与窗口无关 —— 60Hz 实时流的可用窗口从「几千点」抬到「十万点」。
 
+分块加载（10 亿逻辑点 / 1 万块 × 10 万点，`maxResidentChunks: 3`）：
+
+| 口径 | 实测 |
+|---|---|
+| 逻辑点数 | **1,000,000,000** |
+| 常驻块（内存的真实占用） | **3**（30 万点 ≈ 4.8MB 列） |
+| 初始化 | **3 ms**（只登记块长度 / 范围 / 值域，不加载任何块） |
+| 加载次数 | **3**（按预算均匀取样；修之前是 1 万次、初始化 22 秒） |
+| 堆（CDP 取堆，GC 后） | **2.7 MB** |
+| 平移到 9 亿点处 | 换一批块驻留，常驻数不变、堆不变 |
+| 数据点对象 | 0 |
+
+把列交给引擎虚拟层（100 万点散点，`chart.createVirtualSource`）：
+落墨 **2.1ms/帧**、命中 p50/p95 **0.00ms**、堆 **2.1MB**、物化子项 0。
+`forEachInBox` 是 O(窗口项数)（全窗 100 万项约 30ms）——它服务的是**按需**的窗口物化 /
+对齐参考线，别每帧全窗调用。
+
 示例页：`examples/large-data-virtual-series.html` —— 一张散点 + 一条折线**共用同一份列**，
 页面里的状态行实时显示点数、数据点对象数、像素缓存长度、折线实际绘制的点数与堆占用。
 
@@ -143,10 +192,10 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 | K 线 / 看盘类 | tick 级数据、缩放平移最频繁、多 pane 联动回显，"回到最新 N 根"天然是百万级窗口操作 | 一行多条列（OHLCV）+ 历史分页加载 |
 | 热力图 | 本质是 rows×cols 的稠密矩阵（1000×1000 就是 100 万格） | ✅ 已落地（`SeriesGrid` 矩阵；命中 O(1)、亚像素按块聚合） |
 | 实时流（数据 append） | 每 tick 全量重建的窗口上限只有几千点 | ✅ 已落地（`SeriesRing`：10 万点窗口 0.40ms/次） |
-| 亿级数据 | 列存 + **分块 + 可见窗口惰性加载** | 分块读取器与缓存淘汰 |
+| 亿级数据 | 内存必须与数据总量解耦 | ✅ 已落地（`SeriesChunks`：10 亿逻辑点 / 常驻 3 块 / 堆 2.7MB） |
 | 列式数据源对接 | 与列式格式（Apache Arrow / Parquet 这类）的内存布局同构，可以像今天"直接采用 Float64Array"一样直接采用 | 输入适配层（成本很低） |
 | Worker / GPU 路线 | `Float64Array` 可 zero-copy 转移给 Worker；同一条列也能直接上传成 GPU 顶点缓冲 —— 对象数组做不到 | 主线程只画、Worker 算的管线 |
-| 引擎虚拟源 | 引擎侧已有同思路的原型（50 万 × 3 系列、typed 15.3MB、120fps、命中 <0.1ms）；打通后图表的列可以**直接喂给引擎**，省掉中间拷贝 | 两层接口对齐 |
+| 引擎虚拟源 | 引擎侧已有虚拟子源（`VirtualChildSource` + `ICEVirtualLayer`） | ✅ 已落地（`chart.createVirtualSource(id)`：列不复制，命中即物化 / SVG 导出 / 对齐参考线归引擎） |
 | 无障碍镜像 / 节点列表 | 现在每系列最多建 200 个节点，就是因为 100 万节点会爆；列存 + 窗口化后可以只给视口内的点建节点 | 视口变化时增量增删 |
 
 **什么时候别用**（列存救不了，或者反而更贵）：
@@ -175,10 +224,11 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 
 下一步的候选顺序（有需求驱动再做）：
 
-1. 分块加载（亿级数据）；
-2. 与引擎虚拟源打通（列直接喂给引擎，省掉中间拷贝）。
+1. 虚拟内容的**导出 / 无障碍**：列转 SVG、按窗口给无障碍节点（引擎侧 P2 也在这条线上）；
+2. 分块 + 实时流的组合（滑动窗口跨越块边界时的增量域），以及「分块的热力图」。
 
-已落地：散点、折线、面积（数值列）、热力图（稠密矩阵）与实时流的环形缓冲，2026-09-21 同批。
+已落地：散点、折线、面积（数值列）、热力图（稠密矩阵）、实时流的环形缓冲、亿级数据的分块
+按需加载，以及把列交给引擎虚拟子源 —— 2026-09-21 / 22 同批。
 
 ## 7. 实施结果（2026-09-21）
 
@@ -199,6 +249,10 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 - `src/a11y.ts`：数据表行数封顶与抽样说明（`A11yTreeOptions.maxTableRows`）。
 - `src/util/ring.ts`：环形缓冲（滑动窗口存储 + 逻辑/物理下标映射 + 追加与域重算），
   以及 `ICEChart.appendToVirtualSeries()`（虚拟数值列系列的 `appendData` 走这里）。
+- `src/util/chunks.ts`：分块存储（块登记 + 逻辑下标二分 + 按预算取样驻留 + LRU 淘汰）。
+- `src/ICEChart.ts`：`createVirtualSource()`（把列暴露成引擎的 `VirtualChildSource`：
+  `boxAt` / `forEachInBox` / `hitTest` / `paint` / `materialize`），
+  以及 `SeriesBase.paintInto()`（把系列画进给定 ctx —— 引擎虚拟层的落墨入口）。
 
 **门禁**
 
