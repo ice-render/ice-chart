@@ -1,6 +1,7 @@
 import { BandScale } from '../../src/scale/BandScale';
 import { LinearScale } from '../../src/scale/LinearScale';
 import { resolveChartTheme } from '../../src/theme/chartTheme';
+import { normalizeOption } from '../../src/option/normalize';
 import { LineSeries } from '../../src/components/series/LineSeries';
 import { BarSeries } from '../../src/components/series/BarSeries';
 import { ScatterSeries } from '../../src/components/series/ScatterSeries';
@@ -89,6 +90,63 @@ describe('LineSeries 命中判定', () => {
     component.setCoord(cartesianCoord());
     expect(component.pixelAt(1)).toBeNull();
     expect(component.pixelAt(0)).not.toBeNull();
+  });
+});
+
+/**
+ * 断点（`null`）= **没有数据**，不是「等于 0」。
+ *
+ * 这条曾经在归一化与绘制之间分叉：`null` 的 `top` 是 0，于是折线在断点处被画到 0
+ * （实测像素落在绘图区下方 91px），而命中 / 提示框按 `y === null` 判空 ——
+ * 同一份数据，两处语义不一致。现在统一成：断点 → 像素 NaN → 绘制抬笔。
+ */
+describe('折线断点（null = 没有数据）', () => {
+  const mount = (data: any): any => {
+    const norm = normalizeOption({ xAxis: { type: 'category' }, yAxis: {}, series: [{ id: 'a', type: 'line', data }] });
+    const component: any = new LineSeries(norm.series[0], { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord({
+      plot: { x: 0, y: 0, width: 400, height: 300 },
+      canvas: { x: 0, y: 0, width: 400, height: 300 },
+      xScale: new BandScale(norm.categories, [0, 400], { paddingInner: 0.2, paddingOuter: 0.1 }),
+      yScale: new LinearScale([0, 30], [300, 0]),
+      theme: resolveChartTheme('light'),
+    });
+    return component;
+  };
+
+  it('断点没有像素（不会被画到 0）', () => {
+    const component = mount([10, null, 30]);
+    expect(component.series.pointAt(1).y).toBeNull();
+    expect(component.pixelAt(1)).toBeNull();
+    expect(component.pixelAt(0)).not.toBeNull();
+    expect(component.pixelAt(2)).not.toBeNull();
+  });
+
+  it('绘制序列在断点处抬笔（与函数曲线的 NaN 分段同一条规则）', () => {
+    const component = mount([10, null, 30]);
+    const sequence = component.renderSequence();
+    expect(sequence.pts.filter((p: any) => p === null)).toHaveLength(1);
+    // 断点不占「绘制点」的位置，但它两侧的点各自记住了原始下标
+    expect(sequence.indices).toEqual([0, -1, 2]);
+  });
+
+  it('列存（虚拟）折线同样按断点抬笔', () => {
+    const norm = normalizeOption({
+      xAxis: { type: 'linear' },
+      yAxis: {},
+      series: [{ id: 'a', type: 'line', virtual: true, data: { x: new Float64Array([0, 1, 2]), y: new Float64Array([10, NaN, 30]) } }],
+    });
+    const component: any = new LineSeries(norm.series[0], { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord({
+      plot: { x: 0, y: 0, width: 400, height: 300 },
+      canvas: { x: 0, y: 0, width: 400, height: 300 },
+      xScale: new LinearScale([0, 2], [0, 400]),
+      yScale: new LinearScale([0, 30], [300, 0]),
+      theme: resolveChartTheme('light'),
+    });
+    const sequence = component.renderSequence();
+    expect(sequence.pts.filter((p: any) => p === null)).toHaveLength(1);
+    expect(component.pixelAt(1)).toBeNull();
   });
 });
 

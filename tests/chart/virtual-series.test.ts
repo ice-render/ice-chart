@@ -2,13 +2,13 @@ import { createChart, ICEChart } from '../../src/index';
 import type { ChartOption } from '../../src/types';
 
 /**
- * 列存（虚拟）散点的**引擎集成**：真实渲染 → 真实命中 → 真实事件派发。
+ * 列存（虚拟）系列的**引擎集成**：真实渲染 → 真实命中 → 真实事件派发。
  *
- * 这里要盯的正是「虚拟」最容易破的两件事：
+ * 这里盯的正是「虚拟」最容易破的两件事：
  * 1. 命中/悬停仍然精确（像素是现算的，但必须和画出来的一致）；
- * 2. 省内存的两条代价是**显式**的 —— 快照还原与 appendData 直接报错，不静默给空图。
+ * 2. 省内存的代价是**显式**的 —— 快照还原与 appendData 直接报错，不静默给空图。
  */
-function virtualOption(count = 10000): ChartOption {
+function virtualOption(type: 'scatter' | 'line' | 'area', count = 10000): ChartOption {
   const x = new Float64Array(count);
   const y = new Float64Array(count);
   for (let i = 0; i < count; i++) {
@@ -19,11 +19,11 @@ function virtualOption(count = 10000): ChartOption {
     legend: { show: false },
     animation: { enabled: false },
     tooltip: { trigger: 'item' },
-    series: [{ id: 's', type: 'scatter', name: '散点', virtual: true, data: { x, y }, symbolSize: 6 }],
+    series: [{ id: 's', type, name: '列存系列', virtual: true, data: { x, y }, symbolSize: 6 }],
   };
 }
 
-describe('虚拟（列存）散点（引擎集成）', () => {
+describe.each(['scatter', 'line', 'area'] as const)('虚拟（列存）%s（引擎集成）', (type) => {
   let canvas: any;
   let chart: ICEChart | null = null;
 
@@ -40,11 +40,11 @@ describe('虚拟（列存）散点（引擎集成）', () => {
     if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
   });
 
-  async function mount(option: ChartOption = virtualOption()): Promise<ICEChart> {
+  const mount = async (option: ChartOption = virtualOption(type)): Promise<ICEChart> => {
     chart = createChart(canvas, option, { renderMode: 'dirty-rect' });
     await chart.render();
     return chart;
-  }
+  };
 
   it('归一化之后只有列：points 空、pointCount 正确、没有像素缓存', async () => {
     const c = await mount();
@@ -76,8 +76,9 @@ describe('虚拟（列存）散点（引擎集成）', () => {
   it('快照还原与 appendData 都显式报错（省内存的代价不许静默）', async () => {
     const c = await mount();
     const json = c.toJSONString();
-    expect(JSON.parse(json).option.series[0].virtual).toBe(true);
-    expect(JSON.parse(json).option.series[0].data).toBeUndefined();
+    const parsed = JSON.parse(json);
+    expect(parsed.option.series[0].virtual).toBe(true);
+    expect(parsed.option.series[0].data).toBeUndefined();
     const target = document.createElement('canvas');
     target.width = 300;
     target.height = 200;

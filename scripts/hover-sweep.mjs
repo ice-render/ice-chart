@@ -39,7 +39,7 @@ const pages = [
   'dashboard-energy',
   'dashboard-logistics',
   'dashboard-lab',
-  'large-data-scatter-virtual',
+  'large-data-virtual-series',
 ];
 
 fs.mkdirSync(outDir, { recursive: true });

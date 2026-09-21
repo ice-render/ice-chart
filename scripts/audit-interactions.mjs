@@ -52,7 +52,7 @@ const pages = [
   'dashboard-logistics',
   'dashboard-lab',
   'large-data',
-  'large-data-scatter-virtual',
+  'large-data-virtual-series',
   'a11y',
   'linked-charts',
 ];

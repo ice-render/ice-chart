@@ -194,10 +194,30 @@ describe('虚拟（列存）系列（scatter）', () => {
   });
 
   it('非法用法显式报错（类型 / 类目轴 / 非数值 x / 堆叠）', () => {
-    expect(() => normalizeOption({ series: [{ type: 'line', virtual: true, data: [[0, 1]] }] })).toThrow(/scatter/);
+    expect(() => normalizeOption({ series: [{ type: 'bar', virtual: true, data: [[0, 1]] }] })).toThrow(
+      /scatter \/ line \/ area/
+    );
     expect(() => normalizeOption({ xAxis: { type: 'category' }, series: [virtualScatter()] })).toThrow(/数值型 x 轴/);
     expect(() => normalizeOption({ series: [virtualScatter({ data: [['a', 1]] })] })).toThrow(/数值型 x/);
     expect(() => normalizeOption({ series: [virtualScatter({ stack: 'g' })] })).toThrow(/堆叠/);
     expect(() => normalizeOption({ series: [{ id: 's', type: 'scatter', virtual: true }] })).toThrow(/需要 data/);
+  });
+
+  it('折线 / 面积同样能开列存（面积仍然带 0 基线）', () => {
+    const line = normalizeOption({
+      series: [
+        { id: 'l', type: 'line', virtual: true, data: { x: new Float64Array([0, 1, 2]), y: new Float64Array([1, 2, 3]) } },
+      ],
+    });
+    expect(line.series[0].virtual).toBe(true);
+    expect(line.series[0].points).toEqual([]);
+    expect(line.series[0].pointCount).toBe(3);
+    expect(line.yAxis.domain[0]).toBeGreaterThan(0);
+
+    const area = normalizeOption({ series: [{ id: 'a', type: 'area', virtual: true, data: [5, 6, 7] }] });
+    expect(area.series[0].virtual).toBe(true);
+    expect(area.series[0].pointCount).toBe(3);
+    // 面积图的 y 域含 0（与普通面积系列同一条规则）
+    expect(area.yAxis.domain[0]).toBe(0);
   });
 });

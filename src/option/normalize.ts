@@ -766,8 +766,8 @@ function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesC
   const fail: (reason: string) => never = (reason) => {
     throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
   };
-  if (option.type !== 'scatter') {
-    fail(`目前只支持散点图（scatter），收到 type: '${option.type}'。`);
+  if (option.type !== 'scatter' && option.type !== 'line' && option.type !== 'area') {
+    fail(`目前只支持散点 / 折线 / 面积（scatter / line / area），收到 type: '${option.type}'。`);
   }
   if (option.stack) fail('不支持堆叠（stack）。');
 

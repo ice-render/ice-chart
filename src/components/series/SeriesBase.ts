@@ -146,6 +146,8 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 数据里是否带第三维（气泡图尺寸）—— 逐点取值，列存系列也适用。 */
   protected hasPointSize(): boolean {
+    const columns = this.series.columns;
+    if (this.series.virtual) return !!(columns && columns.sizeExtent);
     const series = this.series;
     for (let i = 0, n = series.pointCount; i < n; i++) {
       if (typeof series.sizeAt(i) === 'number') return true;
@@ -156,6 +158,7 @@ export abstract class SeriesBase extends ChartComponent {
   public setCoord(coord: SeriesCoord): this {
     this.coord = coord;
     this.cacheKey = '';
+    if (this.series.virtual) this.syncVirtualMeta();
     return this.markDirty();
   }
 
@@ -336,11 +339,13 @@ export abstract class SeriesBase extends ChartComponent {
     }
     this.series = series;
     this.cacheKey = '';
+    if (series.virtual) this.syncVirtualMeta();
     return this.markDirty();
   }
 
   /** 与当前绘制一致的像素位置；缺失点返回 null。 */
   public pixelAt(index: number): [number, number] | null {
+    if (this.series.virtual) return this.virtualPixelAt(index);
     this.rebuildPixels();
     const x = this.pixels[index * 2];
     const y = this.pixels[index * 2 + 1];
@@ -378,6 +383,19 @@ export abstract class SeriesBase extends ChartComponent {
     for (let i = 0; i < n; i++) {
       // 每个数据项用**自己的**进度：错峰入场时就是「依次长出来」
       const ti = this.itemProgress[i];
+      /**
+       * 断点（`y` 为 `null`）= **没有数据**，像素必须是 NaN。
+       *
+       * 不能拿 `top` 顶上：`null` 的 `top` 是 0，于是断点会被画到 0 的位置
+       * ——实测 `data: [10, null, 30]` 的断点像素落在绘图区**下方 91px** 处
+       * （画出一条「掉到 0」的假线），而命中与提示框那边是按 `y === null` 判空的，
+       * 同一份数据在两处语义分叉。断点一律 NaN，折线绘制再按 NaN 抬笔。
+       */
+      if (this.series.yValueAt(i) === null) {
+        this.effective[i * 2] = NaN;
+        this.effective[i * 2 + 1] = NaN;
+        continue;
+      }
       // 只取标量：列存系列在这里不合成 DataPoint
       const targetTop = series.topAt(i);
       if (targetTop === null || targetTop === undefined) {
@@ -403,6 +421,11 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 数据 → 像素（带缓存）。 */
   protected rebuildPixels(force = false): void {
+    if (this.series.virtual) {
+      // 列存系列不物化像素：只同步元信息（单调性 / 尺寸范围），像素按需现算
+      this.syncVirtualMeta();
+      return;
+    }
     const coord = this.coord;
     if (!coord) {
       this.pixels = new Float64Array(0);
@@ -467,6 +490,126 @@ export abstract class SeriesBase extends ChartComponent {
     this.cacheKey = key;
   }
 
+  // ------------------------------------------------- 虚拟（列存）系列的共用内核
+
+  /**
+   * 列存系列的元信息同步：像素缓存留空，单调性与尺寸范围取自数据列。
+   *
+   * 为什么虚拟系列不建像素缓存：100 万点的 `pixels` + `effective` + `itemProgress`
+   * 就是 40MB，省下来的内存会被缓存原样吃回去（详见 AGENTS.md 铁律 2 的例外说明）。
+   */
+  protected syncVirtualMeta(): void {
+    if (this.pixels.length) this.pixels = new Float64Array(0);
+    const columns = this.series.columns;
+    this.xMonotonic = !!(columns && columns.xMonotonic);
+    this.renderIndices = null;
+    if (columns && columns.sizeExtent) this.sizeExtent = columns.sizeExtent;
+  }
+
+  /** 列上二分：第一个 x（数据值）≥ target 的下标。 */
+  protected virtualLowerBound(target: number): number {
+    const series = this.series;
+    let lo = 0;
+    let hi = series.pointCount;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Number(series.xValueAt(mid)) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** 列上二分：第一个 x（数据值）> target 的下标。 */
+  protected virtualUpperBound(target: number): number {
+    const series = this.series;
+    let lo = 0;
+    let hi = series.pointCount;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Number(series.xValueAt(mid)) <= target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /**
+   * 可见窗口（下标区间，含两端各留一格）。
+   *
+   * 先把握手用的像素余量经 `invert` 换算成数据值，再在单调的 x 列上二分 ——
+   * 于是「窗口外不画」这件事在 100 万点上仍然是 O(log n)，不需要全量像素缓存。
+   */
+  protected virtualVisibleWindow(pad: number): { i0: number; i1: number } {
+    const coord = this.coord;
+    const n = this.series.pointCount;
+    if (!coord || !n) return { i0: 0, i1: -1 };
+    if (!this.xMonotonic) return { i0: 0, i1: n - 1 };
+    const edgeA = coord.xScale.invert(-pad);
+    const edgeB = coord.xScale.invert(coord.plot.width + pad);
+    const i0 = this.virtualLowerBound(Math.min(edgeA, edgeB));
+    const i1 = this.virtualUpperBound(Math.max(edgeA, edgeB));
+    return { i0: Math.max(0, i0 - 1), i1: Math.min(n - 1, i1) };
+  }
+
+  /** 列存系列的点像素：按需现算，不落缓存。 */
+  protected virtualPixelAt(index: number): [number, number] | null {
+    const coord = this.coord;
+    const series = this.series;
+    if (!coord || index < 0 || index >= series.pointCount) return null;
+    const value = series.yValueAt(index);
+    if (value === null) return null;
+    const x = coord.xScale.map(series.xValueAt(index));
+    const y = coord.yScale.map(value);
+    if (!isFinite(x) || !isFinite(y)) return null;
+    return [x, y];
+  }
+
+  /**
+   * 列存系列的最近邻：x 单调时在列上二分，再与左右邻居比一次距离。
+   * 非单调（罕见）退化为线性扫描，语义与像素缓存版的 `nearestIndexAtX` 一致。
+   */
+  protected virtualNearestIndexAtX(localX: number): number {
+    const coord = this.coord;
+    const series = this.series;
+    const n = series.pointCount;
+    if (!coord || !n) return -1;
+    const pixelX = (i: number): number => coord.xScale.map(series.xValueAt(i));
+    if (!this.xMonotonic) {
+      let best = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < n; i++) {
+        const x = pixelX(i);
+        if (!isFinite(x)) continue;
+        const dist = Math.abs(x - localX);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      return best;
+    }
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const x = pixelX(mid);
+      if (!isFinite(x) || x < localX) lo = mid + 1;
+      else hi = mid;
+    }
+    let best = -1;
+    let bestDist = Infinity;
+    for (const i of [lo, lo - 1]) {
+      if (i < 0 || i >= n) continue;
+      const x = pixelX(i);
+      if (!isFinite(x)) continue;
+      const dist = Math.abs(x - localX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   /**
    * 计算实际绘制的点下标。
    *
@@ -502,6 +645,7 @@ export abstract class SeriesBase extends ChartComponent {
    */
   public nearestIndexAtX(localX: number): number {
     this.rebuildPixels();
+    if (this.series.virtual) return this.virtualNearestIndexAtX(localX);
     const n = this.pixels.length / 2;
     if (!n) return -1;
     if (!this.xMonotonic) {
