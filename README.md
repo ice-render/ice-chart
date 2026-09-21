@@ -183,6 +183,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `scatter` | `data: [[x, y, size]]` + `symbolSizeRange` | 第三维映射成直径即气泡图；`symbolSize` 也可传函数 |
 | `scatter` / `line` / `area`（大数据） | `virtual: true` + `data: { x, y }`（列式，推荐 `Float64Array`） | 列存（虚拟）系列：百万级点不建数据点对象与按点缓存，堆 2.2MB / 命中 0.00ms（折线按像素列保留极值）。代价（不进快照、`params.data` 为空）见 [机制与复用边界](./docs/column-store-virtual-series.md) |
 | `heatmap`（大数据） | `virtual: true` + `data: { xCategories, yCategories, values }`（稠密矩阵） | 列存矩阵：1000×1000 = 100 万格堆 3.3MB、命中 O(1)（普通路 4 万格单次命中已 6.8ms）；亚像素按屏幕像素块聚合，热点取最大值 |
+| 实时流（大数据） | `virtual: true` + `appendData(id, items, { maxPoints })` | 列存环形缓冲：窗口满了覆盖最老的，不 concat、不重建。10 万点窗口 **0.40ms/次**（普通路径 5.80ms、p95 15.10ms） |
 | `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
 | `radar` | `radar.indicators` + `data: [数值...]` | 一个系列一个多边形，顶点命中 |
 | `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一组原始观测值 | 恰好 5 个数按五数概括解释，其它长度自动算分位数；命中覆盖整条须 |
