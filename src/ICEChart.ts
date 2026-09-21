@@ -444,17 +444,95 @@ export class ICEChart {
     return this;
   }
 
-  /** 数值轴的数据点 x 值（升序去重），给「窗口至少盖住 2 个点」的兜底用。 */
-  private numericXValues(): number[] {
-    const set = new Set<number>();
+  /**
+   * 数值轴上的数据点分布探针：回答「窗口里有多少点」与「两侧最近的点在哪」。
+   *
+   * 旧实现是把所有系列的 x 值拉成一个大数组（Set 去重 + 排序）—— 普通数据量无所谓，
+   * 虚拟（列存）系列有 100 万点时，**每滚一次轮就 Set + sort 一遍 100 万个数字**（几十毫秒）。
+   * x 单调的列上二分就能回答同样两个问题，O(log n)；列存系列本来就把单调性算好了。
+   * 口径差异只有一处：跨系列不再全局去重（各系列分别计数），对「至少盖住 2 个点」没有影响。
+   */
+  private numericXProbe(): {
+    total: number;
+    countIn(lo: number, hi: number): number;
+    leftOf(value: number): number | undefined;
+    rightOf(value: number): number | undefined;
+  } {
+    const plain: number[] = [];
+    const columns: Array<{ series: InternalSeries; x: ArrayLike<number>; n: number }> = [];
     for (const series of this.norm.series) {
-      for (let i = 0; i < series.pointCount; i++) {
-        const point = series.pointAt(i);
-        const value = Number(point.xValue);
-        if (isFinite(value)) set.add(value);
+      if (series.hidden) continue;
+      const resolved = series.columns;
+      if (resolved && resolved.xMonotonic) {
+        columns.push({ series, x: resolved.x, n: series.pointCount });
+        continue;
+      }
+      for (let i = 0, n = series.pointCount; i < n; i++) {
+        const value = Number(series.xValueAt(i));
+        if (isFinite(value)) plain.push(value);
       }
     }
-    return [...set].sort((a, b) => a - b);
+    plain.sort((a, b) => a - b);
+    const sorted: number[] = [];
+    for (let i = 0; i < plain.length; i++) {
+      if (i > 0 && plain[i] === plain[i - 1]) continue;
+      sorted.push(plain[i]);
+    }
+    /** 第一个 ≥ target 的下标。 */
+    const lowerBound = (array: ArrayLike<number>, n: number, target: number): number => {
+      let lo = 0;
+      let hi = n;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(array[mid]) < target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    /** 第一个 > target 的下标。 */
+    const upperBound = (array: ArrayLike<number>, n: number, target: number): number => {
+      let lo = 0;
+      let hi = n;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(array[mid]) <= target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+
+    return {
+      total: sorted.length + columns.reduce((sum, entry) => sum + entry.n, 0),
+      countIn: (lo: number, hi: number): number => {
+        let count = upperBound(sorted, sorted.length, hi) - lowerBound(sorted, sorted.length, lo);
+        for (const entry of columns) count += upperBound(entry.x, entry.n, hi) - lowerBound(entry.x, entry.n, lo);
+        return count;
+      },
+      leftOf: (value: number): number | undefined => {
+        let best: number | undefined;
+        const fromPlain = lowerBound(sorted, sorted.length, value) - 1;
+        if (fromPlain >= 0) best = sorted[fromPlain];
+        for (const entry of columns) {
+          const index = lowerBound(entry.x, entry.n, value) - 1;
+          if (index < 0) continue;
+          const candidate = Number(entry.x[index]);
+          if (best === undefined || candidate > best) best = candidate;
+        }
+        return best;
+      },
+      rightOf: (value: number): number | undefined => {
+        let best: number | undefined;
+        const fromPlain = upperBound(sorted, sorted.length, value);
+        if (fromPlain < sorted.length) best = sorted[fromPlain];
+        for (const entry of columns) {
+          const index = upperBound(entry.x, entry.n, value);
+          if (index >= entry.n) continue;
+          const candidate = Number(entry.x[index]);
+          if (best === undefined || candidate < best) best = candidate;
+        }
+        return best;
+      },
+    };
   }
 
   /**
@@ -481,19 +559,19 @@ export class ICEChart {
       else if (to < full.length - 1) to += 1;
       return [full[from], full[to]];
     }
-    const xs = this.numericXValues();
-    if (xs.length < 2) return domain;
+    const probe = this.numericXProbe();
+    if (probe.total < 2) return domain;
     // 数据只有两个点时，"至少 2 个点"等于禁止缩放（本来就画不出线段），放宽到 1 个点
-    const need = xs.length >= 3 ? 2 : 1;
+    const need = probe.total >= 3 ? 2 : 1;
     let lo = Number(domain[0]);
     let hi = Number(domain[1]);
     if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return domain;
-    let inside = xs.filter((v) => v >= lo && v <= hi).length;
+    let inside = probe.countIn(lo, hi);
     let guard = 0;
     while (inside < need && guard < 4) {
       guard += 1;
-      const left = [...xs].reverse().find((v) => v < lo);
-      const right = xs.find((v) => v > hi);
+      const left = probe.leftOf(lo);
+      const right = probe.rightOf(hi);
       if (left === undefined && right === undefined) break;
       const dLeft = left === undefined ? Infinity : lo - left;
       const dRight = right === undefined ? Infinity : right - hi;
@@ -502,7 +580,7 @@ export class ICEChart {
       } else {
         hi = right as number;
       }
-      inside = xs.filter((v) => v >= lo && v <= hi).length;
+      inside = probe.countIn(lo, hi);
     }
     return inside >= need ? [lo, hi] : domain;
   }
@@ -904,9 +982,14 @@ export class ICEChart {
 
   // ------------------------------------------------------------- 无障碍
 
-  /** 数据表：屏幕阅读器可直接读取的「图表等价文本」。 */
-  public getDataTable(): DataTable {
-    return buildDataTable(this as any);
+  /**
+   * 数据表：屏幕阅读器可直接读取的「图表等价文本」。
+   *
+   * 行数默认封顶 200（百万级系列整表物化会卡死页面），超限按等步长抽样并在 caption 里写明；
+   * 需要别的口径就传 `maxTableRows`。
+   */
+  public getDataTable(options: A11yTreeOptions = {}): DataTable {
+    return buildDataTable(this as any, options);
   }
 
   /**
@@ -922,8 +1005,8 @@ export class ICEChart {
    * 在 canvas 旁挂载视觉隐藏的数据表 + aria-live 播报区，
    * 让屏幕阅读器既能读到整张数据表，也能听到当前悬停/键盘导航到的数据点。
    */
-  public attachA11yMirror(): boolean {
-    return this.a11yMirror.attach();
+  public attachA11yMirror(options: A11yTreeOptions = {}): boolean {
+    return this.a11yMirror.attach(options);
   }
 
   public detachA11yMirror(): void {

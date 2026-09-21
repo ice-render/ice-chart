@@ -34,6 +34,14 @@ export interface A11yChartLike {
 export interface A11yTreeOptions {
   /** 每个系列最多展开多少个数据节点，默认 200（避免把几万个点塞进无障碍树）。 */
   maxDataNodesPerSeries?: number;
+  /**
+   * 数据表最多多少行，默认 200。
+   *
+   * 为什么要有上限：整表物化是「把全部点摊成 DOM 行」，100 万点会直接卡死页面 ——
+   * 而屏幕阅读器也读不完 100 万行。超限时按等步长抽样，并在 caption 里写明
+   * 「共 N 点、已抽样 M 行」（少给内容必须说出来，不能悄悄截断）。
+   */
+  maxTableRows?: number;
 }
 
 /** 图表标题（无障碍名也用它）。 */
@@ -51,7 +59,7 @@ export function chartTitle(norm: NormalizedOption): string {
  *
  * 只统计**可见**系列与扇区，与画面严格一致 —— 图例隐藏的系列不该被读出来。
  */
-export function buildDataTable(chart: A11yChartLike): DataTable {
+export function buildDataTable(chart: A11yChartLike, options: A11yTreeOptions = {}): DataTable {
   const norm = chart.norm;
   const caption = chartTitle(norm);
   const series = norm.series.filter((s) => !s.hidden && s.type !== 'pie');
@@ -94,10 +102,20 @@ export function buildDataTable(chart: A11yChartLike): DataTable {
 
   const xName = (norm.xAxis.option && norm.xAxis.option.name) || '类目';
   const columns = [xName, ...series.map((s) => s.name)];
+  /**
+   * 行数上限：超过就按等步长抽样，并在 caption 里写明抽了多少。
+   *
+   * 为什么必须封顶：`buildDataTable` 会把「每个 x 位置 × 每个系列」摊成 DOM 行，
+   * 虚拟（列存）系列动辄百万点 —— 既卡死页面，屏幕阅读器也读不完。
+   * 抽样不改变小数据的输出（stride = 1 时逐字与从前一致）。
+   */
+  const maxRows = Math.max(2, options.maxTableRows === undefined ? 200 : Number(options.maxTableRows) || 200);
+  const totalPoints = series.reduce((sum, s) => sum + s.pointCount, 0);
+  const stride = totalPoints > maxRows ? Math.ceil(totalPoints / maxRows) : 1;
   const order: string[] = [];
   const rowMap: Record<string, { x: any; cells: Record<string, string> }> = {};
   for (const s of series) {
-    for (let i = 0, n = s.pointCount; i < n; i++) {
+    for (let i = 0, n = s.pointCount; i < n; i += stride) {
       const point = s.pointAt(i);
       const key = String(point.xValue);
       if (!rowMap[key]) {
@@ -111,7 +129,11 @@ export function buildDataTable(chart: A11yChartLike): DataTable {
     const entry = rowMap[key];
     return [chart.formatAxisValue('x', entry.x), ...series.map((s) => entry.cells[s.id] || '')];
   });
-  return { caption, columns, rows };
+  return {
+    caption: stride > 1 ? `${caption}（共 ${totalPoints} 点，已按每 ${stride} 点抽样 ${rows.length} 行）` : caption,
+    columns,
+    rows,
+  };
 }
 
 /**
@@ -185,10 +207,16 @@ export class A11yMirror {
   private live: any = null;
   private tableEl: any = null;
   private hoverHandler: any = null;
+  /** 表格行数 / 节点数的口径（挂载时给，默认见 A11yTreeOptions）。 */
+  private options: A11yTreeOptions = {};
   private static seq = 0;
 
   constructor(chart: any) {
     this.chart = chart;
+  }
+
+  public get listOptions(): A11yTreeOptions {
+    return this.options;
   }
 
   public get attached(): boolean {
@@ -199,7 +227,8 @@ export class A11yMirror {
     return this.wrapper;
   }
 
-  public attach(): boolean {
+  public attach(options: A11yTreeOptions = {}): boolean {
+    this.options = options || {};
     const ice = this.chart.ice;
     const canvas = this.chart.canvasElement;
     const doc = ice && ice.root && ice.root.document;
@@ -261,7 +290,7 @@ export class A11yMirror {
   public refresh(): void {
     const doc = this.chart.ice && this.chart.ice.root && this.chart.ice.root.document;
     if (!this.wrapper || !this.tableEl || !doc) return;
-    const table = buildDataTable(this.chart);
+    const table = buildDataTable(this.chart, this.options);
     while (this.tableEl.firstChild) this.tableEl.removeChild(this.tableEl.firstChild);
 
     const caption = doc.createElement('caption');
