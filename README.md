@@ -181,7 +181,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `bar` | 类目在 x（默认） | 分组（多系列）与堆叠（同 `stack` 名）；数据项写 `{ value, color }` 可**逐项配色** |
 | `bar`（横向） | `yAxis: { type: 'category', data: [...] }` + `xAxis: { type: 'value' }` | 排行榜；类目也可写在数据项的 `name` 上 |
 | `scatter` | `data: [[x, y, size]]` + `symbolSizeRange` | 第三维映射成直径即气泡图；`symbolSize` 也可传函数 |
-| `scatter`（大数据） | `virtual: true` + `data: { x, y }`（列式，推荐 `Float64Array`） | 列存（虚拟）系列：百万级点不建数据点对象与按点缓存，堆 2.2MB / 命中 0.00ms。代价（不进快照、`params.data` 为空）见 [机制与复用边界](./docs/column-store-virtual-series.md) |
+| `scatter` / `line` / `area`（大数据） | `virtual: true` + `data: { x, y }`（列式，推荐 `Float64Array`） | 列存（虚拟）系列：百万级点不建数据点对象与按点缓存，堆 2.2MB / 命中 0.00ms（折线按像素列保留极值）。代价（不进快照、`params.data` 为空）见 [机制与复用边界](./docs/column-store-virtual-series.md) |
 | `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
 | `radar` | `radar.indicators` + `data: [数值...]` | 一个系列一个多边形，顶点命中 |
 | `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一组原始观测值 | 恰好 5 个数按五数概括解释，其它长度自动算分位数；命中覆盖整条须 |
@@ -556,7 +556,7 @@ npm run examples:serve      # http://localhost:5177
 
 示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、多 y 轴叠加、饼图 / 环形图 / 玫瑰图、雷达图、
 热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
-大数据量（5 万点降采样 / **100 万点列存虚拟化**）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
+大数据量（5 万点降采样 / **100 万点列存虚拟化：散点 + 折线**）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
 （运营 / 设备 / 能源 / 物流 / 函数实验）。
 
 五个大屏共用同一套脚手架（`examples/assets/dash-kit.js`：12 列栅格 + 面板组件 + 数据流主循环），

@@ -60,7 +60,7 @@ series: [{ type: 'scatter', virtual: true, data: { x: Float64Array, y: Float64Ar
 
 **取舍（都做成显式报错，不静默降级）**：数据不进 option 快照（`restore()` 报错）、
 提示框 `params.data` 为空、`appendData` 报错（改 `setData`）、只支持数值型 x 的 scatter。
-示例页 `examples/large-data-scatter-virtual.html`；铁律层面的说明见 `AGENTS.md`
+示例页 `examples/large-data-virtual-series.html`；铁律层面的说明见 `AGENTS.md`
 「虚拟（列存）系列」一节。
 
 **门禁**：`verify:full`（47 套 423 条单测 + 37 条 e2e）、`audit:interactions`（322 步 0 问题）、

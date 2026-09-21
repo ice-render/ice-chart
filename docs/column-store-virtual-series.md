@@ -1,6 +1,6 @@
 # 列存（虚拟）系列：把百万级数据从「对象数组」里拿出来
 
-> 状态：**已实现**（`series.virtual: true`，目前覆盖散点图，2026-09-21）。
+> 状态：**已实现**（`series.virtual: true`，覆盖散点 / 折线 / 面积，2026-09-21）。
 > 本文记录机制、对外契约、实测账，以及**可复用边界** —— 以后要把它推广到折线 / 热力图 /
 > 实时流 / 引擎虚拟源，先读这一篇，不要重新调研。
 >
@@ -45,6 +45,8 @@
 ```js
 // 推荐：直接给列（Float64Array 会被直接采用，不再复制一份）
 series: [{ type: 'scatter', virtual: true, data: { x: Float64Array, y: Float64Array } }]
+series: [{ type: 'line',    virtual: true, data: { x, y }, lineWidth: 1 }]
+series: [{ type: 'area',    virtual: true, data: { x, y } }]
 
 // 也收：元组数组（适合几十万级、应用侧本来就是数组的场景）
 series: [{ type: 'scatter', virtual: true, data: [[0, 1], [1, 3], ...] }]
@@ -62,6 +64,13 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 - **不物化按点缓存**：虚拟系列不建 `pixels` / `effective` / `itemProgress`；
   渲染与命中都从「列 + 同一份比例尺」现算 —— **同一个公式、同一份数据**，
   不存在"两套坐标"的分叉。这是 `AGENTS.md` 铁律 2（像素缓存唯一）的唯一例外。
+- **共用内核在 `SeriesBase`**：`syncVirtualMeta` / `virtualVisibleWindow` / `virtualPixelAt` /
+  `virtualNearestIndexAtX`。各类型的差异只有「窗口怎么画出来」：
+  散点是密度抽稀后逐点画；折线 / 面积按**像素列**分桶保留「首 / 最低 / 最高 / 末」四点 ——
+  每列最多 4 个点，尖峰不会被采样吃掉（折线丢掉极值就是撒谎）。
+- **冷路径也不许全量扫**：交互窗口兜底（`numericXProbe`）改成在单调列上二分，
+  无障碍数据表默认封顶 200 行（超限按等步长抽样并在 caption 写明）。
+  新增"看一眼就完"的消费方之前先问：这件事需要知道**每一个点**吗？
 
 ## 4. 实测
 
@@ -74,10 +83,14 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 | `pixels.length` | 2,000,000 | **0** |
 | 命中 p50 / p95 | 0.8 ms / 1.1 ms | **0.00 ms / 0.00 ms** |
 | 平移 p50 / p95（60 帧拖拽） | 16.7 ms / 17.5 ms | 16.7 ms / 17.4 ms（都在 60fps 上限） |
+| 交互窗口兜底（滑块每步） | 63.9 ms | **10.8 ms**（剩下的是同步重渲染；兜底本身已经是 O(log n)） |
 | 构建 | 752 ms | 640 ms |
 
-示例页：`examples/large-data-scatter-virtual.html`（页面右上角实时显示点数、数据点对象数、
-像素缓存长度与堆占用）。
+折线（同 100 万点）走同一条路：堆 125.8MB → **2.6MB**、命中 0.8ms → **0.00ms**、
+交互窗口兜底 62.3ms → **10.8ms**。
+
+示例页：`examples/large-data-virtual-series.html` —— 一张散点 + 一条折线**共用同一份列**，
+页面里的状态行实时显示点数、数据点对象数、像素缓存长度、折线实际绘制的点数与堆占用。
 
 ## 5. 复用边界：哪些场景值得用
 
@@ -86,7 +99,7 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 
 | 场景 | 为什么契合 | 还差什么 |
 |---|---|---|
-| 折线 / 面积（监控、长历史、科学曲线） | 与散点同一套 (x, y)，收益相同；LTTB 抽稀可与列存叠加 | 把虚拟分支提到通用基类 |
+| 折线 / 面积（监控、长历史、科学曲线） | 与散点同一套 (x, y)，收益相同 | ✅ 已落地（共用虚拟内核；折线按像素列保留极值） |
 | K 线 / 看盘类 | tick 级数据、缩放平移最频繁、多 pane 联动回显，"回到最新 N 根"天然是百万级窗口操作 | 一行多条列（OHLCV）+ 历史分页加载 |
 | 热力图 | 本质是 rows×cols 的稠密矩阵（1000×1000 就是 100 万格），现在是每格一个数据点 | 直方图/聚合桶先算好再存列 |
 | 实时流（数据 append） | 现在是每 tick 全量重建；列存 + **环形缓冲**才能做真增量（丢最老、加最新，只重算新点） | 环形缓冲与"窗口平移"语义 |
@@ -118,11 +131,12 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 
 下一步的候选顺序（有需求驱动再做）：
 
-1. 折线 / 面积通用化（与散点同一套列，成本最低）；
-2. 热力图（稠密矩阵，收益最大）；
-3. 实时流的环形缓冲（把 appendData 从"全量重建"变成真增量）；
-4. 分块加载（亿级数据）；
-5. 与引擎虚拟源打通（列直接喂给引擎，省掉中间拷贝）。
+1. 热力图（稠密矩阵，收益最大）；
+2. 实时流的环形缓冲（把 appendData 从"全量重建"变成真增量）；
+3. 分块加载（亿级数据）；
+4. 与引擎虚拟源打通（列直接喂给引擎，省掉中间拷贝）。
+
+已落地：散点、折线、面积（2026-09-21 同批）。
 
 ## 7. 实施结果（2026-09-21）
 
@@ -132,13 +146,17 @@ series: [{ type: 'scatter', virtual: true, data: [1, 3, 5, ...] }]
 - `src/internal.ts`：`SeriesColumns`、`pointCount` / `pointAt` / 标量访问器契约，
   以及两组实现（`arrayAccessors` / `columnAccessors`）。
 - `src/option/normalize.ts`：`buildVirtualColumns()`（一趟扫描建列 + 算域 + 校验）。
-- `src/components/series/ScatterSeries.ts`：虚拟渲染（值空间二分取窗口 + 同一套密度抽稀）
-  与虚拟命中（列上二分 + 邻域比距离）。
-- `src/ICEChart.ts`：虚拟列存缓存、快照还原与 `appendData` 的显式报错。
+- `src/components/series/SeriesBase.ts`：虚拟内核（窗口二分 / 现算像素 / 最近邻 / 元信息同步），
+  以及 `rebuildPixels` / `pixelAt` / `nearestIndexAtX` 的列存分支。
+- `src/components/series/ScatterSeries.ts`：散点的密度抽稀绘制与邻域命中。
+- `src/components/series/LineSeries.ts`：折线的像素列包络绘制与线段命中（面积共用）。
+- `src/ICEChart.ts`：虚拟列存缓存、快照还原与 `appendData` 的显式报错、
+  交互窗口兜底的二分探针（`numericXProbe`）。
+- `src/a11y.ts`：数据表行数封顶与抽样说明（`A11yTreeOptions.maxTableRows`）。
 
 **门禁**
 
-- `verify:full`：47 套 / 423 条单测 + 37 条浏览器用例全绿（新增 13 条针对列存的用例）。
+- `verify:full`：48 套 / 432 条单测 + 37 条浏览器用例全绿（新增 22 条针对列存的用例）。
 - 交互审计 322 步 0 问题；悬停扫描 396 项 0 失败、像素缓存新鲜、无 console 报错。
 - 只读普通系列的路径**没有行为变化**：`pointAt` 与 `points[i]` 是同一个对象（有契约测试钉住），
   非虚拟系列照旧走全量像素缓存。

@@ -303,7 +303,7 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
 
 ## 虚拟（列存）系列（改数据点存储 / 命中路径前必读）
 
-`series.virtual: true`（**目前只支持 `scatter`**）是「100 万点也要能拖」的那条路：
+`series.virtual: true`（支持 `scatter` / `line` / `area`）是「100 万点也要能拖」的那条路：
 不建「每点一个 `DataPoint`」，只保留 x / y（/ size）几条列。
 
 - **读点只有三个入口**：`pointCount`（数量）、`pointAt(i)`（按需合成，断点仍是 `null`）、
@@ -314,13 +314,21 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   就把 `option.series[i]` 换成不含 data 的副本。列存缓存在 `ICEChart.virtualColumns`
   （一次 `applyOption` 会归一化两遍，第二遍靠它复用）。
 - **不物化按点缓存**：`pixels` / `effective` / `itemProgress` 光缓存就是 40MB，
-  所以虚拟系列的像素与命中都从「列 + 同一份比例尺」现算（渲染按值空间二分取可见窗口 +
-  同一条密度抽稀规则；命中按列二分 + 邻域比距离）。这是铁律 2 唯一的例外，理由见铁律 2。
+  所以虚拟系列的像素与命中都从「列 + 同一份比例尺」现算。共用内核在 `SeriesBase`
+  （`syncVirtualMeta` / `virtualVisibleWindow` / `virtualPixelAt` / `virtualNearestIndexAtX`），
+  各类型的差异只在「怎么把窗口画出来」：散点是密度抽稀后逐点画，
+  折线 / 面积按像素列分桶保留**首 / 最低 / 最高 / 末**（折线丢极值就是撒谎）。
+  这是铁律 2 唯一的例外，理由见铁律 2。
+- **冷路径同样不许全量扫**：能问列的就别遍历点。两条已经修过的：
+  ① 交互窗口兜底（`numericXProbe`）原来把全部 x 值去重排序，100 万点每滚一次轮 60ms，
+  现在在单调列上二分；② 无障碍数据表默认封顶 200 行（`A11yTreeOptions.maxTableRows`），
+  超限按等步长抽样并在 caption 里写明（少给内容必须说出来）。
+  新增「看一眼就完」的冷路径时先问一句：这件事需要知道**每一个点**吗？
 - **代价要一直保持显式**（不许静默降级）：快照里没有数据 → `restore()` 直接报错；
   `appendData` 报错（改 `setData`）；非 scatter / 类目轴 / 堆叠 / 列式 data 配非 virtual 系列
   一律抛错。相应的门禁：`tests/option/normalize.test.ts`、`tests/components/virtual-scatter.test.ts`、
   `tests/chart/virtual-scatter.test.ts`。
-- 示例页 `examples/large-data-scatter-virtual.html`（100 万点，列式输入）。
+- 示例页 `examples/large-data-virtual-series.html`（100 万点，列式输入）。
 
 ## 序列化契约（改持久化相关代码前必读）
 
