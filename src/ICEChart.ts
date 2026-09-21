@@ -1,4 +1,4 @@
-import { ICE, ICEGroup, ICE_EVENT_NAME_CONSTS } from 'ice-render';
+import { ICE, ICEGroup, ICEStar, ICE_EVENT_NAME_CONSTS } from 'ice-render';
 import type {
   AnnotationDiagnostic,
   ChartMarkData,
@@ -12,6 +12,7 @@ import { storeDomainOf } from './internal';
 import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns, SeriesGrid } from './internal';
 import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains } from './util/ring';
 import type { SeriesRing } from './util/ring';
+import type { SeriesChunks } from './util/chunks';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
@@ -218,8 +219,10 @@ export class ICEChart {
    */
   private virtualColumns = new Map<
     string,
-    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing }
+    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing } | { chunks: SeriesChunks }
   >();
+  /** 虚拟子源的版本号：任何影响「画出来是什么 / 命中什么」的变更都要 +1（引擎据此失效缓存）。 */
+  private __virtualSourceVersion = 1;
   /**
    * 更新动画期间的坐标轴数据域过渡。
    *
@@ -501,6 +504,109 @@ export class ICEChart {
     this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
     this.emit('data:change', { seriesId: series.id, seriesIndex: series.index });
     return this;
+  }
+
+  /**
+   * 把一个**虚拟（列存）系列**交给引擎的虚拟子源（`VirtualChildSource`）。
+   *
+   * 「打通」的意义：图表的列**不复制**，直接成为引擎虚拟层的数据源 ——
+   * 窗口裁剪、批量落墨、命中都走引擎那套（`ICEVirtualLayer` / `ICEGroup({ childSource })`），
+   * 于是白拿引擎侧的能力：**命中即物化**（点一下就变成真组件：可拖、可挂控制面板）、
+   * SVG 导出、worker 镜像告警、对齐参考线。
+   *
+   * 坐标是**组件本地（= 绘图区）像素**，与引擎虚拟子源的「容器局部」口径一致：
+   * 把 `ICEVirtualLayer` 摆在绘图区上（`left: layout.plot.x, top: layout.plot.y`）即可对齐。
+   *
+   * ```js
+   * const layer = new ICEVirtualLayer({
+   *   left: chart.layout.plot.x, top: chart.layout.plot.y,
+   *   width: chart.layout.plot.width, height: chart.layout.plot.height,
+   *   childSource: chart.createVirtualSource('big'),
+   * });
+   * ice.addChild(layer);
+   * ```
+   */
+  public createVirtualSource(seriesIdOrIndex: string | number): any {
+    const series =
+      typeof seriesIdOrIndex === 'number'
+        ? this.norm.series[seriesIdOrIndex]
+        : this.norm.series.find((s) => s.id === seriesIdOrIndex || s.name === seriesIdOrIndex);
+    if (!series) throw new Error(`[ice-chart] createVirtualSource：找不到系列「${seriesIdOrIndex}」。`);
+    if (!series.virtual) {
+      throw new Error('[ice-chart] createVirtualSource 只支持虚拟（列存）系列：普通系列本来就是真组件。');
+    }
+    const component: any = this.seriesComponents.find((item: any) => item && item.series && item.series.id === series.id);
+    if (!component) throw new Error(`[ice-chart] createVirtualSource：系列「${series.id}」还没有渲染组件。`);
+
+    const box = new Float64Array(4);
+    /** 源版本要在**读的时候**取当前值（引擎用它失效缓存），所以用箭头守住 this。 */
+    const readVersion = (): number => this.__virtualSourceVersion;
+    /** 描边色取主题的 halo（浅色白 / 深色深）—— 也是"读的时候"取，主题切换后跟着变。 */
+    const readHalo = (): string => (this.norm && this.norm.theme ? this.norm.theme.labelHaloColor : series.color);
+    const symbolSize = (): number => {
+      const option: any = series.option;
+      const size = Number(option.symbolSize);
+      return isFinite(size) && size > 0 ? size : 8;
+    };
+    return {
+      count: series.pointCount,
+      /** 影响「画出来是什么 / 命中什么」的变更都要 +1（引擎只用它失效缓存）。 */
+      get version(): number {
+        return readVersion();
+      },
+      boxAt(index: number, out: Float64Array): void {
+        const pixel = component.pixelAt(index);
+        if (!pixel) {
+          out[0] = NaN;
+          out[1] = NaN;
+          out[2] = NaN;
+          out[3] = NaN;
+          return;
+        }
+        const half = symbolSize() / 2;
+        out[0] = pixel[0] - half;
+        out[1] = pixel[1] - half;
+        out[2] = pixel[0] + half;
+        out[3] = pixel[1] + half;
+      },
+      forEachInBox(x0: number, y0: number, x1: number, y1: number, visit: (index: number) => void): void {
+        const { from, to } = component.virtualIndexRange(x0, x1);
+        for (let i = Math.max(0, from); i <= to; i++) {
+          const pixel = component.pixelAt(i);
+          if (!pixel) continue;
+          if (pixel[1] < y0 || pixel[1] > y1) continue;
+          visit(i);
+        }
+      },
+      hitTest(localX: number, localY: number): number {
+        return component.hitTestIndex(localX, localY);
+      },
+      paint(ctx: any): boolean {
+        return component.paintInto(ctx);
+      },
+      /**
+       * 命中即物化：给这个数据点造一个真图元（只造，不挂 —— 挂树由调用方做，
+       * 这是引擎定的口径：`layer.addChild(source.materialize(i))`）。
+       */
+      materialize(index: number): any {
+        const pixel = component.pixelAt(index);
+        if (!pixel) return null;
+        const size = symbolSize();
+        box[0] = pixel[0];
+        box[1] = pixel[1];
+        const star = new ICEStar({
+          left: pixel[0] - size / 2,
+          top: pixel[1] - size / 2,
+          outerRadius: size / 2,
+          innerRadius: size / 5,
+          spikes: 5,
+          style: { fillStyle: series.color, strokeStyle: readHalo(), lineWidth: 1 },
+        });
+        (star as any).__iceChartDataIndex = index;
+        (star as any).__iceChartSeriesId = series.id;
+        return star;
+      },
+    };
   }
 
   /** 设置数据域（缩放 / 联动入口）。 */
@@ -1488,6 +1594,8 @@ export class ICEChart {
     });
     // 第二次归一化后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
     this.norm = norm;
+    // 虚拟子源的版本：数据 / 窗口 / 布局变了都算「画出来是什么」变了（引擎据此失效缓存）
+    this.__virtualSourceVersion += 1;
     // 虚拟列存缓存跟着当前系列走：不再是虚拟系列的那些列没有理由继续占着内存
     if (this.virtualColumns.size) {
       const live = new Set<string>();

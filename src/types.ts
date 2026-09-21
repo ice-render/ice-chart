@@ -24,6 +24,45 @@ export interface SeriesColumnData {
 }
 
 /**
+ * **分块列存**：数据按块取（可以异步），图表只让「可见窗口覆盖的块」驻留。
+ *
+ * 用途是**数据总量远大于内存**的场景（亿级点）：内存 ≈ 驻留块数 × 块大小，
+ * 与总量无关；缩放 / 平移换了区域就换一批块进来（LRU 淘汰 + 到货自动重绘）。
+ *
+ * ```js
+ * series: [{
+ *   type: 'line', virtual: true,
+ *   data: {
+ *     sizes: [1_000_000, 1_000_000, ...],          // 每块长度
+ *     rangeOf: (i) => [i * 1e6, (i + 1) * 1e6],    // 块 i 的 x 范围（给了才能免加载定位）
+ *     loadChunk: async (i) => ({ x, y }),          // 取第 i 块；返回 Promise 也行
+ *     maxResidentChunks: 4,                        // 常驻上限（LRU）
+ *   },
+ * }]
+ * ```
+ */
+export interface SeriesChunkedData {
+  /** 每块的长度（逻辑点数 = 各块之和）。 */
+  sizes: number[];
+  /** 取第 i 块的列；返回 Promise 时，到货后图表自动重绘。 */
+  loadChunk: (index: number) =>
+    | { x: ArrayLike<number>; y: ArrayLike<number | null> }
+    | PromiseLike<{ x: ArrayLike<number>; y: ArrayLike<number | null> }>;
+  /**
+   * 第 i 块的 x 范围。**必需**：块按 x 递增排列，窗口定位靠它（不必加载就能算出该取哪些块）。
+   * 缺了它就只能靠已加载的块推，坐标轴会随平移漂移 —— 所以直接要求调用方声明。
+   */
+  rangeOf: (index: number) => [number, number];
+  /**
+   * y 值域。**必需**：亿级数据不可能为了自动缩放把块全load一遍，
+   * 而「只看已加载块算域」会让 y 轴随平移跳动 —— 值域由调用方声明（或用 `setDomain('y', …)` 自己控）。
+   */
+  yDomain: [number, number];
+  /** 常驻块数上限（LRU 淘汰），默认 4。 */
+  maxResidentChunks?: number;
+}
+
+/**
  * 稠密矩阵输入（热力图专用）：行 / 列类目 + 行优先的值矩阵。
  *
  * 与 `[[x类目, y类目, 值], ...]` 等价，但**不产生每格一个小数组**
@@ -323,7 +362,7 @@ export interface SeriesOption {
   /** 绑定的 y 轴下标，默认 0（对应 option.yAxis 数组下标）。 */
   yAxisIndex?: number;
   name?: string;
-  data?: DataItem[] | SeriesColumnData | SeriesGridData;
+  data?: DataItem[] | SeriesColumnData | SeriesGridData | SeriesChunkedData;
   /**
    * **列存（虚拟）系列**：不建「每点一个对象」的数据点数组，数据只以列的形态常驻。
    *

@@ -16,6 +16,15 @@
     </p>
     <div class="card"><canvas id="chart" width="960" height="420"></canvas></div>
     <div class="card"><canvas id="chart-line" width="960" height="300"></canvas></div>
+    <div class="card"><canvas id="chart-engine" width="960" height="300"></canvas></div>
+    <div class="card">
+      <div class="tips" id="engine-stats">等待渲染…</div>
+      <div class="tips">
+        这一张**没有用图表的系列组件**：同一份列通过 <code>chart.createVirtualSource('s')</code>
+        交给引擎的 <code>ICEVirtualLayer</code> —— 窗口裁剪 / 批量落墨 / 命中都由引擎承担，
+        点一下就由引擎物化出一个真图元（可拖动）。
+      </div>
+    </div>
     <div class="card" id="snapshot-panel"></div>
     <div class="card">
       <div class="tips" id="stats">等待渲染…</div>
@@ -72,6 +81,38 @@
         series: [{ id: 'l', type: 'line', name: '折线', virtual: true, data: { x, y }, lineWidth: 1 }],
       });
       const buildMs = performance.now() - t0;
+
+      /**
+       * ---- 第三张：同一份列交给引擎的虚拟层
+       *
+       * 这张画布只有一个裸引擎 + 一个 ICEVirtualLayer，**没有任何系列组件**：
+       * childSource 直接来自散点图的列（`chart.createVirtualSource('s')`，不复制数据）。
+       * 命中下标 → 引擎按默认策略「命中即物化」造出真图元（可拖动）。
+       */
+      const engineLayer = (() => {
+        const ns = window.ICE; // UMD 把引擎暴露成命名空间：ns.ICE / ns.ICEVirtualLayer / ns.ICEStar…
+        const host = new ns.ICE().init('chart-engine');
+        const plot = chart.layout.plot;
+        const source = chart.createVirtualSource('s');
+        const layer = new ns.ICEVirtualLayer({
+          left: plot.x,
+          top: plot.y,
+          width: plot.width,
+          height: plot.height,
+          childSource: source,
+        });
+        host.addChild(layer);
+        return { host, layer, source, plot };
+      })();
+      const engineStats = document.getElementById('engine-stats');
+      const updateEngineStats = () => {
+        const materialized = engineLayer.layer.childNodes ? engineLayer.layer.childNodes.length : 0;
+        engineStats.textContent =
+          `引擎虚拟层：文档 ${engineLayer.source.count.toLocaleString()} 项 ｜ 物化子项 ${materialized}` +
+          ` ｜ 源版本 ${engineLayer.source.version}`;
+      };
+      setTimeout(updateEngineStats, 500);
+      setInterval(updateEngineStats, 800);
 
       const stats = document.getElementById('stats');
       const updateStats = () => {

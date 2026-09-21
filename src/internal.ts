@@ -16,6 +16,7 @@ import type {
 } from './types';
 import type { Scale } from './scale';
 import type { SeriesRing } from './util/ring';
+import type { SeriesChunks } from './util/chunks';
 import type { ChartLabels } from './types';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
@@ -79,7 +80,7 @@ export interface SeriesColumns {
 export function storeDomainOf(
   series: InternalSeries
 ): { xDomain: [number, number]; yDomain: [number, number] | null; xMonotonic: boolean; sizeExtent: [number, number] | null } | null {
-  const store = series.columns || series.ring;
+  const store = series.columns || series.ring || series.chunks;
   if (!store) return null;
   return {
     xDomain: store.xDomain,
@@ -134,6 +135,13 @@ export interface InternalSeries {
    * 真正的取点一律走访问器（环形下标 ≠ 逻辑下标）。
    */
   ring?: SeriesRing | null;
+  /**
+   * 列存（虚拟）的**分块存储**（亿级数据按需加载）。
+   *
+   * 与连续列 / 环形缓冲同一套读点契约，区别是「未驻留的点读出来是没有值」——
+   * 可见窗口覆盖的块会被请求驻留，到货后重绘。
+   */
+  chunks?: SeriesChunks | null;
   /** 列存（虚拟）热力图的稠密矩阵；其它系列为 null。 */
   grid?: SeriesGrid | null;
   /**

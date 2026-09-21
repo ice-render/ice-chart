@@ -3,6 +3,8 @@ import { roundRect } from '../Legend';
 import type { ChartTheme, SeriesType } from '../../types';
 import type { DataPoint, InternalSeries, Rect } from '../../internal';
 import { storeDomainOf } from '../../internal';
+import { chunkRangeForX, pickChunksForWindow, requestChunk } from '../../util/chunks';
+import type { SeriesChunks } from '../../util/chunks';
 import type { Scale } from '../../scale';
 import { shouldAnimate } from '../../animation/motion';
 
@@ -543,12 +545,33 @@ export abstract class SeriesBase extends ChartComponent {
     const coord = this.coord;
     const n = this.series.pointCount;
     if (!coord || !n) return { i0: 0, i1: -1 };
+    if (this.series.chunks) return this.chunkWindow(this.series.chunks, coord, pad);
     if (!this.xMonotonic) return { i0: 0, i1: n - 1 };
     const edgeA = coord.xScale.invert(-pad);
     const edgeB = coord.xScale.invert(coord.plot.width + pad);
     const i0 = this.virtualLowerBound(Math.min(edgeA, edgeB));
     const i1 = this.virtualUpperBound(Math.max(edgeA, edgeB));
     return { i0: Math.max(0, i0 - 1), i1: Math.min(n - 1, i1) };
+  }
+
+  /**
+   * 分块存储的窗口：x 范围 → 块区间 → 逻辑下标区间，并**顺手请求这些块驻留**。
+   *
+   * 请求是幂等的（已驻留 / 正在加载的块直接跳过），到达后 `markDirty()` 唤醒重绘 ——
+   * 所以「平移过去 → 先看到已驻留的部分 → 其余块到货再补上」这条链路是自动的。
+   */
+  private chunkWindow(chunks: SeriesChunks, coord: SeriesCoord, pad: number): { i0: number; i1: number } {
+    const edgeA = coord.xScale.invert(-pad);
+    const edgeB = coord.xScale.invert(coord.plot.width + pad);
+    const { from, to } = chunkRangeForX(chunks, Math.min(edgeA, edgeB), Math.max(edgeA, edgeB));
+    if (to < from) return { i0: 0, i1: -1 };
+    // 只按驻留预算取样请求：窗口覆盖 1 万块时不能全请求（见 pickChunksForWindow 的账）
+    for (const index of pickChunksForWindow(from, to, chunks.maxResident)) {
+      requestChunk(chunks, index, () => this.markDirty());
+    }
+    const i0 = chunks.offsets[from];
+    const i1 = chunks.offsets[to] + chunks.sizes[to] - 1;
+    return { i0, i1: Math.min(chunks.total - 1, i1) };
   }
 
   /** 列存系列的点像素：按需现算，不落缓存。 */
@@ -574,6 +597,42 @@ export abstract class SeriesBase extends ChartComponent {
     const n = series.pointCount;
     if (!coord || !n) return -1;
     const pixelX = (i: number): number => coord.xScale.map(series.xValueAt(i));
+    /**
+     * 分块存储**不能在全量下标上二分**：未驻留区间的 `xValueAt` 是 undefined，
+     * 二分会一路往右走到头（实测：放大到 60 点窗口后命中直接判空）。
+     * 正确做法是先用 x 值定位到块（声明式的 rangeOf），再**在驻留块内**二分。
+     */
+    const chunks = series.chunks;
+    if (chunks) {
+      const xValue = Number(coord.xScale.invert(localX));
+      const { from, to } = chunkRangeForX(chunks, xValue, xValue);
+      let best = -1;
+      let bestDist = Infinity;
+      for (let c = Math.max(0, from); c <= to && c < chunks.sizes.length; c++) {
+        if (!chunks.resident[c]) continue;
+        const start = chunks.offsets[c];
+        const end = Math.min(chunks.total - 1, start + chunks.sizes[c] - 1);
+        let lo = start;
+        let hi = end;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          const x = pixelX(mid);
+          if (!isFinite(x) || x < localX) lo = mid + 1;
+          else hi = mid;
+        }
+        for (const i of [lo - 1, lo, lo + 1]) {
+          if (i < start || i > end) continue;
+          const x = pixelX(i);
+          if (!isFinite(x)) continue;
+          const dist = Math.abs(x - localX);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = i;
+          }
+        }
+      }
+      return best;
+    }
     if (!this.xMonotonic) {
       let best = -1;
       let bestDist = Infinity;
@@ -609,6 +668,39 @@ export abstract class SeriesBase extends ChartComponent {
       }
     }
     return best;
+  }
+
+  /**
+   * 把系列画进**给定的 ctx**（引擎虚拟层 `childSource.paint` 的落墨入口）。
+   *
+   * 坐标是组件本地（= 绘图区）像素 —— 与引擎虚拟子源的「容器局部」口径一致：
+   * 应用把 `ICEVirtualLayer` 摆在绘图区上，落墨就天然对齐。
+   * 实现上只是临时换掉 `this.ctx` 再走同一条 `doRender()`：**不复制第二份绘制代码**
+   * （复制一份会立刻分叉，这个仓库在这种事上踩过很多次）。
+   */
+  public paintInto(ctx: any): boolean {
+    if (!this.series.virtual) return false;
+    const previous = this.ctx;
+    this.ctx = ctx;
+    try {
+      this.doRender();
+      return true;
+    } finally {
+      this.ctx = previous;
+    }
+  }
+
+  /** 列存系列的逻辑下标窗口（引擎虚拟源的 `forEachInBox` 用它把 x 范围落成下标范围）。 */
+  public virtualIndexRange(x0: number, x1: number): { from: number; to: number } {
+    const coord = this.coord;
+    const series = this.series;
+    const n = series.pointCount;
+    if (!coord || !n || !series.virtual) return { from: 0, to: -1 };
+    const inverted = (pixel: number): number => Number(coord.xScale.invert(pixel));
+    const lo = inverted(Math.min(x0, x1));
+    const hi = inverted(Math.max(x0, x1));
+    if (!isFinite(lo) || !isFinite(hi)) return { from: 0, to: n - 1 };
+    return { from: this.virtualLowerBound(lo), to: this.virtualUpperBound(hi) - 1 };
   }
 
   /**

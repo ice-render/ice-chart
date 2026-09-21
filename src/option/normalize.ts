@@ -4,6 +4,8 @@ import { arrayAccessors, columnAccessors, gridAccessors, storeDomainOf } from '.
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption, SeriesColumns, SeriesGrid } from '../internal';
 import type { SeriesRing } from '../util/ring';
 import { ringAccessors } from '../util/ring';
+import { chunkAccessors, createChunks } from '../util/chunks';
+import type { SeriesChunks } from '../util/chunks';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
@@ -119,7 +121,10 @@ export interface NormalizeContext {
    * 于是列存要在**图表实例**上留一份：第一遍建列并放进缓存，第二遍直接复用。
    * 带 data 的输入永远以 data 为准（缓存只是「没有 data 时怎么办」的答案）。
    */
-  virtualColumns?: Map<string, { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing }>;
+  virtualColumns?: Map<
+    string,
+    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing } | { chunks: SeriesChunks }
+  >;
 }
 
 /**
@@ -475,6 +480,28 @@ function buildSeries(
           ring,
           pointCount: ring.length,
           ...ringAccessors(ring),
+        });
+        continue;
+      }
+      // 分块存储：逻辑点数来自块长度之和，块本身按需加载
+      if (reuse && 'chunks' in reuse) {
+        const chunks = reuse.chunks;
+        out.push({
+          ...shared,
+          chunks,
+          pointCount: chunks.total,
+          ...chunkAccessors(chunks),
+        });
+        continue;
+      }
+      if (!reuse && isChunkedInput(option.data)) {
+        const chunks = buildVirtualChunks(option.data, i);
+        if (context && context.virtualColumns) context.virtualColumns.set(id, { chunks });
+        out.push({
+          ...shared,
+          chunks,
+          pointCount: chunks.total,
+          ...chunkAccessors(chunks),
         });
         continue;
       }
@@ -920,6 +947,65 @@ function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesC
     xMonotonic: monotonic,
     sizeExtent: hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null,
   };
+}
+
+/** 分块输入的判定（`sizes` + `loadChunk` 是它的两个必需字段）。 */
+function isChunkedInput(data: any): boolean {
+  return !!data && !Array.isArray(data) && typeof data === 'object' && Array.isArray(data.sizes) && typeof data.loadChunk === 'function';
+}
+
+/**
+ * 分块列存（`virtual: true` + `data: { sizes, loadChunk, rangeOf }`）。
+ *
+ * 归一化**不加载任何块**：只登记块长度、逻辑起点与（可选的）块 x 范围。
+ * 真正的加载发生在渲染 / 命中拿到可见窗口之后（见 `util/chunks.ts`）——
+ * 这是「内存与数据总量解耦」的关键：初始化 10 亿点的图，代价只是几个数组。
+ */
+function buildVirtualChunks(input: any, seriesIndex: number): SeriesChunks {
+  const fail: (reason: string) => never = (reason) => {
+    throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
+  };
+  const sizes = input.sizes as any[];
+  if (!sizes.length) fail('的分块需要至少一块（sizes 为空）。');
+  for (const size of sizes) {
+    if (!isFinite(Number(size)) || Number(size) <= 0) {
+      fail(`的 sizes 必须是正数（收到 ${JSON.stringify(size)}）。`);
+    }
+  }
+  if (typeof input.rangeOf !== 'function') {
+    fail('的分块需要 rangeOf(i) 声明每块的 x 范围（否则窗口定位要先把块 load 一遍）。');
+  }
+  const yDomain = input.yDomain;
+  if (!Array.isArray(yDomain) || yDomain.length !== 2 || !yDomain.every((v: any) => isFinite(Number(v)))) {
+    fail('的分块需要声明式 yDomain: [min, max]（亿级数据不能为了自动缩放把块全加载一遍）。');
+  }
+  return createChunks({
+    sizes: sizes.map((size) => Number(size)),
+    load: (index: number) => {
+      const raw = input.loadChunk(index);
+      const normalize = (columns: any): { x: Float64Array; y: Float64Array } => {
+        if (!columns || typeof columns !== 'object' || columns.x === undefined || columns.y === undefined) {
+          fail(`的 loadChunk(${index}) 必须返回 { x, y }。`);
+        }
+        const size = sizes[index] === undefined ? 0 : Number(sizes[index]);
+        const x = columns.x instanceof Float64Array ? columns.x : Float64Array.from(columns.x as ArrayLike<number>, (v: any) => Number(v));
+        const y = new Float64Array(size);
+        for (let i = 0; i < size; i++) {
+          const value = columns.y[i];
+          y[i] = value === null || value === undefined || value === '' ? NaN : Number(value);
+        }
+        if (x.length !== size) fail(`的 loadChunk(${index}) 返回了 ${x.length} 个 x，但 sizes[${index}] 是 ${size}。`);
+        return { x, y };
+      };
+      if (raw && typeof (raw as PromiseLike<any>).then === 'function') {
+        return (raw as PromiseLike<any>).then(normalize);
+      }
+      return normalize(raw);
+    },
+    rangeOf: input.rangeOf,
+    yDomain: [Number(yDomain[0]), Number(yDomain[1])],
+    maxResidentChunks: input.maxResidentChunks,
+  });
 }
 
 /**
