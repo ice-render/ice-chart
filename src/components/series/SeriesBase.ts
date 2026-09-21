@@ -398,6 +398,37 @@ export abstract class SeriesBase extends ChartComponent {
     }
     const key = this.buildCacheKey(coord);
     if (!force && key === this.cacheKey) return;
+    /**
+     * **纯平移走增量**（虚拟化 Phase 1，2026-09-21）。
+     *
+     * 平移只改域、不改跨度：线性轴下 `map(v)` 只是整体平移一个像素量，
+     * 于是 100 万个点各加一个常数即可 —— 不必再跑 `map()`/`computeEffective()`/
+     * `computeSizeExtent()`/`buildRenderIndices()`（实测这正是 1M 散点 472.7ms/帧的来源：
+     * 平移每帧都把缓存 key 打失效 → 全量重算）。
+     * 只在"x/y 域都还是数值、且 x 跨度与 y 域完全没变"时走这条路；缩放 / 换数据仍然全量重算。
+     */
+    const xd: any = coord.xScale.domain;
+    const yd: any = coord.yScale.domain;
+    const incX: any = (this as any).__incrementalXDomain;
+    const incY: any = (this as any).__incrementalYDomain;
+    const numericPair = (d: any) => Array.isArray(d) && d.length === 2 && typeof d[0] === 'number' && typeof d[1] === 'number' && isFinite(d[0]) && isFinite(d[1]);
+    if (
+      !force &&
+      numericPair(xd) &&
+      numericPair(yd) &&
+      numericPair(incX) &&
+      numericPair(incY) &&
+      xd[1] - xd[0] === incX[1] - incX[0] &&
+      yd[0] === incY[0] &&
+      yd[1] === incY[1] &&
+      this.pixels.length === this.series.points.length * 2
+    ) {
+      const dx = ((incX[0] - xd[0]) / (xd[1] - xd[0])) * coord.plot.width;
+      for (let i = 0; i < this.pixels.length; i += 2) this.pixels[i] += dx;
+      (this as any).__incrementalXDomain = [xd[0], xd[1]];
+      this.cacheKey = key;
+      return;
+    }
     this.computeEffective();
     const points = this.series.points;
     const n = points.length;
@@ -420,6 +451,8 @@ export abstract class SeriesBase extends ChartComponent {
     this.xMonotonic = monotonic;
     this.sizeExtent = computeSizeExtent(points);
     this.renderIndices = this.buildRenderIndices(n, coord.plot.width);
+    (this as any).__incrementalXDomain = Array.isArray(xd) && xd.length === 2 ? [xd[0], xd[1]] : null;
+    (this as any).__incrementalYDomain = Array.isArray(yd) && yd.length === 2 ? [yd[0], yd[1]] : null;
     this.cacheKey = key;
   }
 
