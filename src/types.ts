@@ -23,6 +23,22 @@ export interface SeriesColumnData {
   size?: ArrayLike<number>;
 }
 
+/**
+ * 稠密矩阵输入（热力图专用）：行 / 列类目 + 行优先的值矩阵。
+ *
+ * 与 `[[x类目, y类目, 值], ...]` 等价，但**不产生每格一个小数组**
+ * （1000 × 1000 的矩阵，元组写法自己要占几十 MB）。
+ * `values` 是 `Float64Array` 时会被**直接采用**（不再复制）；NaN 表示该格没有值。
+ */
+export interface SeriesGridData {
+  /** 列类目（x 轴），顺序即绘制顺序。 */
+  xCategories: any[];
+  /** 行类目（y 轴），顺序即绘制顺序。 */
+  yCategories: any[];
+  /** 行优先（`row * xCategories.length + col`）的数值；NaN = 没有该格。 */
+  values: ArrayLike<number>;
+}
+
 export type ScaleType = 'linear' | 'category' | 'time' | 'log';
 
 /** 内置系列类型。 */
@@ -307,18 +323,24 @@ export interface SeriesOption {
   /** 绑定的 y 轴下标，默认 0（对应 option.yAxis 数组下标）。 */
   yAxisIndex?: number;
   name?: string;
-  data?: DataItem[] | SeriesColumnData;
+  data?: DataItem[] | SeriesColumnData | SeriesGridData;
   /**
-   * **列存（虚拟）系列**（支持 `scatter` / `line` / `area`）：不建「每点一个对象」的
-   * 数据点数组，只保留 x / y（/ size）几条列，读点时才按需合成。
+   * **列存（虚拟）系列**：不建「每点一个对象」的数据点数组，数据只以列的形态常驻。
+   *
+   * 两类形态：
+   * - `scatter` / `line` / `area`：x / y（/ size）几条数值列；
+   * - `heatmap`：**稠密矩阵**（`data: { xCategories, yCategories, values }`，
+   *   值矩阵行优先、NaN 表示空格）。热力图只有稠密场景值得开 —— 稀疏数据请用普通路径
+   *   （归一化会按密度校验并报错）。
    *
    * 代价（都是有意的取舍，别当成 bug）：
    * - `tooltip` 的 `params.data` 为空、`symbolSize` 函数拿不到 `data`（`xValue` / `y` / `index` 照常）；
    * - `data` 在归一化之后**会被释放**（图表不再持有原始数组），因此虚拟系列**不进 option 快照**：
    *   `toJSON()` 之后再用 `restore()` 会显式报错，而不是还你一张空图；
-   * - 只支持数值型 x（类目轴、堆叠、函数绘图请继续用普通系列）；
+   * - 数值列（scatter / line / area）只支持数值型 x（堆叠、函数绘图请继续用普通系列）；
    *   折线 / 面积在大窗口下按**像素列**压缩成「首 / 最低 / 最高 / 末」四点，
    *   尖峰不会被采样吃掉，但与普通系列的 LTTB 抽稀不是同一套图形（虚拟是另一条渲染路径）。
+   *   矩阵列（heatmap）要求 x / y 都是类目轴，且单元格密度要够高。
    */
   virtual?: boolean;
   /** 对象型数据项的取值字段。 */

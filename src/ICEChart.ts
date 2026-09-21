@@ -8,7 +8,7 @@ import type {
   DataItem,
   LegendToggleParams,
 } from './types';
-import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns } from './internal';
+import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns, SeriesGrid } from './internal';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
@@ -206,7 +206,7 @@ export class ICEChart {
    * （applyOption 一遍、rebuild 一遍）—— 列存留在这里，第二遍直接复用，
    * 同时也让「用户换数据」的写法（setData 带新 data）自然覆盖旧列。
    */
-  private virtualColumns = new Map<string, SeriesColumns>();
+  private virtualColumns = new Map<string, { columns: SeriesColumns } | { grid: SeriesGrid }>();
   /**
    * 更新动画期间的坐标轴数据域过渡。
    *

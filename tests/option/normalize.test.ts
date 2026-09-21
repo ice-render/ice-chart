@@ -203,6 +203,102 @@ describe('虚拟（列存）系列（scatter）', () => {
     expect(() => normalizeOption({ series: [{ id: 's', type: 'scatter', virtual: true }] })).toThrow(/需要 data/);
   });
 
+  it('热力图：元组输入落成稠密矩阵（类目顺序即行列顺序）', () => {
+    const norm = normalizeOption({
+      xAxis: { type: 'category' },
+      yAxis: { type: 'category' },
+      series: [
+        {
+          id: 'h',
+          type: 'heatmap',
+          virtual: true,
+          data: [
+            ['周一', '上午', 10],
+            ['周二', '上午', 20],
+            ['周一', '下午', 30],
+          ],
+        },
+      ],
+    });
+    const series = norm.series[0];
+    expect(series.virtual).toBe(true);
+    expect(series.points).toEqual([]);
+    expect(series.grid!.xCategories).toEqual(['周一', '周二']);
+    expect(series.grid!.yCategories).toEqual(['上午', '下午']);
+    // 行优先：2 行 × 2 列 = 4 格，缺的那格是 NaN（没有值）
+    expect(series.pointCount).toBe(4);
+    expect(Array.from(series.grid!.values, (v) => (Number.isNaN(v) ? null : v))).toEqual([10, 20, 30, null]);
+    expect(series.grid!.valueDomain).toEqual([10, 30]);
+    // 访问器与普通热力图的 DataPoint 语义一致：xValue 是列类目、name 是行类目
+    expect(series.pointAt(0)).toMatchObject({ xValue: '周一', name: '上午', y: 10 });
+    expect(series.pointAt(3).y).toBeNull();
+    expect(norm.categories).toEqual(['周一', '周二']);
+    expect(norm.yAxis.domain).toEqual(['上午', '下午']);
+  });
+
+  it('热力图：矩阵输入直接采用 value 数组（不复制）', () => {
+    const values = new Float64Array([1, 2, 3, 4, 5, 6]);
+    const norm = normalizeOption({
+      xAxis: { type: 'category' },
+      yAxis: { type: 'category' },
+      series: [
+        {
+          id: 'h',
+          type: 'heatmap',
+          virtual: true,
+          data: { xCategories: ['a', 'b', 'c'], yCategories: ['r1', 'r2'], values },
+        },
+      ],
+    });
+    expect(norm.series[0].grid!.values).toBe(values);
+    expect(norm.series[0].pointCount).toBe(6);
+    expect(norm.series[0].pointAt(4)).toMatchObject({ xValue: 'b', name: 'r2', y: 5 });
+  });
+
+  it('热力图：稀疏 / 尺寸不符 / 轴类型不对都显式报错', () => {
+    // 10 × 10 的类目却只给了 20 格 → 密度 0.2，低于 0.25
+    const sparseTuples: any[] = [];
+    for (let c = 0; c < 10; c++) {
+      sparseTuples.push([`c${c}`, `r${c}`, c]);
+      sparseTuples.push([`c${c}`, `r${(c + 3) % 10}`, c + 1]);
+    }
+    const okGrid = { xCategories: ['a', 'b'], yCategories: ['x', 'y'], values: new Float64Array(4) };
+    expect(() =>
+      normalizeOption({
+        xAxis: { type: 'category' },
+        yAxis: { type: 'category' },
+        series: [{ type: 'heatmap', virtual: true, data: sparseTuples }],
+      })
+    ).toThrow(/太稀疏/);
+    expect(() =>
+      normalizeOption({
+        xAxis: { type: 'category' },
+        yAxis: { type: 'category' },
+        series: [
+          {
+            type: 'heatmap',
+            virtual: true,
+            data: { xCategories: ['a', 'b'], yCategories: ['x'], values: new Float64Array(5) },
+          },
+        ],
+      })
+    ).toThrow(/values 长度/);
+    expect(() =>
+      normalizeOption({
+        xAxis: { type: 'linear' },
+        yAxis: { type: 'category' },
+        series: [{ type: 'heatmap', virtual: true, data: { ...okGrid } }],
+      })
+    ).toThrow(/x 轴必须是类目轴/);
+    expect(() =>
+      normalizeOption({
+        xAxis: { type: 'category' },
+        yAxis: { type: 'linear' },
+        series: [{ type: 'heatmap', virtual: true, data: { ...okGrid } }],
+      })
+    ).toThrow(/y 轴必须是类目轴/);
+  });
+
   it('折线 / 面积同样能开列存（面积仍然带 0 基线）', () => {
     const line = normalizeOption({
       series: [

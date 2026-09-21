@@ -70,6 +70,28 @@ export interface SeriesColumns {
   sizeExtent: [number, number] | null;
 }
 
+/**
+ * 虚拟（列存）**稠密矩阵**：热力图用。
+ *
+ * 热力图的数据是「列类目 × 行类目 → 值」，天然是矩阵而不是点集：
+ * 行列由类目定死，值按行优先排在一个 `Float64Array` 里（NaN = 没有该格）。
+ * 于是 100 万格只占 8MB，而且**命中是 O(1)**（类目 → 下标两张表 + 一次下标运算），
+ * 不再像普通热力图那样每个命中去线性扫全部单元格。
+ */
+export interface SeriesGrid {
+  /** 列类目（x 轴），顺序即绘制顺序。 */
+  xCategories: any[];
+  /** 行类目（y 轴），顺序即绘制顺序。 */
+  yCategories: any[];
+  /** 行优先（`row * cols + col`）的数值；NaN = 没有该格。 */
+  values: Float64Array;
+  /** 类目 → 下标（命中 / 提示框按类目反查，避免线性扫）。 */
+  xIndex: Map<any, number>;
+  yIndex: Map<any, number>;
+  /** 值域（忽略 NaN）；全是空格时为 null。 */
+  valueDomain: [number, number] | null;
+}
+
 export interface InternalSeries {
   id: string;
   index: number;
@@ -85,6 +107,8 @@ export interface InternalSeries {
   virtual: boolean;
   /** 列存（虚拟）系列的数据列；普通系列为 null。 */
   columns?: SeriesColumns | null;
+  /** 列存（虚拟）热力图的稠密矩阵；其它系列为 null。 */
+  grid?: SeriesGrid | null;
   /**
    * 数据点个数 —— **读点数量的唯一入口**。
    *
@@ -223,6 +247,47 @@ export function columnAccessors(
 /** `NaN` 判定（列存里 NaN 是「没有值」的记号，不是数值）。 */
 function isNaNNumber(value: number): boolean {
   return typeof value !== 'number' || Number.isNaN(value);
+}
+
+/**
+ * 稠密矩阵（热力图）的访问器：下标 → 行列 → 类目 + 值，**按需合成**一个数据点。
+ *
+ * 命中 / 提示框要的 `xValue`（列类目）与 `name`（行类目）都与普通热力图的
+ * `DataPoint` 语义逐字对齐，所以上层的提示框、图例、无障碍不需要知道存储形态。
+ */
+export function gridAccessors(
+  grid: SeriesGrid
+): Pick<InternalSeries, 'pointAt' | 'xValueAt' | 'yValueAt' | 'baseAt' | 'topAt' | 'sizeAt'> {
+  const cols = grid.xCategories.length;
+  const valueAt = (index: number): number | null => {
+    const raw = grid.values[index];
+    return isNaNNumber(raw) ? null : raw;
+  };
+  return {
+    pointAt: (index: number): DataPoint => {
+      const col = cols > 0 ? index % cols : index;
+      const row = cols > 0 ? (index - col) / cols : 0;
+      const value = valueAt(index);
+      const name = grid.yCategories[row];
+      return {
+        index,
+        xValue: grid.xCategories[col],
+        y: value,
+        raw: undefined,
+        base: 0,
+        top: value === null ? 0 : value,
+        name: name === undefined ? undefined : String(name),
+      };
+    },
+    xValueAt: (index: number): any => (cols > 0 ? grid.xCategories[index % cols] : grid.xCategories[index]),
+    yValueAt: valueAt,
+    baseAt: (): number => 0,
+    topAt: (index: number): number => {
+      const value = valueAt(index);
+      return value === null ? 0 : value;
+    },
+    sizeAt: (): number | undefined => undefined,
+  };
 }
 
 export interface InternalAxis {
