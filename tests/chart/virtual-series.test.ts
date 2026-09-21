@@ -89,7 +89,7 @@ describe.each(['scatter', 'line', 'area'] as const)('虚拟（列存）%s（引�
     expect(Math.round(hover.item.point.y)).toBe(Math.round(component.series.yValueAt(index)));
   });
 
-  it('快照还原与 appendData 都显式报错（省内存的代价不许静默）', async () => {
+  it('快照还原显式报错（省内存的代价不许静默）；appendData 走环形缓冲', async () => {
     const c = await mount();
     const json = c.toJSONString();
     const parsed = JSON.parse(json);
@@ -100,7 +100,24 @@ describe.each(['scatter', 'line', 'area'] as const)('虚拟（列存）%s（引�
     target.height = 200;
     document.body.appendChild(target);
     expect(() => ICEChart.restore(target, json)).toThrow(/虚拟（列存）系列/);
-    expect(() => c.appendData('s', [[1, 2]])).toThrow(/appendData/);
+
+    // 追加：窗口 5000 根，原有 10000 根 → 只留最后 5000 根，再追加 2 根
+    c.appendData('s', [
+      [10000, 55],
+      [10001, 56],
+    ], { maxPoints: 5000 });
+    const series: any = c.norm.series[0];
+    expect(series.ring).toBeTruthy();
+    expect(series.pointCount).toBe(5000);
+    expect(series.xValueAt(4999)).toBe(10001);
+    expect(series.yValueAt(4999)).toBe(56);
+    // 环形缓冲按逻辑顺序读：最老那一根是第 5002 个点
+    expect(series.xValueAt(0)).toBe(5002);
+    // 再追加一根纯数值：x 顺着上一根 +1
+    c.appendData('s', [57], { maxPoints: 5000 });
+    expect(series.pointCount).toBe(5000);
+    expect(series.xValueAt(4999)).toBe(10002);
+    expect(series.yValueAt(4999)).toBe(57);
     target.parentNode.removeChild(target);
   });
 });
@@ -152,7 +169,7 @@ describe('虚拟（列存）热力图（引擎集成）', () => {
     expect(hover.item.point.y).toBe(component.series.grid.values[index]);
   });
 
-  it('快照还原与 appendData 同样显式报错', async () => {
+  it('快照还原显式报错；appendData 也报错（矩阵没有「下一格」这种语义）', async () => {
     const c = await mount();
     const json = c.toJSONString();
     expect(JSON.parse(json).option.series[0].virtual).toBe(true);
@@ -162,7 +179,7 @@ describe('虚拟（列存）热力图（引擎集成）', () => {
     target.height = 200;
     document.body.appendChild(target);
     expect(() => ICEChart.restore(target, json)).toThrow(/虚拟（列存）系列/);
-    expect(() => c.appendData('s', [['c1', 'r1', 5]])).toThrow(/appendData/);
+    expect(() => c.appendData('s', [['c1', 'r1', 5]])).toThrow(/稠密矩阵/);
     target.parentNode.removeChild(target);
   });
 });

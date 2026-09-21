@@ -2,6 +2,7 @@ import { ChartComponent } from '../ChartComponent';
 import { roundRect } from '../Legend';
 import type { ChartTheme, SeriesType } from '../../types';
 import type { DataPoint, InternalSeries, Rect } from '../../internal';
+import { storeDomainOf } from '../../internal';
 import type { Scale } from '../../scale';
 import { shouldAnimate } from '../../animation/motion';
 
@@ -146,8 +147,8 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 数据里是否带第三维（气泡图尺寸）—— 逐点取值，列存系列也适用。 */
   protected hasPointSize(): boolean {
-    const columns = this.series.columns;
-    if (this.series.virtual) return !!(columns && columns.sizeExtent);
+    const store = storeDomainOf(this.series);
+    if (this.series.virtual) return !!(store && store.sizeExtent);
     const series = this.series;
     for (let i = 0, n = series.pointCount; i < n; i++) {
       if (typeof series.sizeAt(i) === 'number') return true;
@@ -500,10 +501,10 @@ export abstract class SeriesBase extends ChartComponent {
    */
   protected syncVirtualMeta(): void {
     if (this.pixels.length) this.pixels = new Float64Array(0);
-    const columns = this.series.columns;
-    this.xMonotonic = !!(columns && columns.xMonotonic);
+    const store = storeDomainOf(this.series);
+    this.xMonotonic = !!(store && store.xMonotonic);
     this.renderIndices = null;
-    if (columns && columns.sizeExtent) this.sizeExtent = columns.sizeExtent;
+    if (store && store.sizeExtent) this.sizeExtent = store.sizeExtent;
   }
 
   /** 列上二分：第一个 x（数据值）≥ target 的下标。 */

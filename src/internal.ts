@@ -15,6 +15,7 @@ import type {
   WaterfallOption,
 } from './types';
 import type { Scale } from './scale';
+import type { SeriesRing } from './util/ring';
 import type { ChartLabels } from './types';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
@@ -56,6 +57,7 @@ export interface PolarLayout {
  * 之后渲染与命中都不再遍历全量数据（见 ScatterSeries 的虚拟路径）。
  */
 export interface SeriesColumns {
+  kind: 'columns';
   x: ArrayLike<number>;
   /** NaN = 断点（对外仍然读成 `y: null`）。 */
   y: Float64Array;
@@ -68,6 +70,23 @@ export interface SeriesColumns {
   xMonotonic: boolean;
   /** 尺寸列的范围（气泡映射用）；没有尺寸列时为 null。 */
   sizeExtent: [number, number] | null;
+}
+
+/**
+ * 列存系列的**域提示**：连续列（`SeriesColumns`）与环形缓冲（`SeriesRing`）
+ * 只是同一件事的两种物理布局，上层要的只有「数据域 / 单调性 / 尺寸范围」这几项。
+ */
+export function storeDomainOf(
+  series: InternalSeries
+): { xDomain: [number, number]; yDomain: [number, number] | null; xMonotonic: boolean; sizeExtent: [number, number] | null } | null {
+  const store = series.columns || series.ring;
+  if (!store) return null;
+  return {
+    xDomain: store.xDomain,
+    yDomain: store.yDomain,
+    xMonotonic: store.xMonotonic,
+    sizeExtent: store.sizeExtent,
+  };
 }
 
 /**
@@ -107,6 +126,14 @@ export interface InternalSeries {
   virtual: boolean;
   /** 列存（虚拟）系列的数据列；普通系列为 null。 */
   columns?: SeriesColumns | null;
+  /**
+   * 列存（虚拟）实时流的**环形缓冲**（`appendData` 之后才有）。
+   *
+   * 与 `columns` 是同一件事的两种物理布局（连续 vs 环形），上层只借它读
+   * `xDomain` / `yDomain` / `xMonotonic` / `sizeExtent` 这几个**域提示**；
+   * 真正的取点一律走访问器（环形下标 ≠ 逻辑下标）。
+   */
+  ring?: SeriesRing | null;
   /** 列存（虚拟）热力图的稠密矩阵；其它系列为 null。 */
   grid?: SeriesGrid | null;
   /**

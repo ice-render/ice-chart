@@ -8,7 +8,10 @@ import type {
   DataItem,
   LegendToggleParams,
 } from './types';
+import { storeDomainOf } from './internal';
 import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns, SeriesGrid } from './internal';
+import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains } from './util/ring';
+import type { SeriesRing } from './util/ring';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
@@ -86,6 +89,13 @@ export function isChartSnapshot(value: any): boolean {
     !!value.option &&
     ('version' in value || 'view' in value || 'hidden' in value)
   );
+}
+
+/** 追加数据时的取值：`null` / 空串 / 非数字都算「没有值」（不是 0）。 */
+function finiteOrNull(value: any): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return isFinite(num) ? num : null;
 }
 
 /** 把补丁合进快照里的 option：series 按 id/下标逐项合并，其余字段浅覆盖。 */
@@ -206,7 +216,10 @@ export class ICEChart {
    * （applyOption 一遍、rebuild 一遍）—— 列存留在这里，第二遍直接复用，
    * 同时也让「用户换数据」的写法（setData 带新 data）自然覆盖旧列。
    */
-  private virtualColumns = new Map<string, { columns: SeriesColumns } | { grid: SeriesGrid }>();
+  private virtualColumns = new Map<
+    string,
+    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing }
+  >();
   /**
    * 更新动画期间的坐标轴数据域过渡。
    *
@@ -399,13 +412,7 @@ export class ICEChart {
     const appended = Array.isArray(items) ? items : [];
     if (!appended.length) return this;
     if (target.item.virtual) {
-      // 虚拟（列存）系列的 data 在归一化后就释放了：追加没有落脚点，
-      // 而「把 data 当成空数组再 concat」会让 100 万点悄悄变成 1 个点。
-      throw new Error(
-        `[ice-chart] 虚拟（列存）系列不支持 appendData（系列 ${
-          target.item.name || target.item.id || target.index
-        }）：请用 setData 重新给一份数据。`
-      );
+      return this.appendToVirtualSeries(target.item, target.index, appended, options);
     }
     const current = target.item.data;
     if (current !== undefined && !Array.isArray(current)) {
@@ -421,6 +428,78 @@ export class ICEChart {
       isFinite(maxPoints) && maxPoints > 0 && next.length > maxPoints ? next.slice(next.length - maxPoints) : next;
     this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
     this.emit('data:change', { seriesId: target.item.id, seriesIndex: target.index });
+    return this;
+  }
+
+  /**
+   * 虚拟（列存）系列的追加：写进**环形缓冲**，不 concat、不重跑数据链路。
+   *
+   * 普通路径每次追加都要「concat 成新数组 → 整条重跑归一化 / 布局 / 重建像素」，
+   * 窗口 1500 点时 11ms/次（见 AGENTS 的账）；环形缓冲把一次追加变成
+   * 「写 1 个槽位 + 挪一次起点」，容量由 `maxPoints` 给定（滑动窗口）。
+   *
+   * 语义与普通路径一致：`maxPoints` 之外的最老数据被丢掉；`animate` 默认 false
+   * （滑动窗口的下标会整体前移，插值会把点插向邻居）。
+   */
+  private appendToVirtualSeries(
+    item: any,
+    index: number,
+    appended: any[],
+    options: { maxPoints?: number; animate?: boolean }
+  ): this {
+    const series = this.norm.series.find((s) => s.id === (item.id || `series-${index}`) || s.index === index);
+    if (!series) throw new Error(`[ice-chart] appendData：找不到已归一化的系列「${item.id || index}」。`);
+    if (series.grid) {
+      throw new Error(
+        `[ice-chart] 虚拟（列存）热力图是稠密矩阵，不支持 appendData（系列 ${
+          item.name || item.id || index
+        }）：请用 setData 重新给一份数据。`
+      );
+    }
+    const maxPoints = Number(options.maxPoints);
+    const capacity = isFinite(maxPoints) && maxPoints > 0 ? Math.floor(maxPoints) : 0;
+    const cached = this.virtualColumns.get(series.id);
+    let ring: SeriesRing;
+    if (cached && 'ring' in cached) {
+      ring = cached.ring;
+    } else {
+      // 第一次追加：把现有的点搬进环形缓冲（给了窗口就只留最后 maxPoints 根）
+      const existing = series.pointCount;
+      const size = Math.max(1, capacity || existing);
+      ring = createRing(size);
+      const keep = Math.min(existing, size);
+      for (let i = existing - keep; i < existing; i++) {
+        ringAppend(ring, [{ x: Number(series.xValueAt(i)), y: series.yValueAt(i) }], 0);
+      }
+    }
+    if (capacity && capacity !== ring.capacity) {
+      // 窗口大小变了：按逻辑顺序重新装一遍（只搬窗口内的点）
+      const next = createRing(capacity);
+      const keep = Math.min(ring.length, capacity);
+      for (let i = ring.length - keep; i < ring.length; i++) {
+        const y = ringYAt(ring, i);
+        ringAppend(next, [{ x: ringXAt(ring, i), y: Number.isNaN(y) ? null : y }], 0);
+      }
+      ring = next;
+    }
+    const points = appended.map((entry: any) => {
+      if (Array.isArray(entry)) return { x: finiteOrNull(entry[0]), y: finiteOrNull(entry[1]) };
+      if (entry && typeof entry === 'object') {
+        const xField = item.xField || 'x';
+        const yField = item.yField || 'y';
+        const x = finiteOrNull(entry[xField] !== undefined ? entry[xField] : entry.x);
+        const y = finiteOrNull(entry[yField] !== undefined ? entry[yField] : entry.value);
+        return { x, y };
+      }
+      // 纯数值：x 顺着上一根 +1
+      return { x: undefined, y: finiteOrNull(entry) };
+    });
+    ringAppend(ring, points, ring.length ? ringLastX(ring) + 1 : 0);
+    refreshRingDomains(ring);
+    // 换掉缓存里的连续列：下一次归一化（applyOption 里）就会用环形的访问器
+    this.virtualColumns.set(series.id, { ring });
+    this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
+    this.emit('data:change', { seriesId: series.id, seriesIndex: series.index });
     return this;
   }
 
@@ -459,12 +538,14 @@ export class ICEChart {
     rightOf(value: number): number | undefined;
   } {
     const plain: number[] = [];
-    const columns: Array<{ series: InternalSeries; x: ArrayLike<number>; n: number }> = [];
+    // 单调序列（连续列 / 环形缓冲）走二分；其余系列照旧拉成数组。
+    // 注意二分必须走 `xValueAt`：环形缓冲的物理顺序 ≠ 逻辑顺序。
+    const ordered: InternalSeries[] = [];
     for (const series of this.norm.series) {
       if (series.hidden) continue;
-      const resolved = series.columns;
-      if (resolved && resolved.xMonotonic) {
-        columns.push({ series, x: resolved.x, n: series.pointCount });
+      const store = storeDomainOf(series);
+      if (store && store.xMonotonic) {
+        ordered.push(series);
         continue;
       }
       for (let i = 0, n = series.pointCount; i < n; i++) {
@@ -500,22 +581,43 @@ export class ICEChart {
       }
       return lo;
     };
+    /** 单调系列（可能是环形缓冲）上的二分：只认 `xValueAt` 这个入口。 */
+    const seriesLowerBound = (series: InternalSeries, target: number): number => {
+      let lo = 0;
+      let hi = series.pointCount;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(series.xValueAt(mid)) < target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    const seriesUpperBound = (series: InternalSeries, target: number): number => {
+      let lo = 0;
+      let hi = series.pointCount;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(series.xValueAt(mid)) <= target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
 
     return {
-      total: sorted.length + columns.reduce((sum, entry) => sum + entry.n, 0),
+      total: sorted.length + ordered.reduce((sum, series) => sum + series.pointCount, 0),
       countIn: (lo: number, hi: number): number => {
         let count = upperBound(sorted, sorted.length, hi) - lowerBound(sorted, sorted.length, lo);
-        for (const entry of columns) count += upperBound(entry.x, entry.n, hi) - lowerBound(entry.x, entry.n, lo);
+        for (const series of ordered) count += seriesUpperBound(series, hi) - seriesLowerBound(series, lo);
         return count;
       },
       leftOf: (value: number): number | undefined => {
         let best: number | undefined;
         const fromPlain = lowerBound(sorted, sorted.length, value) - 1;
         if (fromPlain >= 0) best = sorted[fromPlain];
-        for (const entry of columns) {
-          const index = lowerBound(entry.x, entry.n, value) - 1;
+        for (const series of ordered) {
+          const index = seriesLowerBound(series, value) - 1;
           if (index < 0) continue;
-          const candidate = Number(entry.x[index]);
+          const candidate = Number(series.xValueAt(index));
           if (best === undefined || candidate > best) best = candidate;
         }
         return best;
@@ -524,10 +626,10 @@ export class ICEChart {
         let best: number | undefined;
         const fromPlain = upperBound(sorted, sorted.length, value);
         if (fromPlain < sorted.length) best = sorted[fromPlain];
-        for (const entry of columns) {
-          const index = upperBound(entry.x, entry.n, value);
-          if (index >= entry.n) continue;
-          const candidate = Number(entry.x[index]);
+        for (const series of ordered) {
+          const index = seriesUpperBound(series, value);
+          if (index >= series.pointCount) continue;
+          const candidate = Number(series.xValueAt(index));
           if (best === undefined || candidate < best) best = candidate;
         }
         return best;

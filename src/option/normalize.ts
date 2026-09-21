@@ -1,7 +1,9 @@
 import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
-import { arrayAccessors, columnAccessors, gridAccessors } from '../internal';
+import { arrayAccessors, columnAccessors, gridAccessors, storeDomainOf } from '../internal';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption, SeriesColumns, SeriesGrid } from '../internal';
+import type { SeriesRing } from '../util/ring';
+import { ringAccessors } from '../util/ring';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
@@ -117,7 +119,7 @@ export interface NormalizeContext {
    * 于是列存要在**图表实例**上留一份：第一遍建列并放进缓存，第二遍直接复用。
    * 带 data 的输入永远以 data 为准（缓存只是「没有 data 时怎么办」的答案）。
    */
-  virtualColumns?: Map<string, { columns: SeriesColumns } | { grid: SeriesGrid }>;
+  virtualColumns?: Map<string, { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing }>;
 }
 
 /**
@@ -459,6 +461,20 @@ function buildSeries(
           grid,
           pointCount: grid.values.length,
           ...gridAccessors(grid),
+        });
+        continue;
+      }
+      /**
+       * 环形缓冲（实时流 appendData 之后）：**别在这里重新建列** ——
+       * 数据早就释放了，缓存里的环就是当前数据。访问器按逻辑下标读环。
+       */
+      if (reuse && 'ring' in reuse) {
+        const ring = reuse.ring;
+        out.push({
+          ...shared,
+          ring,
+          pointCount: ring.length,
+          ...ringAccessors(ring),
         });
         continue;
       }
@@ -895,6 +911,7 @@ function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesC
     xMax = 1;
   }
   return {
+    kind: 'columns',
     x,
     y,
     size: hasSize ? size : null,
@@ -1281,8 +1298,9 @@ function buildXDomain(
   const values: number[] = [];
   for (const s of series) {
     // 虚拟（列存）系列：数据域在归一化那一趟里算好了，别再扫一遍全量数据
-    if (s.columns) {
-      values.push(s.columns.xDomain[0], s.columns.xDomain[1]);
+    const domain = storeDomainOf(s);
+    if (domain) {
+      values.push(domain.xDomain[0], domain.xDomain[1]);
       continue;
     }
     // 参数曲线的横坐标不是 xValue（那是参数 t），要用 x(t) 的极值
@@ -1372,8 +1390,9 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     if (s.axisIndex !== axisIndex) continue;
     if (s.type === 'bar' || s.type === 'area') includeZero = true;
     // 虚拟（列存）系列：数据域在归一化那一趟里算好了
-    if (s.columns) {
-      if (s.columns.yDomain) values.push(s.columns.yDomain[0], s.columns.yDomain[1]);
+    const domain = storeDomainOf(s);
+    if (domain) {
+      if (domain.yDomain) values.push(domain.yDomain[0], domain.yDomain[1]);
       continue;
     }
     // 函数绘图：数据域用稳健范围（分位数剪掉尖峰），而不是逐点求 min/max
