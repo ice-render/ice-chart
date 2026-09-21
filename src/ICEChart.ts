@@ -1746,8 +1746,22 @@ export class ICEChart {
       const all = full;
       let from = all.indexOf(domain[0]);
       let to = all.indexOf(domain[1]);
-      if (from < 0) from = 0;
-      if (to < 0) to = all.length - 1;
+      // 两端都不在这份数据里：这个窗口表达不出来，**保持原窗口**。
+      // 早先这里退化成了「整段数据」（`from = 0` / `to = length-1`），
+      // 于是一份类目比别人短的系列会把联动过来的窗口整幅放大（实测：量图被拉成整幅）。
+      if (from < 0 && to < 0) return null;
+      if (from < 0 || to < 0) {
+        // 只有一端越出了这份数据：让整窗**贴着数据的边缘滑动，跨度不变**。
+        // 以前直接把越界的那端拽成 `0` / `length-1`，等于把窗口拉成「整段数据」。
+        const span = Math.max(1, internal.domain.length - 1);
+        if (to < 0) {
+          to = all.length - 1;
+          from = Math.max(0, to - span);
+        } else {
+          from = 0;
+          to = Math.min(all.length - 1, span);
+        }
+      }
       if (from > to) {
         const t = from;
         from = to;

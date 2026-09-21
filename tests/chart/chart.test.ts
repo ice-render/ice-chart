@@ -215,6 +215,44 @@ describe('ICEChart（引擎集成）', () => {
     expect(idx(after[0])).toBeGreaterThanOrEqual(0);
   });
 
+  it('clamps a category window that runs past the data（贴边滑，不许放大成整段）', async () => {
+    // 回归：类目轴的窗口是「一串类目」，端点 key 不在这份数据里时，早先直接退化成了
+    // `from = 0` / `to = length-1` —— 也就是**整段数据**。多 pane 联动时非常致命：
+    // 某个 pane 的系列类比别人短（尾巴上有一段没有数据的空档），联动过来的窗口在那里
+    // 找不到右端 key，于是那格当场被拉成整幅（实测：K 线页拖到最新数据右边，量图被拉成整幅）。
+    // 现在的行为：越界的那一端贴住数据边缘，**跨度按当前窗口保持不变**。
+    const c = await mount({
+      xAxis: { type: 'category' },
+      series: [{ id: 'a', type: 'line', data: [10, 30, 20, 45, 35, 25, 15] }],
+    });
+    const all = c.fullDomain('x');
+    const idx = (value: any) => all.indexOf(value);
+    c.setDomain('x', [all[2], all[4]]);
+    const before = c.getDomain('x');
+    const span = idx(before[before.length - 1]) - idx(before[0]);
+    expect(span).toBe(2);
+
+    // 右端越界：整窗贴到数据右缘，跨度不变。
+    // 用例必须「左端仍在数据里」才照得到 bug：老写法只把越界的右端拽到 `length-1`、
+    // 左端原样保留，窗口就从 3 格被拉成 5 格（整整放大一倍）。
+    c.setDomain('x', [all[2], 'ZZZ-不在数据里']);
+    const after = c.getDomain('x');
+    expect(idx(after[after.length - 1])).toBe(all.length - 1);
+    expect(idx(after[after.length - 1]) - idx(after[0])).toBe(span);
+
+    // 左端越界：镜像行为
+    c.setDomain('x', ['ZZZ-不在数据里', all[4]]);
+    const left = c.getDomain('x');
+    expect(idx(left[0])).toBe(0);
+    expect(idx(left[left.length - 1]) - idx(left[0])).toBe(span);
+
+    // 两端都不在数据里：窗口表达不出来，保持原样（不能就此跳到整段）
+    c.setDomain('x', [all[3], all[5]]);
+    const keep = c.getDomain('x');
+    c.setDomain('x', ['AAA-不在数据里', 'ZZZ-不在数据里']);
+    expect(c.getDomain('x')).toEqual(keep);
+  });
+
   it('pans the y domain downward when dragging down（纵向跟着手走，且是平移不是缩放）', async () => {
     // 回归两件事：
     // 1. y 轴的「值越大越靠上」与屏幕反向，早先沿用 x 的符号会让纵向拖动**方向整体反过来**；
