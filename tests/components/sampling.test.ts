@@ -3,6 +3,7 @@ import { ScatterSeries } from '../../src/components/series/ScatterSeries';
 import { lttbIndices } from '../../src/components/series/SeriesBase';
 import { LinearScale } from '../../src/scale/LinearScale';
 import { resolveChartTheme } from '../../src/theme/chartTheme';
+import { arrayAccessors } from '../../src/internal';
 import type { DataPoint, InternalSeries } from '../../src/internal';
 import type { SeriesCoord } from '../../src/components/series/SeriesBase';
 
@@ -17,7 +18,7 @@ function makeSeries(type: any, values: number[], extra: any = {}): InternalSerie
     option: { type, data: values, ...extra },
     points,
     pointCount: points.length,
-    pointAt: (index: number) => points[index],
+    ...arrayAccessors(points),
     hasExplicitX: false,
     hidden: false,
     axisIndex: 0,

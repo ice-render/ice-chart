@@ -23,7 +23,7 @@ export class BarSeries extends SeriesBase {
    */
   protected rebuildPixels(): void {
     const coord = this.coord;
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     if (!coord) {
       this.pixels = new Float64Array(0);
       return;
@@ -50,10 +50,10 @@ export class BarSeries extends SeriesBase {
   /** 单根柱子的像素矩形（组件本地坐标）。 */
   public barRectAt(index: number): Rect | null {
     const coord = this.coord;
-    const point = this.series.points[index];
+    const point = this.series.pointAt(index);
     if (!coord || !point) return null;
     // 纯几何函数：不触发 rebuildPixels（否则 rebuildPixels → barRectAt 会递归）
-    if (this.effective.length !== this.series.points.length * 2) this.computeEffective();
+    if (this.effective.length !== this.series.pointCount * 2) this.computeEffective();
     const top = this.effective[index * 2 + 1];
     const base = this.effective[index * 2];
     if (!isFinite(top)) return null;
@@ -109,7 +109,7 @@ export class BarSeries extends SeriesBase {
    * 以前只有系列级颜色，只能靠拆成多个系列去凑（还会把柱子排成一组一组的）。
    */
   protected barColorAt(index: number): string {
-    const point = this.series.points[index];
+    const point = this.series.pointAt(index);
     const raw: any = point && (point as any).raw;
     const own = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw.color : undefined;
     return own || this.pointColor(index);
@@ -151,7 +151,7 @@ export class BarSeries extends SeriesBase {
     const radius = Number(this.series.option.barRadius);
     const ctx = this.ctx;
     this.beginDraw();
-    for (let i = 0; i < this.series.points.length; i++) {
+    for (let i = 0; i < this.series.pointCount; i++) {
       const rect = this.barDrawRectAt(i);
       if (!rect || rect.height <= 0) continue;
       const color = this.barColorAt(i);
@@ -176,7 +176,7 @@ export class BarSeries extends SeriesBase {
 
   public hitTestIndex(localX: number, localY: number): number {
     this.rebuildPixels();
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     for (let i = 0; i < n; i++) {
       const rect = this.barRectAt(i);
       if (!rect) continue;

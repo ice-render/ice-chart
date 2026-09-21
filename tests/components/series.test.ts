@@ -4,6 +4,7 @@ import { resolveChartTheme } from '../../src/theme/chartTheme';
 import { LineSeries } from '../../src/components/series/LineSeries';
 import { BarSeries } from '../../src/components/series/BarSeries';
 import { ScatterSeries } from '../../src/components/series/ScatterSeries';
+import { arrayAccessors } from '../../src/internal';
 import type { DataPoint, InternalSeries } from '../../src/internal';
 import type { SeriesCoord } from '../../src/components/series/SeriesBase';
 
@@ -22,7 +23,7 @@ function makeSeries(type: any, values: number[], extra: any = {}): InternalSerie
     option: { type, data: values, ...extra },
     points: data,
     pointCount: data.length,
-    pointAt: (index: number) => data[index],
+    ...arrayAccessors(data),
     hasExplicitX: false,
     hidden: false,
   };
@@ -93,7 +94,10 @@ describe('LineSeries 命中判定', () => {
 describe('BarSeries 命中与布局', () => {
   it('computes a bar rect per category and hits inside it', () => {
     const series = makeSeries('bar', [30, 60, 90, 20]);
-    series.points = series.points.map((p, i) => ({ ...p, xValue: ['a', 'b', 'c', 'd'][i] }));
+    // 就地改：访问器读的是建系列时那一个 points 数组，**不要重新赋值 series.points**
+    series.points.forEach((p, i) => {
+      p.xValue = ['a', 'b', 'c', 'd'][i];
+    });
     const component = new BarSeries(series, { left: 0, top: 0, width: 400, height: 300 });
     component.setCoord(bandCoord());
     component.barSlot = { index: 0, count: 1 };
@@ -106,7 +110,9 @@ describe('BarSeries 命中与布局', () => {
 
   it('splits the band between grouped bars', () => {
     const series = makeSeries('bar', [30, 60, 90, 20]);
-    series.points = series.points.map((p, i) => ({ ...p, xValue: ['a', 'b', 'c', 'd'][i] }));
+    series.points.forEach((p, i) => {
+      p.xValue = ['a', 'b', 'c', 'd'][i];
+    });
     const component = new BarSeries(series, { left: 0, top: 0, width: 400, height: 300 });
     component.setCoord(bandCoord());
     component.barSlot = { index: 1, count: 3 };
@@ -118,7 +124,9 @@ describe('BarSeries 命中与布局', () => {
 describe('BarSeries 逐项配色', () => {
   it('数据项带 color 时按项取色（红涨绿跌 / 告警分级都靠它）', () => {
     const series = makeSeries('bar', [10, 20, 30]);
-    series.points = series.points.map((p, i) => ({ ...p, raw: { value: p.y as number, color: ['#f04438', '#12b76a', '#f5a524'][i] } }));
+    series.points.forEach((p, i) => {
+      p.raw = { value: p.y as number, color: ['#f04438', '#12b76a', '#f5a524'][i] };
+    });
     const component: any = new BarSeries(series, { left: 0, top: 0, width: 400, height: 300 });
     component.setCoord(bandCoord());
     expect(component.barColorAt(0)).toBe('#f04438');

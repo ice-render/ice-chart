@@ -73,6 +73,17 @@ export interface InternalSeries {
    * 新增读点的地方一律走这里，不要直接下标 `points`。
    */
   pointAt(index: number): DataPoint;
+  /**
+   * 热路径取值入口 —— **逐点绘制 / 逐点插值的循环一律走这几个方法**。
+   *
+   * 它们只取一个标量：列存（虚拟）系列直接读 TypedArray 列，不合成 `DataPoint`
+   * （`pointAt` 每次都会 new 一个对象，100 万点的重建循环里那就是每帧 100 万个短命对象）。
+   * 字段含义与 `DataPoint` 上一一对应。
+   */
+  xValueAt(index: number): any;
+  baseAt(index: number): number;
+  topAt(index: number): number;
+  sizeAt(index: number): number | undefined;
   /** 数据里是否显式提供了 x（决定类目轴的类目来源）。 */
   hasExplicitX: boolean;
   /** 该系列是否被图例隐藏。 */
@@ -112,13 +123,25 @@ export interface InternalSeries {
 }
 
 /**
- * 数组式 `pointAt`：普通系列（`points` 齐备）用，与 `points[index]` 逐字等价。
+ * 数组式访问器组：普通系列（`points` 齐备）用，与 `points[index].xxx` 逐字等价。
  *
  * 放在这里是为了让「读点」这件事只有一处实现：归一化建点、组件读点都走它，
- * 列存系列只需要在建系列时换一个取点实现（Phase 2 步骤 3）。
+ * 列存系列只需要在建系列时换一套访问器。
+ *
+ * 注意：闭包捕获的是**建系列时的那一个数组**。建好之后要改点就**就地改**
+ * （`points[i].xValue = ...`，堆叠基线与轴类目回填就是这么做的），
+ * 不要给 `series.points` 重新赋值 —— 那会让访问器与 `points` 分叉。
  */
-export function arrayPointAt(points: DataPoint[]): (index: number) => DataPoint {
-  return (index: number): DataPoint => points[index];
+export function arrayAccessors(
+  points: DataPoint[]
+): Pick<InternalSeries, 'pointAt' | 'xValueAt' | 'baseAt' | 'topAt' | 'sizeAt'> {
+  return {
+    pointAt: (index: number): DataPoint => points[index],
+    xValueAt: (index: number): any => points[index].xValue,
+    baseAt: (index: number): number => points[index].base,
+    topAt: (index: number): number => points[index].top,
+    sizeAt: (index: number): number | undefined => points[index].size,
+  };
 }
 
 export interface InternalAxis {

@@ -59,7 +59,12 @@ export function buildDataTable(chart: A11yChartLike): DataTable {
   if (norm.kind === 'polar') {
     const pie = norm.series.find((s) => s.type === 'pie');
     if (!pie) return { caption, columns: [norm.labels.sector, norm.labels.value, norm.labels.ratio], rows: [] };
-    const visible = pie.points.filter((p) => !norm.hiddenSlices[`${pie.id}#${p.index}`]);
+    const visible = [];
+    for (let i = 0; i < pie.pointCount; i++) {
+      const p = pie.pointAt(i);
+      if (norm.hiddenSlices[`${pie.id}#${p.index}`]) continue;
+      visible.push(p);
+    }
     const total = visible.reduce((sum, p) => sum + (p.y || 0), 0);
     return {
       caption,
@@ -80,7 +85,7 @@ export function buildDataTable(chart: A11yChartLike): DataTable {
       rows: indicators.map((indicator, index) => [
         indicator.name,
         ...series.map((s) => {
-          const point = s.points[index];
+          const point = s.pointAt(index);
           return point && point.y !== null ? String(point.y) : '';
         }),
       ]),
@@ -92,7 +97,8 @@ export function buildDataTable(chart: A11yChartLike): DataTable {
   const order: string[] = [];
   const rowMap: Record<string, { x: any; cells: Record<string, string> }> = {};
   for (const s of series) {
-    for (const point of s.points) {
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       const key = String(point.xValue);
       if (!rowMap[key]) {
         rowMap[key] = { x: point.xValue, cells: {} };
@@ -121,9 +127,9 @@ export function buildDataNodes(chart: A11yChartLike, options: A11yTreeOptions = 
     if (series.hidden) continue;
     const component = chart.controller && chart.controller.resolver ? chart.controller.resolver.seriesComponentOf(series) : null;
     if (!component) continue;
-    const count = Math.min(series.points.length, maxPerSeries);
+    const count = Math.min(series.pointCount, maxPerSeries);
     for (let i = 0; i < count; i++) {
-      const point = series.points[i];
+      const point = series.pointAt(i);
       const pixel = component.pixelAt(i);
       if (!pixel) continue;
       const world = [chart.layout.plot.x + pixel[0], chart.layout.plot.y + pixel[1]];

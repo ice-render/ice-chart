@@ -6,6 +6,7 @@ import { resolveChartTheme } from '../../src/theme/chartTheme';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
 import type { DataPoint, InternalSeries } from '../../src/internal';
+import { arrayAccessors } from '../../src/internal';
 
 const BUBBLE: ChartOption = {
   title: { text: '城市 GDP / 人口' },
@@ -38,6 +39,8 @@ function makeSeries(values: number[], extra: any = {}): InternalSeries {
     color: '#0D6EFD',
     option: { type: 'scatter', data: values, ...extra },
     points,
+    pointCount: points.length,
+    ...arrayAccessors(points),
     hasExplicitX: false,
     hidden: false,
     axisIndex: 0,

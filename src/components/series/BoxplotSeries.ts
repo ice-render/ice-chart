@@ -17,7 +17,7 @@ export class BoxplotSeries extends SeriesBase {
   /** 每个箱线图的像素几何（本地坐标）。 */
   public boxRectAt(index: number): Rect | null {
     const coord = this.coord;
-    const point = this.series.points[index];
+    const point = this.series.pointAt(index);
     if (!coord || !point || !point.boxplot) return null;
     const centerX = coord.xScale.map(point.xValue);
     if (!isFinite(centerX)) return null;
@@ -41,7 +41,7 @@ export class BoxplotSeries extends SeriesBase {
   /** 像素缓存 = 箱体中心（高亮与提示框锚点）。 */
   protected rebuildPixels(): void {
     const coord = this.coord;
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     if (!coord) {
       this.pixels = new Float64Array(0);
       return;
@@ -52,7 +52,7 @@ export class BoxplotSeries extends SeriesBase {
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
     for (let i = 0; i < n; i++) {
       const rect = this.boxRectAt(i);
-      const point = this.series.points[i];
+      const point = this.series.pointAt(i);
       if (!rect || !point || !point.boxplot) {
         this.pixels[i * 2] = NaN;
         this.pixels[i * 2 + 1] = NaN;
@@ -70,8 +70,8 @@ export class BoxplotSeries extends SeriesBase {
     this.rebuildPixels();
     const coord = this.coord;
     if (!coord) return -1;
-    for (let i = 0; i < this.series.points.length; i++) {
-      const point = this.series.points[i];
+    for (let i = 0; i < this.series.pointCount; i++) {
+      const point = this.series.pointAt(i);
       const rect = this.boxRectAt(i);
       if (!point || !point.boxplot || !rect) continue;
       // 水平范围按箱体，垂直范围覆盖整条须（min..max）——和箱体的命中语义一致
@@ -98,8 +98,8 @@ export class BoxplotSeries extends SeriesBase {
     const entering = this.isEntering();
     this.computeItemProgress();
     this.beginDraw();
-    for (let i = 0; i < this.series.points.length; i++) {
-      const point = this.series.points[i];
+    for (let i = 0; i < this.series.pointCount; i++) {
+      const point = this.series.pointAt(i);
       const rect = this.boxRectAt(i);
       if (!point || !point.boxplot || !rect) continue;
       const [min, q1, median, q3, max] = point.boxplot;

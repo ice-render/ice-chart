@@ -109,7 +109,7 @@ export abstract class SeriesBase extends ChartComponent {
    */
   public symbolSizeAt(index: number): number {
     const option = this.series.option;
-    const point = this.series.points[index];
+    const point = this.series.pointAt(index);
     const size = option.symbolSize;
     if (typeof size === 'function') {
       const value = point ? point.y : null;
@@ -134,12 +134,21 @@ export abstract class SeriesBase extends ChartComponent {
   /** 本系列的最大标记尺寸（脏矩形留白与命中容差要用）。 */
   protected maxSymbolSize(): number {
     const option = this.series.option;
-    if (typeof option.symbolSize === 'function' || this.series.points.some((p) => typeof p.size === 'number')) {
+    if (typeof option.symbolSize === 'function' || this.hasPointSize()) {
       const range = Array.isArray(option.symbolSizeRange) ? option.symbolSizeRange : [8, 40];
       return Math.max(8, Number(range[1]) || 40);
     }
     const numeric = Number(option.symbolSize);
     return isFinite(numeric) && numeric > 0 ? numeric : 8;
+  }
+
+  /** 数据里是否带第三维（气泡图尺寸）—— 逐点取值，列存系列也适用。 */
+  private hasPointSize(): boolean {
+    const series = this.series;
+    for (let i = 0, n = series.pointCount; i < n; i++) {
+      if (typeof series.sizeAt(i) === 'number') return true;
+    }
+    return false;
   }
 
   public setCoord(coord: SeriesCoord): this {
@@ -180,7 +189,7 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 每项进度的缓存（数据量变化时重建）。 */
   protected computeItemProgress(): void {
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     if (this.itemProgress.length !== n) this.itemProgress = new Float64Array(n);
     for (let i = 0; i < n; i++) this.itemProgress[i] = this.progressFor(i, n);
   }
@@ -321,7 +330,7 @@ export abstract class SeriesBase extends ChartComponent {
     // 坐标轴数据域过渡期间每帧都会走一次同步，如果这里清掉 fromEffective，值插值就断了。
     if (!preserveAnimation) {
       this.fromEffective =
-        animate && this.effective.length === series.points.length * 2 ? new Float64Array(this.effective) : null;
+        animate && this.effective.length === series.pointCount * 2 ? new Float64Array(this.effective) : null;
     }
     this.series = series;
     this.cacheKey = '';
@@ -356,8 +365,8 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 计算每个点的有效数据值（含动画插值）。 */
   protected computeEffective(): void {
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (this.effective.length !== n * 2) {
       this.effective = new Float64Array(n * 2);
       this.fromEffective = null;
@@ -367,14 +376,15 @@ export abstract class SeriesBase extends ChartComponent {
     for (let i = 0; i < n; i++) {
       // 每个数据项用**自己的**进度：错峰入场时就是「依次长出来」
       const ti = this.itemProgress[i];
-      const p = points[i];
-      const targetTop = p.top;
+      // 只取标量：列存系列在这里不合成 DataPoint
+      const targetTop = series.topAt(i);
       if (targetTop === null || targetTop === undefined) {
         this.effective[i * 2] = NaN;
         this.effective[i * 2 + 1] = NaN;
         continue;
       }
-      const targetBase = isFinite(p.base) ? p.base : 0;
+      const rawBase = series.baseAt(i);
+      const targetBase = isFinite(rawBase) ? rawBase : 0;
       let fromBase = 0;
       let fromTop = 0;
       if (this.fromEffective) {
@@ -421,7 +431,7 @@ export abstract class SeriesBase extends ChartComponent {
       xd[1] - xd[0] === incX[1] - incX[0] &&
       yd[0] === incY[0] &&
       yd[1] === incY[1] &&
-      this.pixels.length === this.series.points.length * 2
+      this.pixels.length === this.series.pointCount * 2
     ) {
       const dx = ((incX[0] - xd[0]) / (xd[1] - xd[0])) * coord.plot.width;
       for (let i = 0; i < this.pixels.length; i += 2) this.pixels[i] += dx;
@@ -430,15 +440,14 @@ export abstract class SeriesBase extends ChartComponent {
       return;
     }
     this.computeEffective();
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
     const { xScale, yScale } = coord;
     let monotonic = true;
     let prevX = -Infinity;
     for (let i = 0; i < n; i++) {
-      const p = points[i];
-      const px = xScale.map(p.xValue);
+      const px = xScale.map(series.xValueAt(i));
       const value = this.effective[i * 2 + 1];
       const py = isFinite(value) ? yScale.map(value) : NaN;
       this.pixels[i * 2] = px;
@@ -449,7 +458,7 @@ export abstract class SeriesBase extends ChartComponent {
       }
     }
     this.xMonotonic = monotonic;
-    this.sizeExtent = computeSizeExtent(points);
+    this.sizeExtent = computeSizeExtent(series);
     this.renderIndices = this.buildRenderIndices(n, coord.plot.width);
     (this as any).__incrementalXDomain = Array.isArray(xd) && xd.length === 2 ? [xd[0], xd[1]] : null;
     (this as any).__incrementalYDomain = Array.isArray(yd) && yd.length === 2 ? [yd[0], yd[1]] : null;
@@ -533,7 +542,7 @@ export abstract class SeriesBase extends ChartComponent {
     const xd = coord.xScale.domain;
     const yd = coord.yScale.domain;
     return [
-      this.series.points.length,
+      this.series.pointCount,
       this.progress(),
       coord.plot.width,
       coord.plot.height,
@@ -541,7 +550,7 @@ export abstract class SeriesBase extends ChartComponent {
       String(xd[xd.length - 1]),
       String(yd[0]),
       String(yd[1]),
-      this.series.points.length ? String(this.series.points[0].xValue) : '',
+      this.series.pointCount ? String(this.series.xValueAt(0)) : '',
     ].join('|');
   }
 
@@ -611,7 +620,7 @@ export abstract class SeriesBase extends ChartComponent {
   }
 
   protected pointByIndex(index: number): DataPoint | null {
-    return this.series.points[index] || null;
+    return this.series.pointAt(index) || null;
   }
 }
 
@@ -681,13 +690,14 @@ export function lttbIndices(pixels: Float64Array, n: number, threshold: number):
 }
 
 /** 数据点第三维的取值范围（气泡尺寸映射用）。 */
-export function computeSizeExtent(points: DataPoint[]): [number, number] {
+export function computeSizeExtent(series: InternalSeries): [number, number] {
   let min = Infinity;
   let max = -Infinity;
-  for (const point of points) {
-    if (typeof point.size !== 'number' || !isFinite(point.size)) continue;
-    if (point.size < min) min = point.size;
-    if (point.size > max) max = point.size;
+  for (let i = 0, n = series.pointCount; i < n; i++) {
+    const size = series.sizeAt(i);
+    if (typeof size !== 'number' || !isFinite(size)) continue;
+    if (size < min) min = size;
+    if (size > max) max = size;
   }
   if (!isFinite(min)) return [0, 1];
   if (min === max) return [min, min + 1];

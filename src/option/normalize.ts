@@ -1,6 +1,6 @@
 import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
-import { arrayPointAt } from '../internal';
+import { arrayAccessors } from '../internal';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
@@ -302,7 +302,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
       const categories: any[] = [];
       for (const s of series) {
         if (s.type !== 'heatmap') continue;
-        for (const point of s.points) {
+        for (let i = 0, n = s.pointCount; i < n; i++) {
+          const point = s.pointAt(i);
           const key = String(point.name === undefined ? point.xValue : point.name);
           if (!seen[key]) {
             seen[key] = true;
@@ -409,7 +410,7 @@ function buildSeries(
       points,
       pointCount: points.length,
       // 普通系列：读点就是 points 的直读，与迁移前逐字等价（列存系列在 Phase 2 步骤 3 换实现）。
-      pointAt: arrayPointAt(points),
+      ...arrayAccessors(points),
       hasExplicitX,
       hidden: false,
       axisIndex: 0,
@@ -705,8 +706,8 @@ function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear
     return 'category';
   const values: any[] = [];
   for (const s of series) {
-    for (const p of s.points) {
-      values.push(p.xValue);
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      values.push(s.xValueAt(i));
       if (values.length > 2000) break;
     }
   }
@@ -737,7 +738,8 @@ export function buildCategoryValues(option: AxisOption, series: InternalSeries[]
   const seen: Record<string, boolean> = {};
   const out: any[] = [];
   for (const s of series) {
-    for (const point of s.points) {
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       const value = point.name === undefined ? point.xValue : point.name;
       const key = String(value);
       if (seen[key]) continue;
@@ -758,7 +760,9 @@ export function applyAxisCategories(axis: AxisOption, series: InternalSeries[]):
   if (!axis || !Array.isArray(axis.data) || !axis.data.length) return;
   const data = axis.data;
   for (const s of series) {
-    for (const point of s.points) {
+    // 写回点（列存系列在 Phase 3 换「写列」分支；普通系列就是写 points 里那一个对象）
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       if (point.xValue !== point.index) continue;
       if (data[point.index] === undefined) continue;
       point.xValue = data[point.index];
@@ -859,7 +863,8 @@ function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?
   if (option.type !== 'function' && option.type !== 'parametric') return;
   const ys: number[] = [];
   const xs: number[] = [];
-  for (const point of series.points) {
+  for (let i = 0, n = series.pointCount; i < n; i++) {
+    const point = series.pointAt(i);
     const raw: any = point.raw;
     if (raw && typeof raw === 'object') {
       if (typeof raw.x === 'number') xs.push(raw.x);
@@ -885,7 +890,8 @@ function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?
   } else if (option.polarExpression !== undefined && option.polarExpression !== null && String(option.polarExpression).trim() !== '') {
     // 极坐标：诊断看的是 r(θ) 本身（x/y 是它的派生值，用它俩判断会给出误导性的提示）
     const radii: number[] = [];
-    for (const point of series.points) {
+    for (let i = 0, n = series.pointCount; i < n; i++) {
+      const point = series.pointAt(i);
       const raw: any = point.raw;
       if (raw && typeof raw === 'object' && typeof raw.r === 'number') radii.push(raw.r);
     }
@@ -936,11 +942,12 @@ function buildXDomain(
     const seen: Record<string, boolean> = {};
     const categories: any[] = [];
     for (const s of series) {
-      for (const p of s.points) {
-        const key = String(p.xValue);
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const xValue = s.xValueAt(i);
+        const key = String(xValue);
         if (!seen[key]) {
           seen[key] = true;
-          categories.push(p.xValue);
+          categories.push(xValue);
         }
       }
     }
@@ -954,8 +961,9 @@ function buildXDomain(
       for (const v of s.domainXValues) if (isFinite(v)) values.push(v);
       continue;
     }
-    for (const p of s.points) {
-      const v = type === 'time' ? toTimestamp(p.xValue) : Number(p.xValue);
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const xValue = s.xValueAt(i);
+      const v = type === 'time' ? toTimestamp(xValue) : Number(xValue);
       if (isFinite(v)) values.push(v);
     }
   }
@@ -1040,7 +1048,8 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
       values.push(lo, hi);
       continue;
     }
-    for (const p of s.points) {
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const p = s.pointAt(i);
       if (p.y !== null) values.push(p.y);
       // 箱线图的须（min/max）也要进数据域
       if (p.boxplot) {
@@ -1098,7 +1107,7 @@ function buildRadarDomains(radar: RadarOption, series: InternalSeries[]): Array<
     let max = -Infinity;
     for (const s of series) {
       if (s.type !== 'radar' || s.hidden) continue;
-      const point = s.points[i];
+      const point = s.pointAt(i);
       if (!point || point.y === null) continue;
       if (point.y > max) max = point.y;
     }
@@ -1121,7 +1130,9 @@ function applyWaterfall(series: InternalSeries[]): void {
   for (const s of series) {
     if (s.type !== 'waterfall') continue;
     let cumulative = 0;
-    for (const point of s.points) {
+    // 写回点（列存系列在 Phase 3 换「写列」分支）
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       const raw: any = point.raw;
       const isTotal = !!(raw && typeof raw === 'object' && !Array.isArray(raw) && raw.total);
       const value = point.y || 0;
@@ -1165,7 +1176,9 @@ function applyStacking(series: InternalSeries[]): void {
   const groups: Record<string, InternalSeries[]> = {};
   for (const s of series) {
     if (!s.option.stack) {
-      for (const p of s.points) {
+      // 写回点（列存系列在 Phase 3 换「写列」分支）
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const p = s.pointAt(i);
         p.base = 0;
         p.top = p.y === null ? 0 : p.y;
       }
@@ -1179,7 +1192,9 @@ function applyStacking(series: InternalSeries[]): void {
     const group = groups[key];
     const cumulative: Record<string, number> = {};
     for (const s of group) {
-      for (const p of s.points) {
+      // 写回点（列存系列在 Phase 3 换「写列」分支）
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const p = s.pointAt(i);
         const k = String(p.xValue);
         const base = cumulative[k] || 0;
         const value = p.y === null ? 0 : p.y;

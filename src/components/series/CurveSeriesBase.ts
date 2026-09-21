@@ -102,11 +102,11 @@ export abstract class CurveSeriesBase extends SeriesBase {
     this.curveKey = key;
 
     // 锚点：按 series.points 的参数值现场求值（提示框 / 高亮 / 键盘导航都用它）
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
     for (let i = 0; i < n; i++) {
-      const [x, y] = this.evaluateAt(Number(points[i].xValue), params);
+      const [x, y] = this.evaluateAt(Number(series.xValueAt(i)), params);
       const px = isFinite(x) ? coord.xScale.map(x) : NaN;
       const py = isFinite(y) ? coord.yScale.map(y) : NaN;
       this.pixels[i * 2] = px;

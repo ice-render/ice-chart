@@ -41,8 +41,8 @@ export class RadarSeries extends SeriesBase {
   /** 顶点像素（本地坐标）。 */
   protected rebuildPixels(): void {
     const coord = this.radar;
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (!coord) {
       this.pixels = new Float64Array(0);
       return;
@@ -56,7 +56,7 @@ export class RadarSeries extends SeriesBase {
     for (let i = 0; i < n; i++) {
       const angle = -Math.PI / 2 + (i / Math.max(1, n)) * Math.PI * 2;
       const domain = coord.domains[i] || [0, 1];
-      const raw = points[i].y;
+      const raw = series.pointAt(i).y;
       const value = raw === null || raw === undefined ? domain[0] : raw;
       const span = domain[1] - domain[0];
       let ratio = span > 0 ? (value - domain[0]) / span : 0;

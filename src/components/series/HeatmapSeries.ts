@@ -15,7 +15,7 @@ export class HeatmapSeries extends SeriesBase {
    */
   protected rebuildPixels(): void {
     const coord = this.coord;
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     if (!coord) {
       this.pixels = new Float64Array(0);
       return;
@@ -41,10 +41,11 @@ export class HeatmapSeries extends SeriesBase {
   private valueRange(): [number, number] {
     let min = Infinity;
     let max = -Infinity;
-    for (const point of this.series.points) {
-      if (point.y === null || !isFinite(point.y)) continue;
-      if (point.y < min) min = point.y;
-      if (point.y > max) max = point.y;
+    for (let i = 0, n = this.series.pointCount; i < n; i++) {
+      const y = this.series.pointAt(i).y;
+      if (y === null || !isFinite(y)) continue;
+      if (y < min) min = y;
+      if (y > max) max = y;
     }
     if (!isFinite(min) || !isFinite(max)) return [0, 1];
     if (min === max) return [min, min + 1];
@@ -53,7 +54,7 @@ export class HeatmapSeries extends SeriesBase {
 
   private cellRectAt(index: number): Rect | null {
     const coord = this.coord;
-    const point = this.series.points[index];
+    const point = this.series.pointAt(index);
     if (!coord || !point) return null;
     const xStart = coord.xScale.bandStart(point.xValue, undefined as any);
     const yValue = point.name === undefined ? point.index : point.name;
@@ -87,8 +88,8 @@ export class HeatmapSeries extends SeriesBase {
     this.computeItemProgress();
     const columns = coord.xScale.domain.length || 1;
     this.beginDraw();
-    for (let i = 0; i < this.series.points.length; i++) {
-      const point = this.series.points[i];
+    for (let i = 0; i < this.series.pointCount; i++) {
+      const point = this.series.pointAt(i);
       const rect = this.cellRectAt(i);
       if (!rect) continue;
       const ratio = point.y === null ? 0 : (point.y - min) / (max - min || 1);
@@ -113,7 +114,7 @@ export class HeatmapSeries extends SeriesBase {
   }
 
   public hitTestIndex(localX: number, localY: number): number {
-    for (let i = 0; i < this.series.points.length; i++) {
+    for (let i = 0; i < this.series.pointCount; i++) {
       const rect = this.cellRectAt(i);
       if (!rect) continue;
       if (localX >= rect.x && localX <= rect.x + rect.width && localY >= rect.y && localY <= rect.y + rect.height) return i;
