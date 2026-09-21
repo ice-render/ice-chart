@@ -874,13 +874,28 @@ export class InteractionController {
         mode: 'pan',
         startX: screenX,
         startY: screenY,
-        domainX: this.host.norm.xAxis.domain.length === 2 ? [this.host.norm.xAxis.domain[0], this.host.norm.xAxis.domain[1]] : null,
+        domainX: this.currentXWindow(),
         domainY: [this.host.norm.yAxis.domain[0], this.host.norm.yAxis.domain[1]],
         moved: false,
       };
       return true;
     }
     return false;
+  }
+
+  /**
+   * 当前 x 窗口的两个**端点值**（拖动平移的起点）。
+   *
+   * 为什么不能直接拿 `norm.xAxis.domain` 当窗口：**类目轴的 `domain` 是窗口内的整串类目**
+   * （窗口里有 120 根就是 120 项），只有连续轴才是 `[min, max]` 两项。早先这里判
+   * `domain.length === 2`，于是类目轴的横向平移**整条分支被跳过** —— 因为纵向照常工作，
+   * 表现就是「只能上下拖、左右拖不动」这种怪现象（K 线图正是类目轴）。
+   */
+  private currentXWindow(): [any, any] | null {
+    const axis = this.host.norm.xAxis;
+    const domain = axis && axis.domain;
+    if (!domain || domain.length < 2) return null;
+    return axis.type === 'category' ? [domain[0], domain[domain.length - 1]] : [domain[0], domain[1]];
   }
 
   public handlePointerUp(screenX: number, screenY: number, _evt?: any): void {
@@ -1006,7 +1021,10 @@ export class InteractionController {
     if (!scale) return null;
     const size = axis === 'x' ? this.host.layout.plot.width : this.host.layout.plot.height;
     if (scale.isBand()) {
-      const all = internal.domain;
+      // 全集的来源是 `fullDomain`（**全部**类目），不是 `internal.domain` ——
+      // 后者是**当前窗口内**的类目串，拿它当全集算出来的位移恒为 0（窗口在窗口里挪不动）。
+      const full = this.host.fullDomain('x');
+      const all = full && full.length ? full : internal.domain;
       const from = all.indexOf(domain[0]);
       const to = all.indexOf(domain[1]);
       if (from < 0 || to < 0 || all.length <= 1) return null;

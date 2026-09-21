@@ -187,6 +187,34 @@ describe('ICEChart（引擎集成）', () => {
     expect(Number(after[0])).toBeGreaterThanOrEqual(0);
   });
 
+  it('pans the domain on a category axis（窗口是「一串类目」而不是两个数）', async () => {
+    // 回归：类目轴的 `norm.xAxis.domain` 是**窗口内的整串类目**（几根就几项），
+    // 不是连续轴那种 `[min, max]`。早先这里按「长度必须是 2」取窗口，于是类目轴
+    // 横向平移整条分支被跳过；`shiftDomain` 又把窗口内的那串当成了「全部类目」，
+    // 位移恒为 0 —— 合起来就是「能上下拖、不能左右拖」。K 线图正是类目轴。
+    const c = await mount({
+      xAxis: { type: 'category' },
+      series: [{ id: 'a', type: 'line', data: [10, 30, 20, 45, 35, 25, 15] }],
+      interaction: { pan: { enabled: true, axes: 'x' }, zoom: false, brush: false },
+    });
+    const all = c.fullDomain('x');
+    expect(all.length).toBeGreaterThan(3);
+    c.setDomain('x', [all[1], all[3]]);
+    const before = c.getDomain('x');
+    const idx = (value: any) => all.indexOf(value);
+    const plot = c.layout.plot;
+    const midY = plot.y + plot.height / 2;
+    // 指针右移 = 内容右移 = 数据窗口左移（类目下标变小）
+    c.controller.handlePointerDown(plot.x + plot.width * 0.2, midY);
+    c.controller.handlePointerMove(plot.x + plot.width * 0.55, midY);
+    c.controller.handlePointerUp(plot.x + plot.width * 0.55, midY);
+    const after = c.getDomain('x');
+
+    expect(idx(after[after.length - 1]) - idx(after[0])).toBe(idx(before[before.length - 1]) - idx(before[0]));
+    expect(idx(after[0])).toBeLessThan(idx(before[0]));
+    expect(idx(after[0])).toBeGreaterThanOrEqual(0);
+  });
+
   it('navigates data points with the keyboard and emits item:hover', async () => {
     const c = await mount();
     const events: any[] = [];
