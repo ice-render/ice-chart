@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 大数据量（引擎虚拟子源原型）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      .wrap {
+        position: relative;
+        width: 960px;
+        height: 420px;
+      }
+      .wrap canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+      }
+      /* 坐标轴 / 十字线在覆盖层画，且不吃指针事件（指针要落到 ICE 那张画布上） */
+      #overlay {
+        pointer-events: none;
+      }
+      #tip {
+        position: absolute;
+        display: none;
+        padding: 4px 8px;
+        font: 12px/1.5 -apple-system, "PingFang SC", sans-serif;
+        color: #0f172a;
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+        pointer-events: none;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>大数据量：引擎虚拟子源（列存文档 + 窗口批量落墨 + 命中即物化）</h1>
+    <p class="lead">
+      和 <code>large-data.html</code> 同一份「服务指标」形状的数据，但**文档放在 <code>Float64Array</code> 列存里**，
+      交给引擎的虚拟子源：<b>看不见的点不建对象、不参与绘制</b>（按可见窗口批量落墨），
+      悬停走 <code>O(1)</code> 索引命中，点一下就由引擎物化成真组件（可拖动）。
+      用 <code>?n=500000</code> 调每系列点数。
+    </p>
+    <div class="card">
+      <div class="wrap">
+        <canvas id="chart" width="960" height="420"></canvas>
+        <canvas id="overlay" width="960" height="420"></canvas>
+        <div id="tip"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="tips" id="stats">等待渲染…</div>
+      <div class="tips" id="hint">滚轮缩放（以光标为锚点）· 空白处拖拽平移 · 悬停看数值 · 点一下某个点会物化成真组件</div>
+    </div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script>
+      const { ICE, ICEVirtualLayer, ICERect, ICEText, materializedIndices, exportSvg } = window.ICE;
+
+      const qs = new URLSearchParams(location.search);
+      const N = Math.max(1000, Number(qs.get('n')) || 500000); // 每系列点数
+      const SERIES = 3;
+      const COLORS = ['#2563eb', '#10b981', '#f59e0b'];
+      const NAMES = ['CPU', '内存', 'QPS'];
+      const Y_MAX = 100;
+
+      /* 绘图区（CSS 像素） */
+      const plot = { left: 56, top: 28, width: 880, height: 350 };
+
+      /* ---------------------------------------------------------------- 文档：列存 */
+      const t0 = performance.now();
+      const xs = new Float64Array(N);
+      for (let i = 0; i < N; i++) xs[i] = i;
+      const ys = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
+      const wave = [
+        (i) => 40 + Math.sin(i / (N / 55)) * 12 + Math.sin(i / (N / 1350)) * 4 + (i % Math.round(N / 10) === 0 ? 26 : 0),
+        (i) => 60 + Math.sin(i / (N / 33) + 1) * 9 + Math.cos(i / (N / 237)) * 3,
+        (i) => 30 + Math.sin(i / (N / 125) + 2) * 15 + Math.sin(i / (N / 2170)) * 2,
+      ];
+      for (let s = 0; s < SERIES; s++) {
+        const col = ys[s];
+        for (let i = 0; i < N; i++) col[i] = wave[s](i);
+      }
+      const buildMs = performance.now() - t0;
+
+      /* ---------------------------------------------------------------- 虚拟子源 */
+      /** 每「项」= 一个数据点（文档共 SERIES × N 个点）：这是"文档大、屏幕小"的原型粒度。 */
+      const source = {
+        count: SERIES * N,
+        version: 1,
+        /** 命中容差（局部 y 单位）：随缩放进来的稀疏程度变化，由 applyView 维护 */
+        toleranceY: 4,
+        stats: { painted: 0, windowItems: 0, lastPaintMs: 0 },
+
+        boxAt(i, out) {
+          const s = (i / N) | 0;
+          const k = i - s * N;
+          out[0] = xs[k];
+          out[1] = ys[s][k] - 0.5;
+          out[2] = xs[k] + 1;
+          out[3] = ys[s][k] + 0.5;
+        },
+
+        forEachInBox(x0, y0, x1, y1, visit) {
+          const k0 = Math.max(0, Math.floor(x0));
+          const k1 = Math.min(N - 1, Math.ceil(x1));
+          for (let s = 0; s < SERIES; s++) {
+            const col = ys[s];
+            const base = s * N;
+            for (let k = k0; k <= k1; k++) {
+              const y = col[k];
+              if (y >= y0 && y <= y1) visit(base + k);
+            }
+          }
+        },
+
+        hitTest(lx, ly) {
+          const k = Math.round(lx);
+          if (k < 0 || k >= N) return -1;
+          let best = -1;
+          let bestD = Infinity;
+          for (let s = 0; s < SERIES; s++) {
+            const d = Math.abs(ys[s][k] - ly);
+            if (d < bestD) {
+              bestD = d;
+              best = s * N + k;
+            }
+          }
+          return bestD <= source.toleranceY ? best : -1;
+        },
+
+        paint(ctx, view) {
+          const t = performance.now();
+          const k0 = Math.max(0, Math.floor(view.x0));
+          const k1 = Math.min(N - 1, Math.ceil(view.x1));
+          const span = k1 - k0 + 1;
+          const stride = Math.max(1, Math.floor(span / (plot.width * 2))); // 抽稀到 ~2 点/像素
+          let painted = 0;
+          for (let s = 0; s < SERIES; s++) {
+            const col = ys[s];
+            ctx.beginPath();
+            let started = false;
+            for (let k = k0; k <= k1; k += stride) {
+              const x = xs[k];
+              const y = col[k];
+              if (started) ctx.lineTo(x, y);
+              else {
+                ctx.moveTo(x, y);
+                started = true;
+              }
+              painted++;
+            }
+            if (k1 !== k1 - ((k1 - k0) % stride)) ctx.lineTo(xs[k1], col[k1]); // 收尾点
+            ctx.strokeStyle = COLORS[s];
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+          // 放大到足够稀疏时补画离散点（这就是"看得见才画"的具体形态）
+          if (span <= 4000) {
+            for (let s = 0; s < SERIES; s++) {
+              ctx.fillStyle = COLORS[s];
+              for (let k = k0; k <= k1; k++) {
+                ctx.fillRect(xs[k] - 1.5, ys[s][k] - 1.5, 3, 3);
+                painted++;
+              }
+            }
+          }
+          source.stats.painted = painted;
+          source.stats.lastPaintMs = Math.round((performance.now() - t) * 100) / 100;
+          requestAnimationFrame(updateStats);
+          return true;
+        },
+
+        /** 全量导出：整份文档（不是窗口）写进 SVG sink */
+        paintToSvg(sink, bounds) {
+          const k0 = Math.max(0, Math.floor(bounds.x0));
+          const k1 = Math.min(N - 1, Math.ceil(bounds.x1));
+          const stride = Math.max(1, Math.floor((k1 - k0 + 1) / 4000));
+          for (let s = 0; s < SERIES; s++) {
+            const col = ys[s];
+            const pts = [];
+            for (let k = k0; k <= k1; k += stride) pts.push(`${xs[k]},${Math.round(col[k] * 100) / 100}`);
+            sink.raw(`<polyline points="${pts.join(' ')}" fill="none" stroke="${COLORS[s]}" stroke-width="1.5"/>`);
+          }
+          return true;
+        },
+
+        documentBounds(out) {
+          out[0] = 0;
+          out[1] = 0;
+          out[2] = N - 1;
+          out[3] = Y_MAX;
+          return true;
+        },
+
+        serializeDocument() {
+          return { kind: 'metrics-timeseries', series: SERIES, points: N, yMax: Y_MAX };
+        },
+
+        /** 命中即物化：给引擎一个真组件（小方块），选中 / 拖动都走引擎既有链路 */
+        materialize(i) {
+          const s = (i / N) | 0;
+          const k = i - s * N;
+          // 标记按**屏幕像素**定尺寸（文档单位随缩放变），否则缩小时它会小到无法命中
+          const pxPerUnitX = plot.width / (view.x1 - view.x0);
+          const pxPerUnitY = plot.height / docHeight;
+          const w = 9 / pxPerUnitX;
+          const h = 9 / pxPerUnitY;
+          return new ICERect({
+            left: xs[k] - w / 2,
+            top: ys[s][k] - h / 2,
+            width: w,
+            height: h,
+            // 数据点只该被"拖"，不该出现缩放/旋转手柄（否则 16px 的手柄会盖住 9px 的标记）
+            transformable: false,
+            style: { fillStyle: COLORS[s], strokeStyle: '#ffffff', lineWidth: 1 },
+          });
+        },
+      };
+
+      /* ---------------------------------------------------------------- ICE + 虚拟层 */
+      const ice = new ICE().init('chart');
+      const layer = new ICEVirtualLayer({
+        left: plot.left,
+        top: plot.top,
+        width: N - 1,
+        height: Y_MAX,
+        // 原点放左上角：局部坐标 (x, y) → 世界 = (left, top) + scale · (x, y)，映射一眼可算
+        origin: 'top-left',
+        childSource: source,
+      });
+      ice.addChild(layer);
+
+      /** 可见的文档 x 区间（缩放 / 平移就是改它） */
+      const docHeight = Y_MAX;
+      const view = { x0: 0, x1: N - 1 };
+
+      const clampView = () => {
+        const span = Math.max(4, Math.min(N - 1, view.x1 - view.x0));
+        view.x0 = Math.max(0, Math.min(N - 1 - span, view.x0));
+        view.x1 = view.x0 + span;
+      };
+
+      const applyView = () => {
+        clampView();
+        const sx = plot.width / (view.x1 - view.x0);
+        const sy = plot.height / docHeight;
+        layer.setState({
+          // x：文档 view.x0 → 绘图区左边界；y：文档 0 → 绘图区底边（canvas 的 y 向下，所以 scale 取负）
+          left: plot.left - sx * view.x0,
+          top: plot.top + plot.height,
+          transform: { skew: [0, 0], rotate: 0, scale: [sx, -sy] },
+        });
+        source.toleranceY = 6 * (docHeight / plot.height); // 6 屏幕像素 → 局部 y 单位
+        drawOverlay();
+        requestAnimationFrame(updateStats);
+      };
+
+      /* ---------------------------------------------------------------- 覆盖层：坐标轴 / 十字线 */
+      const overlay = document.getElementById('overlay');
+      const octx = overlay.getContext('2d');
+      const tip = document.getElementById('tip');
+      let hover = null; // { k, s, value, sx, sy }
+
+      const xToPx = (x) => plot.left + ((x - view.x0) / (view.x1 - view.x0)) * plot.width;
+      const yToPx = (y) => plot.top + plot.height - (y / docHeight) * plot.height;
+
+      function drawOverlay() {
+        octx.clearRect(0, 0, overlay.width, overlay.height);
+        octx.font = '11px -apple-system, "PingFang SC", sans-serif';
+        octx.strokeStyle = '#e2e8f0';
+        octx.fillStyle = '#64748b';
+        octx.lineWidth = 1;
+        // y 网格 + 刻度
+        for (let v = 0; v <= 100; v += 20) {
+          const py = Math.round(yToPx(v)) + 0.5;
+          octx.beginPath();
+          octx.moveTo(plot.left, py);
+          octx.lineTo(plot.left + plot.width, py);
+          octx.stroke();
+          octx.fillText(String(v), 16, py + 4);
+        }
+        // x 刻度：按可见跨度取整
+        const span = view.x1 - view.x0;
+        // 目标：刻度间距 ~90px；步长取 1 / 2 / 5 × 10^k（避免 10k 一格挤成一团）
+        const raw = span / (plot.width / 90);
+        const mag = Math.pow(10, Math.floor(Math.log10(Math.max(1, raw))));
+        const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw) || mag * 10;
+        const first = Math.ceil(view.x0 / step) * step;
+        for (let x = first; x <= view.x1; x += step) {
+          const px = Math.round(xToPx(x)) + 0.5;
+          octx.strokeStyle = '#eef2f7';
+          octx.beginPath();
+          octx.moveTo(px, plot.top);
+          octx.lineTo(px, plot.top + plot.height);
+          octx.stroke();
+          octx.fillStyle = '#64748b';
+          octx.fillText(formatTick(x), px - 12, plot.top + plot.height + 16);
+        }
+        // 十字线
+        if (hover) {
+          octx.strokeStyle = '#94a3b8';
+          octx.setLineDash([4, 3]);
+          octx.beginPath();
+          octx.moveTo(hover.sx, plot.top);
+          octx.lineTo(hover.sx, plot.top + plot.height);
+          octx.stroke();
+          octx.setLineDash([]);
+          for (let s = 0; s < SERIES; s++) {
+            octx.fillStyle = COLORS[s];
+            octx.beginPath();
+            octx.arc(xToPx(hover.k), yToPx(ys[s][hover.k]), 3.2, 0, Math.PI * 2);
+            octx.fill();
+          }
+        }
+      }
+
+      const formatTick = (x) => {
+        const v = Math.round(x);
+        return v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e4 ? `${Math.round(v / 1e3)}k` : String(v);
+      };
+
+      function updateStats() {
+        const span = Math.max(0, Math.ceil(view.x1) - Math.floor(view.x0) + 1);
+        const visibleItems = span * SERIES;
+        const materialized = materializedIndices ? materializedIndices(layer).length : 0;
+        document.getElementById('stats').textContent =
+          `文档 ${N.toLocaleString()} 点 × ${SERIES} 系列 = ${source.count.toLocaleString()} 项 ｜ 建列存 ${buildMs.toFixed(0)}ms ｜ ` +
+          `本帧落墨 ${source.stats.painted.toLocaleString()} 点（${source.stats.lastPaintMs}ms）｜ 窗口内 ${visibleItems.toLocaleString()} 项 ｜ 物化 ${materialized} 个`;
+      }
+
+      /* ---------------------------------------------------------------- 交互 */
+      const canvas = document.getElementById('chart');
+      const localFromEvent = (evt) => {
+        const rect = canvas.getBoundingClientRect();
+        const px = evt.clientX - rect.left;
+        const py = evt.clientY - rect.top;
+        const x = view.x0 + ((px - plot.left) / plot.width) * (view.x1 - view.x0);
+        const y = ((py - plot.top) / plot.height) * docHeight;
+        return { px, py, x, y };
+      };
+
+      canvas.addEventListener(
+        'wheel',
+        (evt) => {
+          evt.preventDefault();
+          const { px, x } = localFromEvent(evt);
+          const f = Math.exp(-evt.deltaY * 0.0015);
+          const span = view.x1 - view.x0;
+          const next = Math.max(4, Math.min(N - 1, span / f));
+          const ratio = (px - plot.left) / plot.width;
+          view.x0 = x - ratio * next;
+          view.x1 = view.x0 + next;
+          applyView();
+        },
+        { passive: false }
+      );
+
+      let dragging = null;
+      canvas.addEventListener('mousedown', (evt) => {
+        // 落在数据点上就别平移（那个点已经被引擎物化成真组件，拖动应该拖它）
+        const { x, y } = localFromEvent(evt);
+        if (source.hitTest(x, y) >= 0) return;
+        dragging = { px: evt.clientX, x0: view.x0, x1: view.x1 };
+      });
+      window.addEventListener('mousemove', (evt) => {
+        if (dragging) {
+          const rect = canvas.getBoundingClientRect();
+          const dx = evt.clientX - dragging.px;
+          const span = dragging.x1 - dragging.x0;
+          const shift = (dx / plot.width) * span;
+          view.x0 = dragging.x0 - shift;
+          view.x1 = dragging.x1 - shift;
+          applyView();
+          return;
+        }
+        const rect = canvas.getBoundingClientRect();
+        if (evt.clientX < rect.left || evt.clientX > rect.right || evt.clientY < rect.top || evt.clientY > rect.bottom) return;
+        const { px, py, x, y } = localFromEvent(evt);
+        if (py < plot.top - 4 || py > plot.top + plot.height + 4) return;
+        const k = Math.round(x);
+        if (k < 0 || k >= N) {
+          hover = null;
+          tip.style.display = 'none';
+          drawOverlay();
+          return;
+        }
+        let bestS = -1;
+        let bestD = Infinity;
+        for (let s = 0; s < SERIES; s++) {
+          const d = Math.abs(ys[s][k] - y);
+          if (d < bestD) {
+            bestD = d;
+            bestS = s;
+          }
+        }
+        if (bestD > 12 * (docHeight / plot.height)) {
+          hover = null;
+          tip.style.display = 'none';
+        } else {
+          hover = { k, s: bestS, sx: px, sy: py };
+          tip.style.display = 'block';
+          tip.textContent = `${NAMES[bestS]} @ ${k.toLocaleString()} = ${ys[bestS][k].toFixed(1)}`;
+          tip.style.left = `${Math.min(px + 12, plot.left + plot.width - 150)}px`;
+          tip.style.top = `${Math.max(py - 34, 4)}px`;
+        }
+        drawOverlay();
+      });
+      window.addEventListener('mouseup', () => {
+        dragging = null;
+      });
+
+      applyView();
+      window.__page = {
+        ice,
+        layer,
+        source,
+        view,
+        N,
+        SERIES,
+        /** 文档占的字节数（列存 = typed array 的后备存储，不进 JS 堆，必须单独报） */
+        docBytes: xs.byteLength + ys.reduce((sum, col) => sum + col.byteLength, 0),
+      };
+      window.__ready = () => true;
+      window.__exportSvg = () => exportSvg(layer, { area: 'content' });
+      /** 探针用：直接设置可见区间（例如放大到 2000 点） */
+      window.__setView = (x0, x1) => {
+        view.x0 = x0;
+        view.x1 = x1;
+        applyView();
+      };
+    </script>
+  </body>
+</html>

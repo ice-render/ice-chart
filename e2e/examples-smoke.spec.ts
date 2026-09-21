@@ -42,6 +42,16 @@ function collectPages(dir: string, rel = ''): string[] {
 
 const pages = collectPages(path.join(ROOT, 'examples'));
 
+/**
+ * **刻意不加载图表库**的页面（引擎级原型）。
+ *
+ * `large-data-virtual.html` 是「大数据量」那条路的对照实验：同样形状的数据，但文档放在
+ * `Float64Array` 列存里、交给引擎的虚拟子源（窗口批量落墨 + 命中即物化），
+ * 它**不经过 ice-chart**，所以 `window.ICEChart` 缺失是设计如此 —— 仍然要校验引擎 UMD 加载、
+ * 画布有输出、零报错。
+ */
+const ENGINE_ONLY_PAGES = new Set(['large-data-virtual.html']);
+
 test.beforeAll(() => {
   const vendor = path.join(ROOT, 'examples', 'vendor', 'ice-chart.umd.js');
   expect(fs.existsSync(vendor), '缺少 examples/vendor —— 先跑 `npm run examples:prepare`').toBe(true);
@@ -102,7 +112,9 @@ test.describe('examples 冒烟', () => {
       });
 
       expect(stats.hasEngine, `${rel}：引擎 UMD 没加载（window.ICE 缺失）`).toBe(true);
-      expect(stats.hasLib, `${rel}：图表库 UMD 没加载（window.ICEChart 缺失）`).toBe(true);
+      if (!ENGINE_ONLY_PAGES.has(rel)) {
+        expect(stats.hasLib, `${rel}：图表库 UMD 没加载（window.ICEChart 缺失）`).toBe(true);
+      }
       expect(stats.canvases, `${rel}：页面上没有 canvas`).toBeGreaterThan(0);
       expect(
         stats.worst,
