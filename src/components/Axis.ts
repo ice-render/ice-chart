@@ -85,13 +85,20 @@ export class Axis extends ChartComponent {
     // 79.5px 宽的标签按 20.7px 的间隔画出去，末端糊成一条色带（那份代码还有个
     // `Math.max(1, slot)` 的下限：间距 0.24px 时它按 1px 算，于是步长从 380 根变成 88 根）。
     const marks: AxisTickMark[] = [];
+    const thinned = layoutLabels.length === ticks.length;
     for (let i = 0; i < ticks.length; i++) {
+      /**
+       * **抽稀掉的刻度根本不进表**（2026-09-22）：`scale.map()` 在类目轴上是线性查类目、
+       * `formatTick()` 还要格式化一遍文本 —— 逐颗都算的话，10 万个类目就是每帧 O(n²)：
+       * 实测 `axisX` 一次渲染 3.7s（同帧的 K 线组件只要 15ms）。
+       * 画不出来的刻度既不需要位置、也不需要标签文本（网格线只看抽稀后的那批 `xTicks`）。
+       */
+      if (thinned && layoutLabels[i] === '') continue;
       const mapped = scale.map(ticks[i]);
       const pos = this.orientation === 'x' ? plot.x + mapped : plot.y + mapped;
       if (!isFinite(pos)) continue;
       const label = formatTick(ticks[i], scale, i, option.formatter) || '';
-      const kept = layoutLabels.length === ticks.length ? layoutLabels[i] !== '' : true;
-      marks.push({ key: String(ticks[i]), pos, label, drawn: !!label && kept });
+      marks.push({ key: String(ticks[i]), pos, label, drawn: !!label });
     }
     return marks;
   }
