@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 大数据量（列存虚拟化）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>大数据量：列存（虚拟）系列</h1>
+    <p class="lead">
+      100 万个点直接给 <code>Float64Array</code> 两条列（既不建 100 万个小数组、也不建 100 万个数据点对象）。
+      图表只保留 x / y 两列，像素与命中都按需现算 —— 散点与折线共用同一套列，
+      平移 / 缩放 / 悬停都不掉帧，堆占用从 125MB 量级降到 2.5MB 量级。
+      代价写在 <code>virtual</code> 的文档里：不进 option 快照（快照只有列，没有数据）、
+      提示框里没有原始数据项。
+    </p>
+    <div class="card"><canvas id="chart" width="960" height="420"></canvas></div>
+    <div class="card"><canvas id="chart-line" width="960" height="300"></canvas></div>
+    <div class="card"><canvas id="chart-engine" width="960" height="300"></canvas></div>
+    <div class="card">
+      <div class="tips" id="engine-stats">等待渲染…</div>
+      <div class="tips">
+        这一张**没有用图表的系列组件**：同一份列通过 <code>chart.createVirtualSource('s')</code>
+        交给引擎的 <code>ICEVirtualLayer</code> —— 窗口裁剪 / 批量落墨 / 命中都由引擎承担，
+        点一下就由引擎物化出一个真图元（可拖动）。
+      </div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card">
+      <div class="tips" id="stats">等待渲染…</div>
+      <div class="log" id="log">事件日志：</div>
+    </div>
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const COUNT = 1000000;
+      // 列式输入：x / y 两条 Float64Array（两张图共用同一份列，图表直接采用，不再复制）
+      const x = new Float64Array(COUNT);
+      const y = new Float64Array(COUNT);
+      for (let i = 0; i < COUNT; i++) {
+        x[i] = i;
+        y[i] = 50 + Math.sin(i / 3000) * 20 + Math.sin(i / 37) * 4 + (i % 50000 === 0 ? 22 : 0);
+      }
+
+      const t0 = performance.now();
+      const chart = ICEChart.createChart('chart', {
+        title: { text: '散点（100 万点 × 1 系列）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        grid: { show: true, y: true, x: false },
+        interaction: {
+          hover: { enabled: true },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+        },
+        animation: { enabled: false },
+        xAxis: { type: 'linear', name: '时间轴（秒）' },
+        yAxis: { name: '%' },
+        series: [{ id: 's', type: 'scatter', name: '单点', virtual: true, data: { x, y }, symbolSize: 3 }],
+      });
+      // 同一套列的折线：折线按**像素列**压缩成「首 / 最低 / 最高 / 末」，
+      // 尖峰不会被采样吃掉（与散点共用虚拟内核）
+      const lineChart = ICEChart.createChart('chart-line', {
+        title: { text: '折线（同一套列，按像素列保留极值）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        grid: { show: true, y: true, x: false },
+        interaction: {
+          hover: { enabled: true },
+          zoom: { enabled: true, axes: 'x', wheel: true },
+          pan: { enabled: true, axes: 'x' },
+        },
+        animation: { enabled: false },
+        xAxis: { type: 'linear', name: '时间轴（秒）' },
+        yAxis: { name: '%' },
+        series: [{ id: 'l', type: 'line', name: '折线', virtual: true, data: { x, y }, lineWidth: 1 }],
+      });
+      const buildMs = performance.now() - t0;
+
+      /**
+       * ---- 第三张：同一份列交给引擎的虚拟层
+       *
+       * 这张画布只有一个裸引擎 + 一个 ICEVirtualLayer，**没有任何系列组件**：
+       * childSource 直接来自散点图的列（`chart.createVirtualSource('s')`，不复制数据）。
+       * 命中下标 → 引擎按默认策略「命中即物化」造出真图元（可拖动）。
+       */
+      const engineLayer = (() => {
+        const ns = window.ICE; // UMD 把引擎暴露成命名空间：ns.ICE / ns.ICEVirtualLayer / ns.ICEStar…
+        const host = new ns.ICE().init('chart-engine');
+        const plot = chart.layout.plot;
+        const source = chart.createVirtualSource('s');
+        const layer = new ns.ICEVirtualLayer({
+          left: plot.x,
+          top: plot.y,
+          width: plot.width,
+          height: plot.height,
+          childSource: source,
+        });
+        host.addChild(layer);
+        return { host, layer, source, plot };
+      })();
+      const engineStats = document.getElementById('engine-stats');
+      const updateEngineStats = () => {
+        const materialized = engineLayer.layer.childNodes ? engineLayer.layer.childNodes.length : 0;
+        engineStats.textContent =
+          `引擎虚拟层：文档 ${engineLayer.source.count.toLocaleString()} 项 ｜ 物化子项 ${materialized}` +
+          ` ｜ 源版本 ${engineLayer.source.version}`;
+      };
+      setTimeout(updateEngineStats, 500);
+      setInterval(updateEngineStats, 800);
+
+      const stats = document.getElementById('stats');
+      const updateStats = () => {
+        const component = chart.seriesComponents[0];
+        const lineComponent = lineChart.seriesComponents[0];
+        const memory = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null;
+        stats.textContent =
+          `构建耗时 ${buildMs.toFixed(0)}ms（两张图）` +
+          ` ｜ 散点：${component.series.pointCount.toLocaleString()} 点 / 数据点对象 ${component.series.points.length} / 像素缓存 ${component.pixels.length}` +
+          ` ｜ 折线：${lineComponent.series.pointCount.toLocaleString()} 点 / 绘制 ${lineComponent.revealedPointCount()} 点` +
+          (memory === null ? '' : ` ｜ 堆 ${memory.toFixed(1)}MB`);
+      };
+      setTimeout(updateStats, 300);
+      setInterval(updateStats, 1000);
+
+      const log = document.getElementById('log');
+      let last = 0;
+      chart.on('item:hover', (p) => {
+        const now = performance.now();
+        if (now - last < 120) return; // 日志本身别成为瓶颈
+        last = now;
+        const memory = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null;
+        log.textContent =
+          `${new Date().toLocaleTimeString()}  ${p.seriesName} @ ${p.xValue} = ${Number(p.value).toFixed(1)}` +
+          (memory === null ? '' : `  ｜ 堆 ${memory.toFixed(1)}MB`) +
+          '\n' +
+          log.textContent;
+      });
+      window.__chart = chart;
+      window.__charts = { scatter: chart, line: lineChart };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

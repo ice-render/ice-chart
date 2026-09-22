@@ -10,10 +10,15 @@
     <p class="lead">
       数据项是 <code>[x类目, y类目, 数值]</code>，<b>y 轴自动变成类目轴</b>，颜色按数值线性插值；
       命中判定按单元格矩形，提示框给出类目对与数值。
+      下面第二张是<b>列存（虚拟）稠密矩阵</b>：<code>virtual: true</code> +
+      <code>data: { xCategories, yCategories, values }</code>（值矩阵是 <code>Float64Array</code>），
+      100 万格只占 8MB，命中是查表 + 下标运算（O(1)），亚像素时按屏幕像素块聚合绘制。
     </p>
     <div class="row">
       <div class="card"><canvas id="heatmap" width="760" height="420"></canvas></div>
     </div>
+    <div class="card"><canvas id="heatmap-virtual" width="760" height="420"></canvas></div>
+    <div class="card"><div class="tips" id="stats">等待渲染…</div></div>
     <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
     <script src="./vendor/ice-render.umd.js"></script>
@@ -56,7 +61,58 @@
         log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
       };
       heatmap.on('item:hover', (p) => write(`热力图 ${p.data[0]} · ${p.data[1]} = ${p.data[2]}`));
-      window.__charts = { heatmap };
+
+      // ---- 列存（虚拟）稠密矩阵：1000 × 1000 = 100 万格，值矩阵直接给 Float64Array
+      const COLS = 1000;
+      const ROWS = 1000;
+      const xCategories = Array.from({ length: COLS }, (_, i) => `t${i}`);
+      const yCategories = Array.from({ length: ROWS }, (_, i) => `f${i}`);
+      const values = new Float64Array(COLS * ROWS);
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const v = Math.sin(c / 90) * Math.cos(r / 70) + Math.sin((c + r) / 220) * 0.6;
+          values[r * COLS + c] = Math.round((v + 1.6) * 30);
+        }
+      }
+      const t0 = performance.now();
+      const bigHeatmap = ICEChart.createChart('heatmap-virtual', {
+        title: { text: '列存矩阵热力图（1000 × 1000 = 100 万格）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'category', name: '通道' },
+        yAxis: { type: 'category', name: '频率' },
+        animation: { enabled: false },
+        series: [
+          {
+            id: 'big',
+            type: 'heatmap',
+            name: '矩阵',
+            virtual: true,
+            data: { xCategories, yCategories, values },
+            color: '#B91C1C',
+            heatmap: { minColor: '#FFF7ED', maxColor: '#B91C1C' },
+          },
+        ],
+      });
+      const buildMs = performance.now() - t0;
+      bigHeatmap.on('item:hover', (p) => {
+        const row = Math.floor(p.dataIndex / COLS);
+        const col = p.dataIndex % COLS;
+        write(`列存矩阵 [${col}, ${row}] = ${Number(p.value).toFixed(1)}（第 ${p.dataIndex.toLocaleString()} 格）`);
+      });
+
+      const stats = document.getElementById('stats');
+      const updateStats = () => {
+        const component = bigHeatmap.seriesComponents[0];
+        stats.textContent =
+          `构建 ${buildMs.toFixed(0)}ms ｜ 格子 ${component.series.pointCount.toLocaleString()}` +
+          ` ｜ 数据点对象 ${component.series.points.length} ｜ 像素缓存 ${component.pixels.length}` +
+          ` ｜ 命中：查表 + 下标运算（O(1)）`;
+      };
+      setTimeout(updateStats, 300);
+
+      window.__charts = { heatmap, bigHeatmap };
       mountSnapshotPanel();
     </script>
   </body>

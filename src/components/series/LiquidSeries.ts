@@ -55,7 +55,7 @@ export class LiquidSeries extends SeriesBase {
   /** 目标值 → 水位比例（0~1）。 */
   private targetRatio(): number {
     const { min, max } = this.range();
-    const value = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    const value = this.series.pointCount ? Number(this.series.pointAt(0).y) || 0 : 0;
     return Math.max(0, Math.min(1, (value - min) / (max - min)));
   }
 
@@ -108,7 +108,7 @@ export class LiquidSeries extends SeriesBase {
       this.pixels = new Float64Array(0);
       return;
     }
-    const value = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    const value = this.series.pointCount ? Number(this.series.pointAt(0).y) || 0 : 0;
     const key = this.buildSeriesKey([coord.polar.radius, coord.options.min, coord.options.max, value]);
     if (key === this.liquidKey && this.pixels.length === 2) return;
     this.liquidKey = key;
@@ -123,7 +123,7 @@ export class LiquidSeries extends SeriesBase {
   /** 整个液位球都是命中区（只有一个数值，点哪里都命中它）。 */
   public hitTestIndex(localX: number, localY: number): number {
     const coord = this.liquid;
-    if (!coord || !this.series.points.length) return -1;
+    if (!coord || !this.series.pointCount) return -1;
     const [cx, cy] = this.localCenter();
     return Math.hypot(localX - cx, localY - cy) <= coord.polar.radius + 8 ? 0 : -1;
   }
@@ -206,13 +206,13 @@ export class LiquidSeries extends SeriesBase {
     const detail = options.detail || {};
     if (detail.show !== false) {
       const { min } = this.range();
-      const raw = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+      const raw = this.series.pointCount ? Number(this.series.pointAt(0).y) || 0 : 0;
       const shown = min + (raw - min) * Math.max(0, Math.min(1, this.progress()));
       const text =
         typeof detail.formatter === 'function'
           ? detail.formatter(shown)
           : `${Number(shown.toPrecision(4))}${options.unit === undefined ? '%' : options.unit}`;
-      const name = this.series.points.length ? this.series.points[0].name : undefined;
+      const name = this.series.pointCount ? this.series.pointAt(0).name : undefined;
       if (name && options.title !== false) {
         this.setFont(theme.fontSize, theme.fontFamily);
         ctx.fillStyle = theme.subTextColor;

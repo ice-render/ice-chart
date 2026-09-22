@@ -372,7 +372,8 @@ function layoutLegend(norm: NormalizedOption, ctx: any, canvas: Rect, topOffset:
     // 饼图 / 漏斗图的图例项是「数据项（扇区 / 阶段）」而不是「系列」
     for (const s of norm.series) {
       if (s.type !== 'pie' && s.type !== 'funnel') continue;
-      for (const point of s.points) {
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const point = s.pointAt(i);
         items.push({
           seriesId: s.id,
           seriesIndex: s.index,

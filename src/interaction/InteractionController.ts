@@ -255,7 +255,7 @@ export class InteractionController {
       const index = current.item.point.index;
       const sliceHidden = (series.type === 'pie' || series.type === 'funnel') && norm.hiddenSlices[`${series.id}#${index}`];
       // 系列/扇区被隐藏，或数据被替换导致下标越界 → 直接清理，不要悄悄跳到别的系列
-      if (series.hidden || sliceHidden || !series.points[index]) {
+      if (series.hidden || sliceHidden || !series.pointAt(index)) {
         this.setHover(null);
         return;
       }
@@ -444,7 +444,8 @@ export class InteractionController {
       const series = anchorItem.series;
       const point = anchorItem.point;
       let total = 0;
-      for (const p of series.points) {
+      for (let i = 0; i < series.pointCount; i++) {
+        const p = series.pointAt(i);
         if (this.host.norm.hiddenSlices[`${series.id}#${p.index}`]) continue;
         total += p.y || 0;
       }
@@ -466,7 +467,8 @@ export class InteractionController {
       const series = anchorItem.series;
       const point = anchorItem.point;
       let total = 0;
-      for (const p of series.points) {
+      for (let i = 0; i < series.pointCount; i++) {
+        const p = series.pointAt(i);
         if (this.host.norm.hiddenSlices[`${series.id}#${p.index}`]) continue;
         total += p.y || 0;
       }
@@ -537,13 +539,18 @@ export class InteractionController {
     }
     if (anchorItem && anchorItem.series.type === 'radar') {
       const series = anchorItem.series;
-      return {
-        title: series.name,
-        rows: series.points.map((point) => ({
+      const rows: Array<{ name: string; value: string; color: string }> = [];
+      for (let i = 0; i < series.pointCount; i++) {
+        const point = series.pointAt(i);
+        rows.push({
           name: point.name || `${point.index + 1}`,
           value: point.y === null ? '-' : String(point.y),
           color: point.index === anchorItem.point.index ? series.color : this.host.norm.theme.subTextColor,
-        })),
+        });
+      }
+      return {
+        title: series.name,
+        rows,
       };
     }
     // 箱线图：五数概括
@@ -582,12 +589,14 @@ export class InteractionController {
     if (anchorItem && anchorItem.series.type === 'treemap') {
       const series = anchorItem.series;
       const point = anchorItem.point;
-      const rootTotal = series.points.find((p) => p.index === 0) ? series.points[0].y || 0 : 0;
+      const root = series.pointAt(0);
+      const rootTotal = root && root.index === 0 ? root.y || 0 : 0;
       void rootTotal;
       const value = point.y || 0;
       // 占比用「同类目下的总量」不好界定，这里统一按根节点总量算
       let total = 0;
-      for (const p of series.points) {
+      for (let i = 0; i < series.pointCount; i++) {
+        const p = series.pointAt(i);
         const raw: any = p.raw;
         if (raw && Array.isArray(raw.children) && raw.children.length) continue;
         total += p.y || 0;
@@ -1301,7 +1310,7 @@ export class InteractionController {
       case 'ArrowRight':
       case 'ArrowLeft': {
         const series = visible[seriesIndex];
-        if (!series.points.length) break;
+        if (!series.pointCount) break;
         // 只在「当前可见窗口内」的数据点之间移动：缩放之后不该跳到窗外去
         const nextIndex = this.stepVisibleIndex(series, key === 'ArrowRight' ? 1 : -1);
         if (nextIndex >= 0) {
@@ -1316,8 +1325,8 @@ export class InteractionController {
       case 'ArrowDown': {
         const nextIndex = clamp(seriesIndex + (key === 'ArrowDown' ? 1 : -1), 0, visible.length - 1);
         const series = visible[nextIndex];
-        if (!series.points.length) break;
-        const index = clamp(this.keyboardIndex, 0, series.points.length - 1);
+        if (!series.pointCount) break;
+        const index = clamp(this.keyboardIndex, 0, series.pointCount - 1);
         const item = this.resolver.buildActiveItem(series, index);
         if (item) this.setHover({ kind: 'item', item });
         handled = true;
@@ -1369,7 +1378,7 @@ export class InteractionController {
   }
 
   private stepVisibleIndex(series: any, direction: number): number {
-    const total = series.points.length;
+    const total = series.pointCount;
     if (!total) return -1;
     let index = clamp(this.keyboardIndex, 0, total - 1);
     for (let guard = 0; guard < total; guard++) {

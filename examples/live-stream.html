@@ -65,6 +65,7 @@
     </div>
 
     <div class="card"><canvas id="stream" width="960" height="380"></canvas></div>
+    <div class="card"><canvas id="stream-virtual" width="960" height="320"></canvas></div>
 
     <div class="row">
       <div class="card"><canvas id="gauge" width="420" height="300"></canvas></div>
@@ -134,6 +135,42 @@
         series: [
           { id: 'cpu', type: 'area', name: 'CPU', data: [], color: '#0d6efd', areaOpacity: 0.18, lineWidth: 2, smooth: 0.25 },
           { id: 'mem', type: 'line', name: '内存', data: [], color: '#198754', lineWidth: 2, smooth: 0.25 },
+        ],
+      });
+
+      /**
+       * ---- 列存（虚拟）实时流：环形缓冲
+       *
+       * 同一套 appendData，但数据只以「环形缓冲（滑动窗口）」的形式常驻：
+       * 每次追加是「写 1 个槽位 + 挪一次起点」，不 concat、不重跑数据链路，
+       * 也不建数据点对象与像素缓存。窗口开多大，每 tick 的成本都是平的。
+       */
+      const VWINDOW = 20000;
+      const vx = new Float64Array(VWINDOW);
+      const vy = new Float64Array(VWINDOW);
+      for (let i = 0; i < VWINDOW; i++) {
+        // 种子是「当前时刻之前的 2 万根」：x 取负数，实时 tick（0,1,2…）接在后面
+        vx[i] = i - VWINDOW;
+        vy[i] = 50 + Math.sin(i / 90) * 18 + Math.sin(i / 13) * 3;
+      }
+      const streamVirtual = ICEChart.createChart('stream-virtual', {
+        title: { text: '列存实时流（窗口 2 万点）', subtext: '环形缓冲 · 每 tick 成本与窗口大小无关' },
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        crosshair: { show: true, axis: 'x', showAxisLabel: true },
+        xAxis: { type: 'value', name: 't' },
+        yAxis: { name: '%', min: 0, max: 100 },
+        animation: { enabled: false },
+        series: [
+          {
+            id: 'v',
+            type: 'line',
+            name: '负载',
+            virtual: true,
+            data: { x: vx, y: vy },
+            color: '#7c3aed',
+            lineWidth: 1,
+          },
         ],
       });
 
@@ -214,6 +251,8 @@
         stream.appendData('cpu', [[t, Number(state.cpu.toFixed(2))]], { maxPoints: WINDOW });
         stream.appendData('mem', [[t, Number(state.mem.toFixed(2))]], { maxPoints: WINDOW });
         state.pushed += 2;
+        // 列存那路：同一个 API，窗口 2 万点，成本仍然是平的
+        streamVirtual.appendData('v', [[t, Number(state.cpu.toFixed(2))]], { maxPoints: VWINDOW });
 
         // 峰值聚合：最后一根随数据实时跳动（用 CPU 单指标，波动比三项平均更直观）
         const load = state.cpu;
@@ -301,7 +340,7 @@
       stream.on('item:hover', (p) => write(`负载 hover  t=${Number(p.xValue).toFixed(0)}  ${p.seriesName}=${Number(p.value).toFixed(1)}%`));
 
       window.__chart = stream;
-      window.__charts = { stream, gauge, heat, bars: barChart };
+      window.__charts = { stream, streamVirtual, gauge, heat, bars: barChart };
       window.__liveState = state;
       mountSnapshotPanel();
       write('数据流已启动');

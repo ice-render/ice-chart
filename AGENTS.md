@@ -39,6 +39,10 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
    遮挡关系、zIndex、`display:false`、`interactive:false` 全部由引擎统一保证；重写一套必然与渲染漂移。
 2. **像素缓存唯一**：`rebuildPixels()` 是点集像素的唯一来源，渲染与命中都消费它。
    任何「渲染时另算一遍坐标」的写法都会让「看得见的点」与「点得到的点」分叉。
+   **例外只有虚拟（列存）系列**（`virtual: true` 的 scatter，2026-09-21）：它不物化像素缓存
+   （100 万点的 `pixels` + `effective` + `itemProgress` 就是 40MB，省下的内存会被缓存吃回去），
+   渲染与命中都从**列 + 同一份比例尺**现算 —— 同一处公式、同一份数据，不存在两套坐标；
+   换来的代价见「虚拟（列存）系列」一节。除它之外，一律照旧走像素缓存。
 3. **组件的 `doRender()` 必须自己 `ctx.beginPath()`**。引擎的脏矩形局部重绘会在 ctx 上留下
    `clip` 用的 rect 路径，直接 `ctx.stroke()` 会把那条残留路径一起描出来 ——
    表现为画布边缘莫名多出一圈与最后绘制的系列同色的线。`ICEPath` 系组件因为有独立 Path2D 才不需要担心。
@@ -297,6 +301,58 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   而大屏设计宽是 1572 —— 最右侧的面板在视口外，鼠标移过去不产生事件，
   探针会偶发报「hoverIndex: null」，看起来像图表坏了，其实是探针够不着。
 
+## 虚拟（列存）系列（改数据点存储 / 命中路径前必读）
+
+`series.virtual: true`（支持 `scatter` / `line` / `area` / `heatmap`）是「100 万点也要能拖」的那条路：
+不建「每点一个 `DataPoint`」，只保留列。两类形态：
+
+- **数值列**（scatter / line / area）：`SeriesColumns`（x / y（/ size）几条 `Float64Array`）；
+- **稠密矩阵**（heatmap）：`SeriesGrid`（行列类目 + 行优先值矩阵，NaN = 空格）。
+  热力图的收益有一半来自「承认它是矩阵」：**命中退化成类目查表 + 下标运算（O(1)）**，
+  不再是逐格比矩形；亚像素时按**屏幕像素块聚合**（块内取最大值，热点不被抹平），
+  聚合结果按几何键缓存。稀疏数据别开 virtual（归一化按密度报错）。
+
+- **读点只有三个入口**：`pointCount`（数量）、`pointAt(i)`（按需合成，断点仍是 `null`）、
+  标量访问器 `xValueAt / yValueAt / baseAt / topAt / sizeAt`（逐点绘制与插值的循环走这组）。
+  **不许再写 `series.points[...]`**：虚拟系列的 `points` 是空的，直读会静默少画 / 提示框空；
+  访问器闭包捕获的是**建系列时那一个数组**，要改点必须就地改，别给 `points` 重新赋值。
+- **原始 `data` 会被释放**（这是省内存的大头，百万级元组自己就占 40~70MB）：归一化建完列
+  就把 `option.series[i]` 换成不含 data 的副本。列存缓存在 `ICEChart.virtualColumns`
+  （一次 `applyOption` 会归一化两遍，第二遍靠它复用）。
+- **不物化按点缓存**：`pixels` / `effective` / `itemProgress` 光缓存就是 40MB，
+  所以虚拟系列的像素与命中都从「列 + 同一份比例尺」现算。共用内核在 `SeriesBase`
+  （`syncVirtualMeta` / `virtualVisibleWindow` / `virtualPixelAt` / `virtualNearestIndexAtX`），
+  各类型的差异只在「怎么把窗口画出来」：散点是密度抽稀后逐点画，
+  折线 / 面积按像素列分桶保留**首 / 最低 / 最高 / 末**（折线丢极值就是撒谎），
+  热力图走矩阵那条（窗口裁剪 + 像素块聚合）。
+  这是铁律 2 唯一的例外，理由见铁律 2。
+- **冷路径同样不许全量扫**：能问列的就别遍历点。两条已经修过的：
+  ① 交互窗口兜底（`numericXProbe`）原来把全部 x 值去重排序，100 万点每滚一次轮 60ms，
+  现在在单调列上二分；② 无障碍数据表默认封顶 200 行（`A11yTreeOptions.maxTableRows`），
+  超限按等步长抽样并在 caption 里写明（少给内容必须说出来）。
+  新增「看一眼就完」的冷路径时先问一句：这件事需要知道**每一个点**吗？
+- **亿级数据用分块按需加载**（`SeriesChunks`）：`data: { sizes, rangeOf, yDomain, loadChunk }`，
+  只驻留可见窗口覆盖的块（`maxResidentChunks`，LRU）。三条纪律：
+  ① `rangeOf` / `yDomain` **必须声明式**（前者让窗口定位不必先加载，后者让坐标轴不随加载漂移）；
+  ② 窗口覆盖的块远多于驻留预算时**按预算均匀取样**，不能对窗口内每块都发请求
+     （实测：10 亿点全量视图覆盖 1 万块，全请求 = 1 万次加载 / 初始化 22 秒；
+     取样后 3 次 / 3ms —— 与散点折线的密度抽稀同一条思路）；
+  ③ 分块系列的**最近邻不能在全量下标上二分**（未驻留区间的 `xValueAt` 是 undefined，
+     会一路走到头、命中判空）：先用 x 值定位到块，再在驻留块内二分。
+- **列可以交给引擎的虚拟子源**：`chart.createVirtualSource(seriesId)` 返回
+  `VirtualChildSource`（坐标是组件本地 = 绘图区像素），`ICEVirtualLayer` 摆在绘图区上即可；
+  数据**不复制**，窗口裁剪 / 批量落墨 / 命中归引擎，白拿「命中即物化」/ SVG 导出 /
+  对齐参考线。两点注意：`forEachInBox` 是 O(窗口项数)（100 万项全窗约 30ms，按需调用，
+  别每帧全窗扫）；`materialize` 只造组件，挂树由调用方做（引擎定的口径）。
+- **代价要一直保持显式**（不许静默降级）：快照里没有数据 → `restore()` 直接报错；
+  `appendData` 报错（改 `setData`）；数值列系列要数值型 x（类目轴、堆叠一律抛错）、
+  虚拟热力图反而要求类目轴且密度够高（太稀疏报错）。相应的门禁：
+  `tests/option/normalize.test.ts`、`tests/components/virtual-*.test.ts`、`tests/chart/virtual-series.test.ts`。
+- 示例页：`examples/large-data-virtual-series.html`（100 万点，散点 + 折线共用一份列）、
+  `examples/heatmap.html`（第二张图是 100 万格矩阵热力图）、
+  `examples/live-stream.html`（第二张图是窗口 2 万点的列存实时流）、
+  `examples/large-data-virtual-series.html` 的第三张图（同一份列喂给引擎虚拟层）。
+
 ## 序列化契约（改持久化相关代码前必读）
 
 - **唯一事实来源是 option 快照**：`{ version, option, view, hidden, hiddenSlices }`。
@@ -399,6 +455,16 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
 - 推送频率就是流畅度：60Hz 推送 = 60fps 滚动。实测成本（2 系列 / 每次各追加 1 点）：
   120 点窗口 **1.6ms/tick**、600 点 4.9ms、1500 点 11ms（成本随窗口近似线性，因为每 tick 都会
   归一化 + 布局 + 重建像素）。监控类示例用 120~300 点窗口最划算。
+- **虚拟（列存）系列的追加走环形缓冲**（`appendData(id, items, { maxPoints: 窗口 })`）：
+  容量就是滑动窗口大小，满了覆盖最老的；每次追加是「写 1 个槽位 + 挪一次起点」，
+  **不 concat、不重建数据点对象、不重建像素**。实测同一个 API：
+  窗口 1500 → 0.10ms/次、2 万 → 0.20ms、**10 万 → 0.40ms**（几乎与窗口无关）；
+  普通路径同口径是 0.30 / 0.80 / **5.80ms**（p95 15.1ms，一帧预算就没了）。
+  两处纪律：① 只有**数值列**系列能流式（热力图是矩阵，追加没有「下一格」这种语义，会报错）；
+  ② 环形缓冲的**物理下标 ≠ 逻辑下标**，一律走 `xValueAt` / `pointAt` 读，
+  不许直读 `ring.x[i]`（绕回之后那就是别的点的值）。
+  数据域每次追加重算一趟（窗口几千点约 0.02ms，10 万点约 0.3ms）——
+  真要做百万级窗口的实时流，该换的是「分块 + 增量域」，而不是在这里加复杂度。
 - `appendData`/`setData` 会**就地改传入的 option**（`series[i].data = ...`），
   测试与调用方要传自己的副本，否则模块级常量会在用例之间互相污染（踩过）。
 - **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。

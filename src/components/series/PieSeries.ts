@@ -68,7 +68,7 @@ export class PieSeries extends SeriesBase {
   /** 扇区几何 + 质心像素（质心供高亮与提示框锚点使用）。 */
   protected rebuildPixels(): void {
     const coord = this.polar;
-    const points = this.series.points;
+    const series = this.series;
     if (!coord) {
       this.pixels = new Float64Array(0);
       this.slices = new Float64Array(0);
@@ -76,7 +76,7 @@ export class PieSeries extends SeriesBase {
     }
     const option = this.series.option;
     const key = [
-      points.length,
+      series.pointCount,
       option.startAngle,
       option.clockwise,
       option.roseType,
@@ -86,12 +86,12 @@ export class PieSeries extends SeriesBase {
       coord.plot.width,
       this.hiddenSlices.join(','),
       this.progress(),
-      points.length ? String(points[0].y) : '',
+      series.pointCount ? String(series.pointAt(0).y) : '',
     ].join('|');
     if (key === this.pieCacheKey) return;
     this.pieCacheKey = key;
 
-    const n = points.length;
+    const n = series.pointCount;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
     if (this.slices.length !== n * 4) this.slices = new Float64Array(n * 4);
     const [cx, cy] = this.localCenter();
@@ -101,7 +101,7 @@ export class PieSeries extends SeriesBase {
     let maxValue = 0;
     for (let i = 0; i < n; i++) {
       if (this.hiddenSlices.indexOf(i) >= 0) continue;
-      const value = points[i].y || 0;
+      const value = series.pointAt(i).y || 0;
       if (value > 0) total += value;
       if (value > maxValue) maxValue = value;
     }
@@ -115,7 +115,7 @@ export class PieSeries extends SeriesBase {
 
     for (let i = 0; i < n; i++) {
       const hidden = this.hiddenSlices.indexOf(i) >= 0;
-      const value = hidden ? 0 : points[i].y || 0;
+      const value = hidden ? 0 : series.pointAt(i).y || 0;
       const sweep = total > 0 ? (value / total) * TAU * (hidden ? 0 : this.itemProgress[i]) : 0;
       const a0 = angle;
       const a1 = angle + dir * sweep;
@@ -199,7 +199,7 @@ export class PieSeries extends SeriesBase {
     const radius = coord.polar.radius;
     if (dist > radius + 4) return -1;
 
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     const angle = Math.atan2(dy, dx);
     for (let i = 0; i < n; i++) {
       const a0 = this.slices[i * 4];
@@ -223,14 +223,14 @@ export class PieSeries extends SeriesBase {
     const [cx, cy] = this.localCenter();
     const unit = this.unit();
     const dir = this.series.option.clockwise === false ? -1 : 1;
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     const labelOption = this.series.option.label;
     const showLabel = !(labelOption && labelOption.show === false) && n > 0 && n <= 16;
     const inside = labelOption && labelOption.position === 'inside';
     let total = 0;
     for (let i = 0; i < n; i++) {
       if (this.hiddenSlices.indexOf(i) >= 0) continue;
-      const value = this.series.points[i].y || 0;
+      const value = this.series.pointAt(i).y || 0;
       if (value > 0) total += value;
     }
 
@@ -242,7 +242,7 @@ export class PieSeries extends SeriesBase {
       const inner = this.slices[i * 4 + 2];
       const outer = this.slices[i * 4 + 3];
       if (Math.abs(a1 - a0) <= 1e-9) continue;
-      const color = this.series.points[i].color || this.series.color;
+      const color = this.series.pointAt(i).color || this.series.color;
       // 悬停反馈：扇形沿中角向外「脱出」一点（经典饼图交互）
       const boost = this.hoverBoost(i, 1);
       const offset = boost > 1 ? 7 * (boost - 1) * this.unit() : 0;
@@ -292,7 +292,7 @@ export class PieSeries extends SeriesBase {
         const outer = this.slices[i * 4 + 3];
         if (Math.abs(a1 - a0) <= 1e-9) continue;
         // 太窄的扇形不画标签，避免文字互相压叠（玫瑰图里小扇区尤其明显）
-        const point = this.series.points[i];
+        const point = this.series.pointAt(i);
         const value = point.y || 0;
         const radius = coord.polar.radius;
         const percent = total > 0 ? (value / total) * 100 : 0;

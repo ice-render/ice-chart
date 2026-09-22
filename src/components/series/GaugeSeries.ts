@@ -52,7 +52,7 @@ export class GaugeSeries extends SeriesBase {
   /** 当前**渲染**的数值（不是源数据）：测试与外观审计断言用。 */
   public renderedValue(): number {
     const { min } = this.range();
-    const target = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    const target = this.series.pointCount ? Number(this.series.pointAt(0).y) || 0 : 0;
     const p = Math.max(0, Math.min(1, this.progress()));
     const from = this.fromValue === null ? min : this.fromValue;
     return from + (target - from) * p;
@@ -96,7 +96,7 @@ export class GaugeSeries extends SeriesBase {
       return;
     }
     const options = coord.options || {};
-    const value = this.series.points.length ? Number(this.series.points[0].y) || 0 : 0;
+    const value = this.series.pointCount ? Number(this.series.pointAt(0).y) || 0 : 0;
     const key = this.buildSeriesKey([coord.polar.radius, options.startAngle, options.endAngle, options.min, options.max, value]);
     if (key === this.gaugeKey && this.pixels.length === 2) return;
     this.gaugeKey = key;
@@ -113,7 +113,7 @@ export class GaugeSeries extends SeriesBase {
   /** 整个表盘都是命中区（只有一个数值，点哪里都命中它）。 */
   public hitTestIndex(localX: number, localY: number): number {
     const coord = this.gauge;
-    if (!coord || !this.series.points.length) return -1;
+    if (!coord || !this.series.pointCount) return -1;
     const [cx, cy] = this.localCenter();
     const distance = Math.hypot(localX - cx, localY - cy);
     return distance <= coord.polar.radius + 12 ? 0 : -1;
@@ -226,7 +226,7 @@ export class GaugeSeries extends SeriesBase {
       ctx.fillText(detailText, cx, cy + radius * (openBottom ? 0.78 : 0.42));
     }
     const title = options.title || {};
-    const point = this.series.points[0];
+    const point = this.series.pointAt(0);
     const name = point && (point.name || point.xValue !== undefined) ? point.name || String(point.xValue) : '';
     if (title.show !== false && name) {
       const fontSize = Number(title.fontSize) || theme.fontSize;

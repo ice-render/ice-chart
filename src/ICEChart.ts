@@ -1,4 +1,4 @@
-import { ICE, ICEGroup, ICE_EVENT_NAME_CONSTS } from 'ice-render';
+import { ICE, ICEGroup, ICEStar, ICE_EVENT_NAME_CONSTS } from 'ice-render';
 import type {
   AnnotationDiagnostic,
   ChartMarkData,
@@ -8,7 +8,11 @@ import type {
   DataItem,
   LegendToggleParams,
 } from './types';
-import type { ChartLayout, InternalSeries, NormalizedOption, Rect } from './internal';
+import { storeDomainOf } from './internal';
+import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns, SeriesGrid } from './internal';
+import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains } from './util/ring';
+import type { SeriesRing } from './util/ring';
+import type { SeriesChunks } from './util/chunks';
 import { normalizeOption, toSerializableOption } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
@@ -86,6 +90,13 @@ export function isChartSnapshot(value: any): boolean {
     !!value.option &&
     ('version' in value || 'view' in value || 'hidden' in value)
   );
+}
+
+/** 追加数据时的取值：`null` / 空串 / 非数字都算「没有值」（不是 0）。 */
+function finiteOrNull(value: any): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return isFinite(num) ? num : null;
 }
 
 /** 把补丁合进快照里的 option：series 按 id/下标逐项合并，其余字段浅覆盖。 */
@@ -199,6 +210,19 @@ export class ICEChart {
    */
   private __offThemeFollow: (() => void) | null = null;
   private a11yMirror = new A11yMirror(this);
+  /**
+   * 虚拟（列存）系列的数据列（key 为系列 id）。
+   *
+   * 虚拟系列归一化后会**释放原始 data**，而一次 applyOption 要归一化两遍
+   * （applyOption 一遍、rebuild 一遍）—— 列存留在这里，第二遍直接复用，
+   * 同时也让「用户换数据」的写法（setData 带新 data）自然覆盖旧列。
+   */
+  private virtualColumns = new Map<
+    string,
+    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing } | { chunks: SeriesChunks }
+  >();
+  /** 虚拟子源的版本号：任何影响「画出来是什么 / 命中什么」的变更都要 +1（引擎据此失效缓存）。 */
+  private __virtualSourceVersion = 1;
   /**
    * 更新动画期间的坐标轴数据域过渡。
    *
@@ -390,13 +414,199 @@ export class ICEChart {
     if (!target) throw new Error(`[ice-chart] 找不到系列：${seriesIdOrIndex}`);
     const appended = Array.isArray(items) ? items : [];
     if (!appended.length) return this;
-    const next = (target.item.data || []).concat(appended);
+    if (target.item.virtual) {
+      return this.appendToVirtualSeries(target.item, target.index, appended, options);
+    }
+    const current = target.item.data;
+    if (current !== undefined && !Array.isArray(current)) {
+      throw new Error(
+        `[ice-chart] 列式输入（{ x, y }）不支持 appendData（系列 ${
+          target.item.name || target.item.id || target.index
+        }）：请用 setData 重新给一份数据。`
+      );
+    }
+    const next = (current || []).concat(appended);
     const maxPoints = Number(options.maxPoints);
     target.item.data =
       isFinite(maxPoints) && maxPoints > 0 && next.length > maxPoints ? next.slice(next.length - maxPoints) : next;
     this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
     this.emit('data:change', { seriesId: target.item.id, seriesIndex: target.index });
     return this;
+  }
+
+  /**
+   * 虚拟（列存）系列的追加：写进**环形缓冲**，不 concat、不重跑数据链路。
+   *
+   * 普通路径每次追加都要「concat 成新数组 → 整条重跑归一化 / 布局 / 重建像素」，
+   * 窗口 1500 点时 11ms/次（见 AGENTS 的账）；环形缓冲把一次追加变成
+   * 「写 1 个槽位 + 挪一次起点」，容量由 `maxPoints` 给定（滑动窗口）。
+   *
+   * 语义与普通路径一致：`maxPoints` 之外的最老数据被丢掉；`animate` 默认 false
+   * （滑动窗口的下标会整体前移，插值会把点插向邻居）。
+   */
+  private appendToVirtualSeries(
+    item: any,
+    index: number,
+    appended: any[],
+    options: { maxPoints?: number; animate?: boolean }
+  ): this {
+    const series = this.norm.series.find((s) => s.id === (item.id || `series-${index}`) || s.index === index);
+    if (!series) throw new Error(`[ice-chart] appendData：找不到已归一化的系列「${item.id || index}」。`);
+    if (series.grid) {
+      throw new Error(
+        `[ice-chart] 虚拟（列存）热力图是稠密矩阵，不支持 appendData（系列 ${
+          item.name || item.id || index
+        }）：请用 setData 重新给一份数据。`
+      );
+    }
+    const maxPoints = Number(options.maxPoints);
+    const capacity = isFinite(maxPoints) && maxPoints > 0 ? Math.floor(maxPoints) : 0;
+    const cached = this.virtualColumns.get(series.id);
+    let ring: SeriesRing;
+    if (cached && 'ring' in cached) {
+      ring = cached.ring;
+    } else {
+      // 第一次追加：把现有的点搬进环形缓冲（给了窗口就只留最后 maxPoints 根）
+      const existing = series.pointCount;
+      const size = Math.max(1, capacity || existing);
+      ring = createRing(size);
+      const keep = Math.min(existing, size);
+      for (let i = existing - keep; i < existing; i++) {
+        ringAppend(ring, [{ x: Number(series.xValueAt(i)), y: series.yValueAt(i) }], 0);
+      }
+    }
+    if (capacity && capacity !== ring.capacity) {
+      // 窗口大小变了：按逻辑顺序重新装一遍（只搬窗口内的点）
+      const next = createRing(capacity);
+      const keep = Math.min(ring.length, capacity);
+      for (let i = ring.length - keep; i < ring.length; i++) {
+        const y = ringYAt(ring, i);
+        ringAppend(next, [{ x: ringXAt(ring, i), y: Number.isNaN(y) ? null : y }], 0);
+      }
+      ring = next;
+    }
+    const points = appended.map((entry: any) => {
+      if (Array.isArray(entry)) return { x: finiteOrNull(entry[0]), y: finiteOrNull(entry[1]) };
+      if (entry && typeof entry === 'object') {
+        const xField = item.xField || 'x';
+        const yField = item.yField || 'y';
+        const x = finiteOrNull(entry[xField] !== undefined ? entry[xField] : entry.x);
+        const y = finiteOrNull(entry[yField] !== undefined ? entry[yField] : entry.value);
+        return { x, y };
+      }
+      // 纯数值：x 顺着上一根 +1
+      return { x: undefined, y: finiteOrNull(entry) };
+    });
+    ringAppend(ring, points, ring.length ? ringLastX(ring) + 1 : 0);
+    refreshRingDomains(ring);
+    // 换掉缓存里的连续列：下一次归一化（applyOption 里）就会用环形的访问器
+    this.virtualColumns.set(series.id, { ring });
+    this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
+    this.emit('data:change', { seriesId: series.id, seriesIndex: series.index });
+    return this;
+  }
+
+  /**
+   * 把一个**虚拟（列存）系列**交给引擎的虚拟子源（`VirtualChildSource`）。
+   *
+   * 「打通」的意义：图表的列**不复制**，直接成为引擎虚拟层的数据源 ——
+   * 窗口裁剪、批量落墨、命中都走引擎那套（`ICEVirtualLayer` / `ICEGroup({ childSource })`），
+   * 于是白拿引擎侧的能力：**命中即物化**（点一下就变成真组件：可拖、可挂控制面板）、
+   * SVG 导出、worker 镜像告警、对齐参考线。
+   *
+   * 坐标是**组件本地（= 绘图区）像素**，与引擎虚拟子源的「容器局部」口径一致：
+   * 把 `ICEVirtualLayer` 摆在绘图区上（`left: layout.plot.x, top: layout.plot.y`）即可对齐。
+   *
+   * ```js
+   * const layer = new ICEVirtualLayer({
+   *   left: chart.layout.plot.x, top: chart.layout.plot.y,
+   *   width: chart.layout.plot.width, height: chart.layout.plot.height,
+   *   childSource: chart.createVirtualSource('big'),
+   * });
+   * ice.addChild(layer);
+   * ```
+   */
+  public createVirtualSource(seriesIdOrIndex: string | number): any {
+    const series =
+      typeof seriesIdOrIndex === 'number'
+        ? this.norm.series[seriesIdOrIndex]
+        : this.norm.series.find((s) => s.id === seriesIdOrIndex || s.name === seriesIdOrIndex);
+    if (!series) throw new Error(`[ice-chart] createVirtualSource：找不到系列「${seriesIdOrIndex}」。`);
+    if (!series.virtual) {
+      throw new Error('[ice-chart] createVirtualSource 只支持虚拟（列存）系列：普通系列本来就是真组件。');
+    }
+    const component: any = this.seriesComponents.find((item: any) => item && item.series && item.series.id === series.id);
+    if (!component) throw new Error(`[ice-chart] createVirtualSource：系列「${series.id}」还没有渲染组件。`);
+
+    const box = new Float64Array(4);
+    /** 源版本要在**读的时候**取当前值（引擎用它失效缓存），所以用箭头守住 this。 */
+    const readVersion = (): number => this.__virtualSourceVersion;
+    /** 描边色取主题的 halo（浅色白 / 深色深）—— 也是"读的时候"取，主题切换后跟着变。 */
+    const readHalo = (): string => (this.norm && this.norm.theme ? this.norm.theme.labelHaloColor : series.color);
+    const symbolSize = (): number => {
+      const option: any = series.option;
+      const size = Number(option.symbolSize);
+      return isFinite(size) && size > 0 ? size : 8;
+    };
+    return {
+      count: series.pointCount,
+      /** 影响「画出来是什么 / 命中什么」的变更都要 +1（引擎只用它失效缓存）。 */
+      get version(): number {
+        return readVersion();
+      },
+      boxAt(index: number, out: Float64Array): void {
+        const pixel = component.pixelAt(index);
+        if (!pixel) {
+          out[0] = NaN;
+          out[1] = NaN;
+          out[2] = NaN;
+          out[3] = NaN;
+          return;
+        }
+        const half = symbolSize() / 2;
+        out[0] = pixel[0] - half;
+        out[1] = pixel[1] - half;
+        out[2] = pixel[0] + half;
+        out[3] = pixel[1] + half;
+      },
+      forEachInBox(x0: number, y0: number, x1: number, y1: number, visit: (index: number) => void): void {
+        const { from, to } = component.virtualIndexRange(x0, x1);
+        for (let i = Math.max(0, from); i <= to; i++) {
+          const pixel = component.pixelAt(i);
+          if (!pixel) continue;
+          if (pixel[1] < y0 || pixel[1] > y1) continue;
+          visit(i);
+        }
+      },
+      hitTest(localX: number, localY: number): number {
+        return component.hitTestIndex(localX, localY);
+      },
+      paint(ctx: any): boolean {
+        return component.paintInto(ctx);
+      },
+      /**
+       * 命中即物化：给这个数据点造一个真图元（只造，不挂 —— 挂树由调用方做，
+       * 这是引擎定的口径：`layer.addChild(source.materialize(i))`）。
+       */
+      materialize(index: number): any {
+        const pixel = component.pixelAt(index);
+        if (!pixel) return null;
+        const size = symbolSize();
+        box[0] = pixel[0];
+        box[1] = pixel[1];
+        const star = new ICEStar({
+          left: pixel[0] - size / 2,
+          top: pixel[1] - size / 2,
+          outerRadius: size / 2,
+          innerRadius: size / 5,
+          spikes: 5,
+          style: { fillStyle: series.color, strokeStyle: readHalo(), lineWidth: 1 },
+        });
+        (star as any).__iceChartDataIndex = index;
+        (star as any).__iceChartSeriesId = series.id;
+        return star;
+      },
+    };
   }
 
   /** 设置数据域（缩放 / 联动入口）。 */
@@ -419,16 +629,118 @@ export class ICEChart {
     return this;
   }
 
-  /** 数值轴的数据点 x 值（升序去重），给「窗口至少盖住 2 个点」的兜底用。 */
-  private numericXValues(): number[] {
-    const set = new Set<number>();
+  /**
+   * 数值轴上的数据点分布探针：回答「窗口里有多少点」与「两侧最近的点在哪」。
+   *
+   * 旧实现是把所有系列的 x 值拉成一个大数组（Set 去重 + 排序）—— 普通数据量无所谓，
+   * 虚拟（列存）系列有 100 万点时，**每滚一次轮就 Set + sort 一遍 100 万个数字**（几十毫秒）。
+   * x 单调的列上二分就能回答同样两个问题，O(log n)；列存系列本来就把单调性算好了。
+   * 口径差异只有一处：跨系列不再全局去重（各系列分别计数），对「至少盖住 2 个点」没有影响。
+   */
+  private numericXProbe(): {
+    total: number;
+    countIn(lo: number, hi: number): number;
+    leftOf(value: number): number | undefined;
+    rightOf(value: number): number | undefined;
+  } {
+    const plain: number[] = [];
+    // 单调序列（连续列 / 环形缓冲）走二分；其余系列照旧拉成数组。
+    // 注意二分必须走 `xValueAt`：环形缓冲的物理顺序 ≠ 逻辑顺序。
+    const ordered: InternalSeries[] = [];
     for (const series of this.norm.series) {
-      for (const point of series.points) {
-        const value = Number(point.xValue);
-        if (isFinite(value)) set.add(value);
+      if (series.hidden) continue;
+      const store = storeDomainOf(series);
+      if (store && store.xMonotonic) {
+        ordered.push(series);
+        continue;
+      }
+      for (let i = 0, n = series.pointCount; i < n; i++) {
+        const value = Number(series.xValueAt(i));
+        if (isFinite(value)) plain.push(value);
       }
     }
-    return [...set].sort((a, b) => a - b);
+    plain.sort((a, b) => a - b);
+    const sorted: number[] = [];
+    for (let i = 0; i < plain.length; i++) {
+      if (i > 0 && plain[i] === plain[i - 1]) continue;
+      sorted.push(plain[i]);
+    }
+    /** 第一个 ≥ target 的下标。 */
+    const lowerBound = (array: ArrayLike<number>, n: number, target: number): number => {
+      let lo = 0;
+      let hi = n;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(array[mid]) < target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    /** 第一个 > target 的下标。 */
+    const upperBound = (array: ArrayLike<number>, n: number, target: number): number => {
+      let lo = 0;
+      let hi = n;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(array[mid]) <= target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    /** 单调系列（可能是环形缓冲）上的二分：只认 `xValueAt` 这个入口。 */
+    const seriesLowerBound = (series: InternalSeries, target: number): number => {
+      let lo = 0;
+      let hi = series.pointCount;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(series.xValueAt(mid)) < target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    const seriesUpperBound = (series: InternalSeries, target: number): number => {
+      let lo = 0;
+      let hi = series.pointCount;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (Number(series.xValueAt(mid)) <= target) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+
+    return {
+      total: sorted.length + ordered.reduce((sum, series) => sum + series.pointCount, 0),
+      countIn: (lo: number, hi: number): number => {
+        let count = upperBound(sorted, sorted.length, hi) - lowerBound(sorted, sorted.length, lo);
+        for (const series of ordered) count += seriesUpperBound(series, hi) - seriesLowerBound(series, lo);
+        return count;
+      },
+      leftOf: (value: number): number | undefined => {
+        let best: number | undefined;
+        const fromPlain = lowerBound(sorted, sorted.length, value) - 1;
+        if (fromPlain >= 0) best = sorted[fromPlain];
+        for (const series of ordered) {
+          const index = seriesLowerBound(series, value) - 1;
+          if (index < 0) continue;
+          const candidate = Number(series.xValueAt(index));
+          if (best === undefined || candidate > best) best = candidate;
+        }
+        return best;
+      },
+      rightOf: (value: number): number | undefined => {
+        let best: number | undefined;
+        const fromPlain = upperBound(sorted, sorted.length, value);
+        if (fromPlain < sorted.length) best = sorted[fromPlain];
+        for (const series of ordered) {
+          const index = seriesUpperBound(series, value);
+          if (index >= series.pointCount) continue;
+          const candidate = Number(series.xValueAt(index));
+          if (best === undefined || candidate < best) best = candidate;
+        }
+        return best;
+      },
+    };
   }
 
   /**
@@ -455,19 +767,19 @@ export class ICEChart {
       else if (to < full.length - 1) to += 1;
       return [full[from], full[to]];
     }
-    const xs = this.numericXValues();
-    if (xs.length < 2) return domain;
+    const probe = this.numericXProbe();
+    if (probe.total < 2) return domain;
     // 数据只有两个点时，"至少 2 个点"等于禁止缩放（本来就画不出线段），放宽到 1 个点
-    const need = xs.length >= 3 ? 2 : 1;
+    const need = probe.total >= 3 ? 2 : 1;
     let lo = Number(domain[0]);
     let hi = Number(domain[1]);
     if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return domain;
-    let inside = xs.filter((v) => v >= lo && v <= hi).length;
+    let inside = probe.countIn(lo, hi);
     let guard = 0;
     while (inside < need && guard < 4) {
       guard += 1;
-      const left = [...xs].reverse().find((v) => v < lo);
-      const right = xs.find((v) => v > hi);
+      const left = probe.leftOf(lo);
+      const right = probe.rightOf(hi);
       if (left === undefined && right === undefined) break;
       const dLeft = left === undefined ? Infinity : lo - left;
       const dRight = right === undefined ? Infinity : right - hi;
@@ -476,7 +788,7 @@ export class ICEChart {
       } else {
         hi = right as number;
       }
-      inside = xs.filter((v) => v >= lo && v <= hi).length;
+      inside = probe.countIn(lo, hi);
     }
     return inside >= need ? [lo, hi] : domain;
   }
@@ -799,7 +1111,7 @@ export class ICEChart {
     const currentlyHidden = !!this.hiddenSlices[key];
     const nextHidden = forceSelected === undefined ? !currentlyHidden : !forceSelected;
     this.hiddenSlices[key] = nextHidden;
-    const point = series.points[dataIndex];
+    const point = series.pointAt(dataIndex);
     // 动画更新：其余扇区/阶段平滑挪位（被隐藏的那个收拢到 0 再消失）
     this.applyOption(this.option, { animate: true, preserveView: true });
     this.emit('legend:toggle', {
@@ -878,9 +1190,14 @@ export class ICEChart {
 
   // ------------------------------------------------------------- 无障碍
 
-  /** 数据表：屏幕阅读器可直接读取的「图表等价文本」。 */
-  public getDataTable(): DataTable {
-    return buildDataTable(this as any);
+  /**
+   * 数据表：屏幕阅读器可直接读取的「图表等价文本」。
+   *
+   * 行数默认封顶 200（百万级系列整表物化会卡死页面），超限按等步长抽样并在 caption 里写明；
+   * 需要别的口径就传 `maxTableRows`。
+   */
+  public getDataTable(options: A11yTreeOptions = {}): DataTable {
+    return buildDataTable(this as any, options);
   }
 
   /**
@@ -896,8 +1213,8 @@ export class ICEChart {
    * 在 canvas 旁挂载视觉隐藏的数据表 + aria-live 播报区，
    * 让屏幕阅读器既能读到整张数据表，也能听到当前悬停/键盘导航到的数据点。
    */
-  public attachA11yMirror(): boolean {
-    return this.a11yMirror.attach();
+  public attachA11yMirror(options: A11yTreeOptions = {}): boolean {
+    return this.a11yMirror.attach(options);
   }
 
   public detachA11yMirror(): void {
@@ -1101,6 +1418,18 @@ export class ICEChart {
         `[ice-chart] 快照版本 ${parsed.version} 高于当前实现支持的 ${SNAPSHOT_VERSION}，请升级 ice-chart 后再还原。`
       );
     }
+    /**
+     * 虚拟（列存）系列不参与快照：归一化时就把原始 `data` 释放了（这正是它省内存的原因），
+     * 所以快照里只有 `virtual: true` 而**没有数据**。这里显式报错 ——
+     * 静默还原出一张空图，比报错难查得多。
+     */
+    const incoming = Array.isArray(rawOption && rawOption.series) ? rawOption.series : [];
+    const emptyVirtual = incoming.findIndex((item: any) => item && item.virtual && !item.data);
+    if (emptyVirtual >= 0) {
+      throw new Error(
+        `[ice-chart] 快照里的 series[${emptyVirtual}] 是虚拟（列存）系列，数据不在快照里，无法还原：请用 setData 重新给一份数据（虚拟化省内存的代价就是不进快照）。`
+      );
+    }
     const option = options.optionPatch ? mergeOptionPatch(rawOption, options.optionPatch) : rawOption;
     this.hiddenIds = parsed.hidden || {};
     this.hiddenSlices = parsed.hiddenSlices || {};
@@ -1120,6 +1449,7 @@ export class ICEChart {
       hiddenSlices: this.hiddenSlices,
       // theme:'auto' = 跟随引擎实例主题：明暗由引擎主题的背景色亮度判定（归一化层保持纯函数）
       preferDark: isEngineThemeDark(this.ice),
+      virtualColumns: this.virtualColumns,
     });
     // 图表主题 → 引擎主题：图表实例里那些**引擎自己画的东西**（默认样式 / 交互外壳 /
     // 应用后加的自定义图元）跟着图表的主题走，避免"图表是暗的、外壳还是亮的"。
@@ -1244,6 +1574,7 @@ export class ICEChart {
       hiddenSlices: this.hiddenSlices,
       // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
       preferDark: isEngineThemeDark(this.ice),
+      virtualColumns: this.virtualColumns,
       xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
       yDomain:
         this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
@@ -1263,6 +1594,16 @@ export class ICEChart {
     });
     // 第二次归一化后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
     this.norm = norm;
+    // 虚拟子源的版本：数据 / 窗口 / 布局变了都算「画出来是什么」变了（引擎据此失效缓存）
+    this.__virtualSourceVersion += 1;
+    // 虚拟列存缓存跟着当前系列走：不再是虚拟系列的那些列没有理由继续占着内存
+    if (this.virtualColumns.size) {
+      const live = new Set<string>();
+      for (const series of norm.series) if (series.virtual) live.add(series.id);
+      for (const key of Array.from(this.virtualColumns.keys())) {
+        if (!live.has(key)) this.virtualColumns.delete(key);
+      }
+    }
     if (this.autoYCurve) {
       // 自动贴合后同步 fullYDomains：currentRange() / y 轴缩放的夹取都以它为准
       this.fullYDomain = norm.yAxis.domain.slice();
@@ -1589,7 +1930,7 @@ export class ICEChart {
                       plot,
                       canvas: this.layout.canvas,
                       layout: layoutTreemap(
-                        (series.option.data || []) as any,
+                        (Array.isArray(series.option.data) ? series.option.data : []) as any,
                         plot,
                         norm.treemap || {},
                         norm.theme.colorPalette
@@ -1635,7 +1976,7 @@ export class ICEChart {
       });
       component.barSlot = slots[series.id] || { index: 0, count: 1 };
       component.chartTheme = norm.theme;
-      component.state.ariaLabel = `${series.name} 系列，共 ${series.points.length} 个数据点`;
+      component.state.ariaLabel = `${series.name} 系列，共 ${series.pointCount} 个数据点`;
       component.updateSeries(series, !!animate && !this.viewState.x, !!this.domainTransition);
       if (series.type === 'pie' || series.type === 'funnel') {
         component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));
@@ -1889,7 +2230,8 @@ export function hiddenSliceIndexes(norm: NormalizedOption, seriesId: string): nu
   const out: number[] = [];
   const series = norm.series.find((s) => s.id === seriesId);
   if (!series) return out;
-  for (const point of series.points) {
+  for (let i = 0; i < series.pointCount; i++) {
+    const point = series.pointAt(i);
     if (norm.hiddenSlices[`${seriesId}#${point.index}`]) out.push(point.index);
   }
   return out;

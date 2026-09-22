@@ -67,8 +67,8 @@ export class FunnelSeries extends SeriesBase {
 
   protected rebuildPixels(): void {
     const coord = this.funnel;
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (!coord || !n) {
       this.pixels = new Float64Array(0);
       this.stageGeom = [];
@@ -94,18 +94,18 @@ export class FunnelSeries extends SeriesBase {
     const visible: number[] = [];
     for (let i = 0; i < n; i++) {
       if (this.hiddenSlices.indexOf(i) >= 0) continue;
-      if (points[i].y === null) continue;
+      if (series.pointAt(i).y === null) continue;
       visible.push(i);
     }
     const sort = options.sort || 'descending';
     if (sort !== 'none') {
-      visible.sort((a, b) => (sort === 'ascending' ? (points[a].y || 0) - (points[b].y || 0) : (points[b].y || 0) - (points[a].y || 0)));
+      visible.sort((a, b) => (sort === 'ascending' ? (series.pointAt(a).y || 0) - (series.pointAt(b).y || 0) : (series.pointAt(b).y || 0) - (series.pointAt(a).y || 0)));
     }
     if (!visible.length) return;
 
     const gap = Math.max(0, Number(options.gap) || 2);
     const stageHeight = Math.max(4, (coord.plot.height - gap * (visible.length - 1)) / visible.length);
-    const maxValue = Math.max(...visible.map((i) => points[i].y || 0), 0);
+    const maxValue = Math.max(...visible.map((i) => series.pointAt(i).y || 0), 0);
     const minSize = Math.max(0, Math.min(1, options.minSize === undefined ? 0.12 : Number(options.minSize)));
     const maxWidth = coord.plot.width;
     const cx = coord.plot.width / 2;
@@ -113,7 +113,7 @@ export class FunnelSeries extends SeriesBase {
     const morph = this.isEntering() ? Math.max(0, Math.min(1, this.progress())) : 1;
     const flatWidth = maxWidth * 0.72;
     const widths = visible.map((i) => {
-      const value = points[i].y || 0;
+      const value = series.pointAt(i).y || 0;
       const ratio = maxValue > 0 ? value / maxValue : 1;
       const target = Math.max(maxWidth * minSize, maxWidth * Math.max(0, Math.min(1, ratio)));
       return flatWidth + (target - flatWidth) * morph;
@@ -191,16 +191,16 @@ export class FunnelSeries extends SeriesBase {
     let visibleCount = 0;
     for (let i = 0; i < this.stageGeom.length; i++) if (this.stageGeom[i]) visibleCount++;
     let total = 0;
-    for (let i = 0; i < this.series.points.length; i++) {
+    for (let i = 0; i < this.series.pointCount; i++) {
       if (!this.stageGeom[i]) continue;
-      total += this.series.points[i].y || 0;
+      total += this.series.pointAt(i).y || 0;
     }
 
     this.beginDraw();
     for (let i = 0; i < this.stageGeom.length; i++) {
       const geom = this.stageGeom[i];
       if (!geom) continue;
-      const point = this.series.points[i];
+      const point = this.series.pointAt(i);
       const color = point.color || this.series.color;
       // 悬停：整级向两侧摊开一点（保持中心不动，仍不越过绘图区）
       const boost = this.hoverBoost(i, 0.06);
@@ -228,7 +228,7 @@ export class FunnelSeries extends SeriesBase {
     for (let i = 0; i < this.stageGeom.length; i++) {
       const geom = this.stageGeom[i];
       if (!geom) continue;
-      const point = this.series.points[i];
+      const point = this.series.pointAt(i);
       const value = point.y || 0;
       const percent = total > 0 ? (value / total) * 100 : 0;
       const text = `${point.name || point.xValue}  ${value}${visibleCount > 1 ? `  ${percent.toFixed(1)}%` : ''}`;

@@ -2,6 +2,9 @@ import { ChartComponent } from '../ChartComponent';
 import { roundRect } from '../Legend';
 import type { ChartTheme, SeriesType } from '../../types';
 import type { DataPoint, InternalSeries, Rect } from '../../internal';
+import { storeDomainOf } from '../../internal';
+import { chunkRangeForX, pickChunksForWindow, requestChunk } from '../../util/chunks';
+import type { SeriesChunks } from '../../util/chunks';
 import type { Scale } from '../../scale';
 import { shouldAnimate } from '../../animation/motion';
 
@@ -109,22 +112,24 @@ export abstract class SeriesBase extends ChartComponent {
    */
   public symbolSizeAt(index: number): number {
     const option = this.series.option;
-    const point = this.series.points[index];
     const size = option.symbolSize;
     if (typeof size === 'function') {
-      const value = point ? point.y : null;
+      const value = this.series.yValueAt(index);
       let out = NaN;
       try {
+        // 虚拟（列存）系列没有原始数据项 → data 为 undefined（契约见 SeriesOption.virtual）
+        const point = this.series.virtual ? null : this.series.pointAt(index);
         out = Number(size(value, { dataIndex: index, data: point ? point.raw : undefined, seriesName: this.series.name }));
       } catch (err) {
         out = NaN;
       }
       return isFinite(out) && out > 0 ? out : 8;
     }
-    if (point && typeof point.size === 'number' && isFinite(point.size)) {
+    const own = this.series.sizeAt(index);
+    if (typeof own === 'number' && isFinite(own)) {
       const range = Array.isArray(option.symbolSizeRange) ? option.symbolSizeRange : [8, 40];
       const [min, max] = this.sizeExtent;
-      const t = max > min ? (point.size - min) / (max - min) : 0.5;
+      const t = max > min ? (own - min) / (max - min) : 0.5;
       return range[0] + (range[1] - range[0]) * Math.max(0, Math.min(1, t));
     }
     const numeric = Number(size);
@@ -134,7 +139,7 @@ export abstract class SeriesBase extends ChartComponent {
   /** 本系列的最大标记尺寸（脏矩形留白与命中容差要用）。 */
   protected maxSymbolSize(): number {
     const option = this.series.option;
-    if (typeof option.symbolSize === 'function' || this.series.points.some((p) => typeof p.size === 'number')) {
+    if (typeof option.symbolSize === 'function' || this.hasPointSize()) {
       const range = Array.isArray(option.symbolSizeRange) ? option.symbolSizeRange : [8, 40];
       return Math.max(8, Number(range[1]) || 40);
     }
@@ -142,9 +147,21 @@ export abstract class SeriesBase extends ChartComponent {
     return isFinite(numeric) && numeric > 0 ? numeric : 8;
   }
 
+  /** 数据里是否带第三维（气泡图尺寸）—— 逐点取值，列存系列也适用。 */
+  protected hasPointSize(): boolean {
+    const store = storeDomainOf(this.series);
+    if (this.series.virtual) return !!(store && store.sizeExtent);
+    const series = this.series;
+    for (let i = 0, n = series.pointCount; i < n; i++) {
+      if (typeof series.sizeAt(i) === 'number') return true;
+    }
+    return false;
+  }
+
   public setCoord(coord: SeriesCoord): this {
     this.coord = coord;
     this.cacheKey = '';
+    if (this.series.virtual) this.syncVirtualMeta();
     return this.markDirty();
   }
 
@@ -180,7 +197,7 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 每项进度的缓存（数据量变化时重建）。 */
   protected computeItemProgress(): void {
-    const n = this.series.points.length;
+    const n = this.series.pointCount;
     if (this.itemProgress.length !== n) this.itemProgress = new Float64Array(n);
     for (let i = 0; i < n; i++) this.itemProgress[i] = this.progressFor(i, n);
   }
@@ -321,15 +338,17 @@ export abstract class SeriesBase extends ChartComponent {
     // 坐标轴数据域过渡期间每帧都会走一次同步，如果这里清掉 fromEffective，值插值就断了。
     if (!preserveAnimation) {
       this.fromEffective =
-        animate && this.effective.length === series.points.length * 2 ? new Float64Array(this.effective) : null;
+        animate && this.effective.length === series.pointCount * 2 ? new Float64Array(this.effective) : null;
     }
     this.series = series;
     this.cacheKey = '';
+    if (series.virtual) this.syncVirtualMeta();
     return this.markDirty();
   }
 
   /** 与当前绘制一致的像素位置；缺失点返回 null。 */
   public pixelAt(index: number): [number, number] | null {
+    if (this.series.virtual) return this.virtualPixelAt(index);
     this.rebuildPixels();
     const x = this.pixels[index * 2];
     const y = this.pixels[index * 2 + 1];
@@ -356,8 +375,8 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 计算每个点的有效数据值（含动画插值）。 */
   protected computeEffective(): void {
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (this.effective.length !== n * 2) {
       this.effective = new Float64Array(n * 2);
       this.fromEffective = null;
@@ -367,14 +386,28 @@ export abstract class SeriesBase extends ChartComponent {
     for (let i = 0; i < n; i++) {
       // 每个数据项用**自己的**进度：错峰入场时就是「依次长出来」
       const ti = this.itemProgress[i];
-      const p = points[i];
-      const targetTop = p.top;
+      /**
+       * 断点（`y` 为 `null`）= **没有数据**，像素必须是 NaN。
+       *
+       * 不能拿 `top` 顶上：`null` 的 `top` 是 0，于是断点会被画到 0 的位置
+       * ——实测 `data: [10, null, 30]` 的断点像素落在绘图区**下方 91px** 处
+       * （画出一条「掉到 0」的假线），而命中与提示框那边是按 `y === null` 判空的，
+       * 同一份数据在两处语义分叉。断点一律 NaN，折线绘制再按 NaN 抬笔。
+       */
+      if (this.series.yValueAt(i) === null) {
+        this.effective[i * 2] = NaN;
+        this.effective[i * 2 + 1] = NaN;
+        continue;
+      }
+      // 只取标量：列存系列在这里不合成 DataPoint
+      const targetTop = series.topAt(i);
       if (targetTop === null || targetTop === undefined) {
         this.effective[i * 2] = NaN;
         this.effective[i * 2 + 1] = NaN;
         continue;
       }
-      const targetBase = isFinite(p.base) ? p.base : 0;
+      const rawBase = series.baseAt(i);
+      const targetBase = isFinite(rawBase) ? rawBase : 0;
       let fromBase = 0;
       let fromTop = 0;
       if (this.fromEffective) {
@@ -391,6 +424,11 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 数据 → 像素（带缓存）。 */
   protected rebuildPixels(force = false): void {
+    if (this.series.virtual) {
+      // 列存系列不物化像素：只同步元信息（单调性 / 尺寸范围），像素按需现算
+      this.syncVirtualMeta();
+      return;
+    }
     const coord = this.coord;
     if (!coord) {
       this.pixels = new Float64Array(0);
@@ -421,7 +459,7 @@ export abstract class SeriesBase extends ChartComponent {
       xd[1] - xd[0] === incX[1] - incX[0] &&
       yd[0] === incY[0] &&
       yd[1] === incY[1] &&
-      this.pixels.length === this.series.points.length * 2
+      this.pixels.length === this.series.pointCount * 2
     ) {
       const dx = ((incX[0] - xd[0]) / (xd[1] - xd[0])) * coord.plot.width;
       for (let i = 0; i < this.pixels.length; i += 2) this.pixels[i] += dx;
@@ -430,15 +468,14 @@ export abstract class SeriesBase extends ChartComponent {
       return;
     }
     this.computeEffective();
-    const points = this.series.points;
-    const n = points.length;
+    const series = this.series;
+    const n = series.pointCount;
     if (this.pixels.length !== n * 2) this.pixels = new Float64Array(n * 2);
     const { xScale, yScale } = coord;
     let monotonic = true;
     let prevX = -Infinity;
     for (let i = 0; i < n; i++) {
-      const p = points[i];
-      const px = xScale.map(p.xValue);
+      const px = xScale.map(series.xValueAt(i));
       const value = this.effective[i * 2 + 1];
       const py = isFinite(value) ? yScale.map(value) : NaN;
       this.pixels[i * 2] = px;
@@ -449,11 +486,221 @@ export abstract class SeriesBase extends ChartComponent {
       }
     }
     this.xMonotonic = monotonic;
-    this.sizeExtent = computeSizeExtent(points);
+    this.sizeExtent = computeSizeExtent(series);
     this.renderIndices = this.buildRenderIndices(n, coord.plot.width);
     (this as any).__incrementalXDomain = Array.isArray(xd) && xd.length === 2 ? [xd[0], xd[1]] : null;
     (this as any).__incrementalYDomain = Array.isArray(yd) && yd.length === 2 ? [yd[0], yd[1]] : null;
     this.cacheKey = key;
+  }
+
+  // ------------------------------------------------- 虚拟（列存）系列的共用内核
+
+  /**
+   * 列存系列的元信息同步：像素缓存留空，单调性与尺寸范围取自数据列。
+   *
+   * 为什么虚拟系列不建像素缓存：100 万点的 `pixels` + `effective` + `itemProgress`
+   * 就是 40MB，省下来的内存会被缓存原样吃回去（详见 AGENTS.md 铁律 2 的例外说明）。
+   */
+  protected syncVirtualMeta(): void {
+    if (this.pixels.length) this.pixels = new Float64Array(0);
+    const store = storeDomainOf(this.series);
+    this.xMonotonic = !!(store && store.xMonotonic);
+    this.renderIndices = null;
+    if (store && store.sizeExtent) this.sizeExtent = store.sizeExtent;
+  }
+
+  /** 列上二分：第一个 x（数据值）≥ target 的下标。 */
+  protected virtualLowerBound(target: number): number {
+    const series = this.series;
+    let lo = 0;
+    let hi = series.pointCount;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Number(series.xValueAt(mid)) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** 列上二分：第一个 x（数据值）> target 的下标。 */
+  protected virtualUpperBound(target: number): number {
+    const series = this.series;
+    let lo = 0;
+    let hi = series.pointCount;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Number(series.xValueAt(mid)) <= target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /**
+   * 可见窗口（下标区间，含两端各留一格）。
+   *
+   * 先把握手用的像素余量经 `invert` 换算成数据值，再在单调的 x 列上二分 ——
+   * 于是「窗口外不画」这件事在 100 万点上仍然是 O(log n)，不需要全量像素缓存。
+   */
+  protected virtualVisibleWindow(pad: number): { i0: number; i1: number } {
+    const coord = this.coord;
+    const n = this.series.pointCount;
+    if (!coord || !n) return { i0: 0, i1: -1 };
+    if (this.series.chunks) return this.chunkWindow(this.series.chunks, coord, pad);
+    if (!this.xMonotonic) return { i0: 0, i1: n - 1 };
+    const edgeA = coord.xScale.invert(-pad);
+    const edgeB = coord.xScale.invert(coord.plot.width + pad);
+    const i0 = this.virtualLowerBound(Math.min(edgeA, edgeB));
+    const i1 = this.virtualUpperBound(Math.max(edgeA, edgeB));
+    return { i0: Math.max(0, i0 - 1), i1: Math.min(n - 1, i1) };
+  }
+
+  /**
+   * 分块存储的窗口：x 范围 → 块区间 → 逻辑下标区间，并**顺手请求这些块驻留**。
+   *
+   * 请求是幂等的（已驻留 / 正在加载的块直接跳过），到达后 `markDirty()` 唤醒重绘 ——
+   * 所以「平移过去 → 先看到已驻留的部分 → 其余块到货再补上」这条链路是自动的。
+   */
+  private chunkWindow(chunks: SeriesChunks, coord: SeriesCoord, pad: number): { i0: number; i1: number } {
+    const edgeA = coord.xScale.invert(-pad);
+    const edgeB = coord.xScale.invert(coord.plot.width + pad);
+    const { from, to } = chunkRangeForX(chunks, Math.min(edgeA, edgeB), Math.max(edgeA, edgeB));
+    if (to < from) return { i0: 0, i1: -1 };
+    // 只按驻留预算取样请求：窗口覆盖 1 万块时不能全请求（见 pickChunksForWindow 的账）
+    for (const index of pickChunksForWindow(from, to, chunks.maxResident)) {
+      requestChunk(chunks, index, () => this.markDirty());
+    }
+    const i0 = chunks.offsets[from];
+    const i1 = chunks.offsets[to] + chunks.sizes[to] - 1;
+    return { i0, i1: Math.min(chunks.total - 1, i1) };
+  }
+
+  /** 列存系列的点像素：按需现算，不落缓存。 */
+  protected virtualPixelAt(index: number): [number, number] | null {
+    const coord = this.coord;
+    const series = this.series;
+    if (!coord || index < 0 || index >= series.pointCount) return null;
+    const value = series.yValueAt(index);
+    if (value === null) return null;
+    const x = coord.xScale.map(series.xValueAt(index));
+    const y = coord.yScale.map(value);
+    if (!isFinite(x) || !isFinite(y)) return null;
+    return [x, y];
+  }
+
+  /**
+   * 列存系列的最近邻：x 单调时在列上二分，再与左右邻居比一次距离。
+   * 非单调（罕见）退化为线性扫描，语义与像素缓存版的 `nearestIndexAtX` 一致。
+   */
+  protected virtualNearestIndexAtX(localX: number): number {
+    const coord = this.coord;
+    const series = this.series;
+    const n = series.pointCount;
+    if (!coord || !n) return -1;
+    const pixelX = (i: number): number => coord.xScale.map(series.xValueAt(i));
+    /**
+     * 分块存储**不能在全量下标上二分**：未驻留区间的 `xValueAt` 是 undefined，
+     * 二分会一路往右走到头（实测：放大到 60 点窗口后命中直接判空）。
+     * 正确做法是先用 x 值定位到块（声明式的 rangeOf），再**在驻留块内**二分。
+     */
+    const chunks = series.chunks;
+    if (chunks) {
+      const xValue = Number(coord.xScale.invert(localX));
+      const { from, to } = chunkRangeForX(chunks, xValue, xValue);
+      let best = -1;
+      let bestDist = Infinity;
+      for (let c = Math.max(0, from); c <= to && c < chunks.sizes.length; c++) {
+        if (!chunks.resident[c]) continue;
+        const start = chunks.offsets[c];
+        const end = Math.min(chunks.total - 1, start + chunks.sizes[c] - 1);
+        let lo = start;
+        let hi = end;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          const x = pixelX(mid);
+          if (!isFinite(x) || x < localX) lo = mid + 1;
+          else hi = mid;
+        }
+        for (const i of [lo - 1, lo, lo + 1]) {
+          if (i < start || i > end) continue;
+          const x = pixelX(i);
+          if (!isFinite(x)) continue;
+          const dist = Math.abs(x - localX);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = i;
+          }
+        }
+      }
+      return best;
+    }
+    if (!this.xMonotonic) {
+      let best = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < n; i++) {
+        const x = pixelX(i);
+        if (!isFinite(x)) continue;
+        const dist = Math.abs(x - localX);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      return best;
+    }
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const x = pixelX(mid);
+      if (!isFinite(x) || x < localX) lo = mid + 1;
+      else hi = mid;
+    }
+    let best = -1;
+    let bestDist = Infinity;
+    for (const i of [lo, lo - 1]) {
+      if (i < 0 || i >= n) continue;
+      const x = pixelX(i);
+      if (!isFinite(x)) continue;
+      const dist = Math.abs(x - localX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 把系列画进**给定的 ctx**（引擎虚拟层 `childSource.paint` 的落墨入口）。
+   *
+   * 坐标是组件本地（= 绘图区）像素 —— 与引擎虚拟子源的「容器局部」口径一致：
+   * 应用把 `ICEVirtualLayer` 摆在绘图区上，落墨就天然对齐。
+   * 实现上只是临时换掉 `this.ctx` 再走同一条 `doRender()`：**不复制第二份绘制代码**
+   * （复制一份会立刻分叉，这个仓库在这种事上踩过很多次）。
+   */
+  public paintInto(ctx: any): boolean {
+    if (!this.series.virtual) return false;
+    const previous = this.ctx;
+    this.ctx = ctx;
+    try {
+      this.doRender();
+      return true;
+    } finally {
+      this.ctx = previous;
+    }
+  }
+
+  /** 列存系列的逻辑下标窗口（引擎虚拟源的 `forEachInBox` 用它把 x 范围落成下标范围）。 */
+  public virtualIndexRange(x0: number, x1: number): { from: number; to: number } {
+    const coord = this.coord;
+    const series = this.series;
+    const n = series.pointCount;
+    if (!coord || !n || !series.virtual) return { from: 0, to: -1 };
+    const inverted = (pixel: number): number => Number(coord.xScale.invert(pixel));
+    const lo = inverted(Math.min(x0, x1));
+    const hi = inverted(Math.max(x0, x1));
+    if (!isFinite(lo) || !isFinite(hi)) return { from: 0, to: n - 1 };
+    return { from: this.virtualLowerBound(lo), to: this.virtualUpperBound(hi) - 1 };
   }
 
   /**
@@ -491,6 +738,7 @@ export abstract class SeriesBase extends ChartComponent {
    */
   public nearestIndexAtX(localX: number): number {
     this.rebuildPixels();
+    if (this.series.virtual) return this.virtualNearestIndexAtX(localX);
     const n = this.pixels.length / 2;
     if (!n) return -1;
     if (!this.xMonotonic) {
@@ -533,7 +781,7 @@ export abstract class SeriesBase extends ChartComponent {
     const xd = coord.xScale.domain;
     const yd = coord.yScale.domain;
     return [
-      this.series.points.length,
+      this.series.pointCount,
       this.progress(),
       coord.plot.width,
       coord.plot.height,
@@ -541,7 +789,7 @@ export abstract class SeriesBase extends ChartComponent {
       String(xd[xd.length - 1]),
       String(yd[0]),
       String(yd[1]),
-      this.series.points.length ? String(this.series.points[0].xValue) : '',
+      this.series.pointCount ? String(this.series.xValueAt(0)) : '',
     ].join('|');
   }
 
@@ -611,7 +859,7 @@ export abstract class SeriesBase extends ChartComponent {
   }
 
   protected pointByIndex(index: number): DataPoint | null {
-    return this.series.points[index] || null;
+    return this.series.pointAt(index) || null;
   }
 }
 
@@ -681,13 +929,14 @@ export function lttbIndices(pixels: Float64Array, n: number, threshold: number):
 }
 
 /** 数据点第三维的取值范围（气泡尺寸映射用）。 */
-export function computeSizeExtent(points: DataPoint[]): [number, number] {
+export function computeSizeExtent(series: InternalSeries): [number, number] {
   let min = Infinity;
   let max = -Infinity;
-  for (const point of points) {
-    if (typeof point.size !== 'number' || !isFinite(point.size)) continue;
-    if (point.size < min) min = point.size;
-    if (point.size > max) max = point.size;
+  for (let i = 0, n = series.pointCount; i < n; i++) {
+    const size = series.sizeAt(i);
+    if (typeof size !== 'number' || !isFinite(size)) continue;
+    if (size < min) min = size;
+    if (size > max) max = size;
   }
   if (!isFinite(min)) return [0, 1];
   if (min === max) return [min, min + 1];

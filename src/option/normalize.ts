@@ -1,6 +1,11 @@
 import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
-import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption } from '../internal';
+import { arrayAccessors, columnAccessors, gridAccessors, storeDomainOf } from '../internal';
+import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption, SeriesColumns, SeriesGrid } from '../internal';
+import type { SeriesRing } from '../util/ring';
+import { ringAccessors } from '../util/ring';
+import { chunkAccessors, createChunks } from '../util/chunks';
+import type { SeriesChunks } from '../util/chunks';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
@@ -108,6 +113,18 @@ export interface NormalizeContext {
   yDomain?: [number, number] | null;
   /** 每个 y 轴的数据域（多轴时按 index 区分）。 */
   yDomains?: Array<[number, number] | null>;
+  /**
+   * 虚拟（列存）系列的存储缓存，key 为系列 id。
+   *
+   * 为什么需要：`data` 在第一次归一化之后就被释放了（这正是虚拟化省内存的地方），
+   * 而一次 `applyOption` 会归一化两遍（applyOption 自己一遍、rebuild 一遍）。
+   * 于是列存要在**图表实例**上留一份：第一遍建列并放进缓存，第二遍直接复用。
+   * 带 data 的输入永远以 data 为准（缓存只是「没有 data 时怎么办」的答案）。
+   */
+  virtualColumns?: Map<
+    string,
+    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing } | { chunks: SeriesChunks }
+  >;
 }
 
 /**
@@ -255,6 +272,20 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
       ? xAxisOption.type
       : 'linear'
     : resolveXAxisType(xAxisOption, series);
+  // 虚拟（列存）系列只有数值列，类目轴表达不了它（别让 100 万个数值被聚合成 100 万个类目）
+  if (series.some((s) => s.virtual && !s.grid) && (xType === 'category' || horizontal)) {
+    throw new Error('[ice-chart] 虚拟（列存）系列只支持数值型 x 轴（xAxis.type 不要写 category）。');
+  }
+  // 反过来：虚拟热力图的 x / y 都必须是类目轴（矩阵靠类目定行列）
+  if (series.some((s) => s.grid)) {
+    if (xType !== 'category') {
+      throw new Error('[ice-chart] 虚拟（列存）热力图的 x 轴必须是类目轴（xAxis.type: \'category\'）。');
+    }
+    const yType = yAxisOptions[0] && yAxisOptions[0].type;
+    if (yType !== undefined && yType !== 'category') {
+      throw new Error('[ice-chart] 虚拟（列存）热力图的 y 轴必须是类目轴（yAxis.type 不要写别的）。');
+    }
+  }
   let rawXDomain: any[];
   let categories: any[];
   if (horizontal) {
@@ -301,7 +332,18 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
       const categories: any[] = [];
       for (const s of series) {
         if (s.type !== 'heatmap') continue;
-        for (const point of s.points) {
+        // 列存（虚拟）热力图：行类目就是矩阵的行，别再扫 100 万格
+        if (s.grid) {
+          for (const value of s.grid.yCategories) {
+            const key = String(value);
+            if (seen[key]) continue;
+            seen[key] = true;
+            categories.push(value);
+          }
+          continue;
+        }
+        for (let i = 0, n = s.pointCount; i < n; i++) {
+          const point = s.pointAt(i);
           const key = String(point.name === undefined ? point.xValue : point.name);
           if (!seen[key]) {
             seen[key] = true;
@@ -389,6 +431,90 @@ function buildSeries(
     }
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
+    // 列存（虚拟）系列：只建列，不建数据点数组（见 plans/scatter-large-data-virtualization.md）
+    if (option.virtual) {
+      const cached = context && context.virtualColumns ? context.virtualColumns.get(id) : undefined;
+      // 没有 data（已被释放）时复用上一遍建好的列；带 data 的输入永远以 data 为准
+      const reuse = cached && option.data === undefined ? cached : null;
+      /**
+       * **释放原始 data**：建完列之后图表只保留列本身。
+       *
+       * 这里换掉的是 option.series 里的那一项本身（`merged.series === option.series`，
+       * 两处一起生效）—— 百万级输入（元组数组动辄 40~70MB）从此没有任何引用，
+       * 调用方自己留着的引用不受影响。提示框的 `params.data` 因此为空（见 types 里的说明）。
+       */
+      const leanOption: SeriesOption = { ...option, data: undefined };
+      seriesOptions[i] = leanOption;
+      const shared = {
+        id,
+        index: i,
+        type: option.type,
+        name,
+        color,
+        option: leanOption,
+        points: [],
+        virtual: true as const,
+        hasExplicitX: true,
+        hidden: false,
+        axisIndex: 0,
+      };
+      if (option.type === 'heatmap') {
+        const grid = reuse && 'grid' in reuse ? (reuse.grid as SeriesGrid) : buildVirtualGrid(option, i);
+        if (context && context.virtualColumns) context.virtualColumns.set(id, { grid });
+        out.push({
+          ...shared,
+          grid,
+          pointCount: grid.values.length,
+          ...gridAccessors(grid),
+        });
+        continue;
+      }
+      /**
+       * 环形缓冲（实时流 appendData 之后）：**别在这里重新建列** ——
+       * 数据早就释放了，缓存里的环就是当前数据。访问器按逻辑下标读环。
+       */
+      if (reuse && 'ring' in reuse) {
+        const ring = reuse.ring;
+        out.push({
+          ...shared,
+          ring,
+          pointCount: ring.length,
+          ...ringAccessors(ring),
+        });
+        continue;
+      }
+      // 分块存储：逻辑点数来自块长度之和，块本身按需加载
+      if (reuse && 'chunks' in reuse) {
+        const chunks = reuse.chunks;
+        out.push({
+          ...shared,
+          chunks,
+          pointCount: chunks.total,
+          ...chunkAccessors(chunks),
+        });
+        continue;
+      }
+      if (!reuse && isChunkedInput(option.data)) {
+        const chunks = buildVirtualChunks(option.data, i);
+        if (context && context.virtualColumns) context.virtualColumns.set(id, { chunks });
+        out.push({
+          ...shared,
+          chunks,
+          pointCount: chunks.total,
+          ...chunkAccessors(chunks),
+        });
+        continue;
+      }
+      const columns = reuse && 'columns' in reuse ? (reuse.columns as SeriesColumns) : buildVirtualColumns(option, i);
+      if (context && context.virtualColumns) context.virtualColumns.set(id, { columns });
+      out.push({
+        ...shared,
+        columns,
+        pointCount: columns.y.length,
+        ...columnAccessors(columns),
+      });
+      continue;
+    }
     const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph, context);
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
@@ -406,6 +532,10 @@ function buildSeries(
       color,
       option,
       points,
+      virtual: false,
+      pointCount: points.length,
+      // 普通系列：读点就是 points 的直读，与迁移前逐字等价（列存系列在 Phase 2 步骤 3 换实现）。
+      ...arrayAccessors(points),
       hasExplicitX,
       hidden: false,
       axisIndex: 0,
@@ -424,6 +554,12 @@ function buildPoints(
   context?: NormalizeContext
 ): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
+  if (!Array.isArray(option.data) && option.data && typeof option.data === 'object') {
+    // 列式输入（{ x, y }）只有列存（virtual）系列认识；普通系列拿到它只会画出一张空图
+    throw new Error(
+      `[ice-chart] series 的列式 data（{ x, y }）需要配 virtual: true（当前 type: '${option.type}'）。`
+    );
+  }
   const points: DataPoint[] = [];
   let hasExplicitX = false;
   // 函数绘图 / 参数曲线：数据点由表达式现算（不是用户给的数组）
@@ -692,6 +828,293 @@ function toNumber(value: any): number | null {
   return isFinite(n) ? n : null;
 }
 
+/**
+ * 列存（虚拟）系列的建列：**一趟扫描**同时算好数据域、单调性与尺寸范围。
+ *
+ * 为什么必须一趟：100 万点上每多扫一遍就是几毫秒，而且中间产物（临时数组）会立刻被丢弃；
+ * 建完之后只有 `x / y / size` 三条列常驻，`points` 留空 —— 这就是省内存的全部秘密。
+ *
+ * 输入三种写法都收：
+ * 1. 列式 `{ x, y, size? }`（大数据推荐直接给 `Float64Array`，图表**直接采用**，不复制）；
+ * 2. `[[x, y], ...]` 元组数组；
+ * 3. `[y, y, ...]` 纯数值数组（x 取下标）。
+ */
+function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesColumns {
+  const fail: (reason: string) => never = (reason) => {
+    throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
+  };
+  if (option.type !== 'scatter' && option.type !== 'line' && option.type !== 'area') {
+    fail(`目前只支持散点 / 折线 / 面积（scatter / line / area），收到 type: '${option.type}'。`);
+  }
+  if (option.stack) fail('不支持堆叠（stack）。');
+
+  const data: any = option.data;
+  let count = 0;
+  let readX: ((i: number) => any) | null = null;
+  let readY: ((i: number) => any) | null = null;
+  let readSize: ((i: number) => any) | null = null;
+  /** 列式输入且已经是 Float64Array 时直接采用（省掉一份 8MB/百万点的复制）。 */
+  let adoptX: Float64Array | null = null;
+  let adoptY: Float64Array | null = null;
+  let adoptSize: Float64Array | null = null;
+
+  if (data && !Array.isArray(data) && typeof data === 'object' && (data as any).x !== undefined) {
+    const cols: any = data;
+    count = Number(cols.y.length) || 0;
+    if (Number(cols.x.length) !== count) fail(`的 x / y 长度不一致（${cols.x.length} vs ${cols.y.length}）。`);
+    readX = (i) => cols.x[i];
+    readY = (i) => cols.y[i];
+    readSize = cols.size ? (i) => cols.size[i] : null;
+    adoptX = cols.x instanceof Float64Array ? cols.x : null;
+    adoptY = cols.y instanceof Float64Array ? cols.y : null;
+    adoptSize = cols.size instanceof Float64Array ? cols.size : null;
+  } else if (Array.isArray(data)) {
+    count = data.length;
+    readX = (i) => (Array.isArray(data[i]) ? data[i][0] : i);
+    readY = (i) => (Array.isArray(data[i]) ? data[i][1] : data[i]);
+    readSize = (i) => (Array.isArray(data[i]) && data[i].length > 2 ? data[i][2] : undefined);
+  } else {
+    fail('需要 data（列式 { x, y }、元组数组或数值数组）。');
+  }
+
+  const x = adoptX && adoptX.length === count ? adoptX : new Float64Array(count);
+  const y = adoptY && adoptY.length === count ? adoptY : new Float64Array(count);
+  if (!readX || !readY) fail('的数据无法解析。');
+  if (!adoptX || adoptX.length !== count) {
+    for (let i = 0; i < count; i++) {
+      const value = Number(readX(i));
+      if (!isFinite(value)) fail(`需要数值型 x（第 ${i} 项是 ${JSON.stringify(readX(i))}）。`);
+      x[i] = value;
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      if (!isFinite(x[i])) fail(`需要数值型 x（第 ${i} 项是 ${JSON.stringify(x[i])}）。`);
+    }
+  }
+
+  let hasSize = false;
+  const size = adoptSize && adoptSize.length === count ? adoptSize : new Float64Array(count).fill(NaN);
+  for (let i = 0; i < count; i++) {
+    const rawSize = readSize ? readSize(i) : undefined;
+    if (rawSize !== undefined && rawSize !== null && rawSize !== '') {
+      const parsed = Number(rawSize);
+      if (isFinite(parsed)) {
+        size[i] = parsed;
+        hasSize = true;
+      }
+    }
+    const parsedY = toNumber(readY(i));
+    y[i] = parsedY === null ? NaN : parsedY;
+  }
+
+  // 数据域 / 单调性：与建列同一趟（下面的循环就是扫描本体，上面那次只做了拷贝）
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  let monotonic = true;
+  let prevX = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const xv = x[i];
+    if (xv < xMin) xMin = xv;
+    if (xv > xMax) xMax = xv;
+    if (xv < prevX) monotonic = false;
+    prevX = xv;
+    const yv = y[i];
+    if (!Number.isNaN(yv)) {
+      if (yv < yMin) yMin = yv;
+      if (yv > yMax) yMax = yv;
+    }
+    const sv = size[i];
+    if (!Number.isNaN(sv)) {
+      if (sv < sMin) sMin = sv;
+      if (sv > sMax) sMax = sv;
+    }
+  }
+  if (!isFinite(xMin)) {
+    xMin = 0;
+    xMax = 1;
+  }
+  return {
+    kind: 'columns',
+    x,
+    y,
+    size: hasSize ? size : null,
+    xDomain: [xMin, xMax],
+    yDomain: isFinite(yMin) ? [yMin, yMax] : null,
+    xMonotonic: monotonic,
+    sizeExtent: hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null,
+  };
+}
+
+/** 分块输入的判定（`sizes` + `loadChunk` 是它的两个必需字段）。 */
+function isChunkedInput(data: any): boolean {
+  return !!data && !Array.isArray(data) && typeof data === 'object' && Array.isArray(data.sizes) && typeof data.loadChunk === 'function';
+}
+
+/**
+ * 分块列存（`virtual: true` + `data: { sizes, loadChunk, rangeOf }`）。
+ *
+ * 归一化**不加载任何块**：只登记块长度、逻辑起点与（可选的）块 x 范围。
+ * 真正的加载发生在渲染 / 命中拿到可见窗口之后（见 `util/chunks.ts`）——
+ * 这是「内存与数据总量解耦」的关键：初始化 10 亿点的图，代价只是几个数组。
+ */
+function buildVirtualChunks(input: any, seriesIndex: number): SeriesChunks {
+  const fail: (reason: string) => never = (reason) => {
+    throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
+  };
+  const sizes = input.sizes as any[];
+  if (!sizes.length) fail('的分块需要至少一块（sizes 为空）。');
+  for (const size of sizes) {
+    if (!isFinite(Number(size)) || Number(size) <= 0) {
+      fail(`的 sizes 必须是正数（收到 ${JSON.stringify(size)}）。`);
+    }
+  }
+  if (typeof input.rangeOf !== 'function') {
+    fail('的分块需要 rangeOf(i) 声明每块的 x 范围（否则窗口定位要先把块 load 一遍）。');
+  }
+  const yDomain = input.yDomain;
+  if (!Array.isArray(yDomain) || yDomain.length !== 2 || !yDomain.every((v: any) => isFinite(Number(v)))) {
+    fail('的分块需要声明式 yDomain: [min, max]（亿级数据不能为了自动缩放把块全加载一遍）。');
+  }
+  return createChunks({
+    sizes: sizes.map((size) => Number(size)),
+    load: (index: number) => {
+      const raw = input.loadChunk(index);
+      const normalize = (columns: any): { x: Float64Array; y: Float64Array } => {
+        if (!columns || typeof columns !== 'object' || columns.x === undefined || columns.y === undefined) {
+          fail(`的 loadChunk(${index}) 必须返回 { x, y }。`);
+        }
+        const size = sizes[index] === undefined ? 0 : Number(sizes[index]);
+        const x = columns.x instanceof Float64Array ? columns.x : Float64Array.from(columns.x as ArrayLike<number>, (v: any) => Number(v));
+        const y = new Float64Array(size);
+        for (let i = 0; i < size; i++) {
+          const value = columns.y[i];
+          y[i] = value === null || value === undefined || value === '' ? NaN : Number(value);
+        }
+        if (x.length !== size) fail(`的 loadChunk(${index}) 返回了 ${x.length} 个 x，但 sizes[${index}] 是 ${size}。`);
+        return { x, y };
+      };
+      if (raw && typeof (raw as PromiseLike<any>).then === 'function') {
+        return (raw as PromiseLike<any>).then(normalize);
+      }
+      return normalize(raw);
+    },
+    rangeOf: input.rangeOf,
+    yDomain: [Number(yDomain[0]), Number(yDomain[1])],
+    maxResidentChunks: input.maxResidentChunks,
+  });
+}
+
+/**
+ * 虚拟（列存）**稠密矩阵**：热力图的建列。
+ *
+ * 热力图的数据天然是矩阵（列类目 × 行类目 → 值），所以这里不做「点集 → 列」的搬运，
+ * 而是直接按矩阵存：类目定行列，值按行优先排进一个 `Float64Array`。
+ * 收益是三件事一起到手 —— 内存（100 万格 8MB）、**命中 O(1)**（类目查表 + 下标运算）、
+ * 以及绘制可以按窗口裁剪（不用每帧把所有格子都 fillRect 一遍）。
+ *
+ * 为什么校验密度：稀疏数据用矩阵存会**更费**内存（1000 个类目里只有 100 个格子有值，
+ * 矩阵还是 100 万格）。低于阈值直接报错，让调用方走普通路径。
+ */
+const VIRTUAL_GRID_MIN_DENSITY = 0.25;
+
+function buildVirtualGrid(option: SeriesOption, seriesIndex: number): SeriesGrid {
+  const fail: (reason: string) => never = (reason) => {
+    throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
+  };
+  const data: any = option.data;
+  const xCategories: any[] = [];
+  const yCategories: any[] = [];
+  let values: Float64Array | null = null;
+  /** 元组输入时实际提供了值的格子数（密度校验用）。 */
+  let provided = 0;
+  let fromTuples = false;
+
+  if (data && !Array.isArray(data) && typeof data === 'object' && (data as any).values !== undefined) {
+    const source: any = data;
+    if (Array.isArray(source.xCategories)) xCategories.push(...source.xCategories);
+    if (Array.isArray(source.yCategories)) yCategories.push(...source.yCategories);
+    const cols = xCategories.length;
+    const rows = yCategories.length;
+    if (!cols || !rows) fail('的矩阵需要非空的 xCategories / yCategories。');
+    const expected = cols * rows;
+    const length = Number(source.values.length) || 0;
+    if (length !== expected) fail(`的 values 长度（${length}）应等于 ${cols} × ${rows} = ${expected}。`);
+    values =
+      source.values instanceof Float64Array
+        ? source.values
+        : Float64Array.from(source.values as ArrayLike<number>, (v: any) =>
+            v === null || v === undefined ? NaN : Number(v)
+          );
+    provided = expected;
+  } else if (Array.isArray(data)) {
+    fromTuples = true;
+    const xLookup = new Map<any, number>();
+    const yLookup = new Map<any, number>();
+    const cells: Array<{ col: number; row: number; value: number }> = [];
+    for (let i = 0; i < data.length; i++) {
+      const item: any = data[i];
+      if (!Array.isArray(item) || item.length < 3) continue;
+      let col = xLookup.get(item[0]);
+      if (col === undefined) {
+        col = xCategories.length;
+        xLookup.set(item[0], col);
+        xCategories.push(item[0]);
+      }
+      let row = yLookup.get(item[1]);
+      if (row === undefined) {
+        row = yCategories.length;
+        yLookup.set(item[1], row);
+        yCategories.push(item[1]);
+      }
+      const value = toNumber(item[2]);
+      if (value === null) continue;
+      cells.push({ col, row, value });
+      provided += 1;
+    }
+    const cols = xCategories.length;
+    const rows = yCategories.length;
+    if (!cols || !rows) fail('的矩阵是空的（没有可用的 [x类目, y类目, 值] 数据项）。');
+    values = new Float64Array(cols * rows).fill(NaN);
+    for (const cell of cells) values[cell.row * cols + cell.col] = cell.value;
+  } else {
+    fail('需要 data（矩阵 { xCategories, yCategories, values } 或 [x类目, y类目, 值] 数组）。');
+  }
+
+  const cols = xCategories.length;
+  const rows = yCategories.length;
+  if (fromTuples && provided / Math.max(1, cols * rows) < VIRTUAL_GRID_MIN_DENSITY) {
+    fail(
+      `的矩阵太稀疏（${provided}/${cols * rows} 格有值）：虚拟热力图按稠密矩阵存，` +
+        '稀疏数据请用普通路径（去掉 virtual）。'
+    );
+  }
+  const matrix = values as Float64Array;
+  const xIndex = new Map<any, number>();
+  const yIndex = new Map<any, number>();
+  for (let i = 0; i < cols; i++) xIndex.set(xCategories[i], i);
+  for (let i = 0; i < rows; i++) yIndex.set(yCategories[i], i);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < matrix.length; i++) {
+    const value = matrix[i];
+    if (Number.isNaN(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  return {
+    xCategories,
+    yCategories,
+    values: matrix,
+    xIndex,
+    yIndex,
+    valueDomain: isFinite(min) ? [min, max] : null,
+  };
+}
+
 /** 推断 x 轴类型：显式配置优先，其次是「有柱状图 → 类目」。 */
 function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear' | 'category' | 'time' | 'log' {
   if (option.type) return option.type;
@@ -701,8 +1124,8 @@ function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear
     return 'category';
   const values: any[] = [];
   for (const s of series) {
-    for (const p of s.points) {
-      values.push(p.xValue);
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      values.push(s.xValueAt(i));
       if (values.length > 2000) break;
     }
   }
@@ -733,7 +1156,8 @@ export function buildCategoryValues(option: AxisOption, series: InternalSeries[]
   const seen: Record<string, boolean> = {};
   const out: any[] = [];
   for (const s of series) {
-    for (const point of s.points) {
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       const value = point.name === undefined ? point.xValue : point.name;
       const key = String(value);
       if (seen[key]) continue;
@@ -754,7 +1178,12 @@ export function applyAxisCategories(axis: AxisOption, series: InternalSeries[]):
   if (!axis || !Array.isArray(axis.data) || !axis.data.length) return;
   const data = axis.data;
   for (const s of series) {
-    for (const point of s.points) {
+    // 列存（虚拟）系列的类目顺序在「建列那一趟」就定死了（列是事实来源），
+    // 这里回填只会写入合成出来的临时对象，白跑 100 万次
+    if (s.virtual) continue;
+    // 写回点（列存系列在 Phase 3 换「写列」分支；普通系列就是写 points 里那一个对象）
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       if (point.xValue !== point.index) continue;
       if (data[point.index] === undefined) continue;
       point.xValue = data[point.index];
@@ -855,7 +1284,8 @@ function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?
   if (option.type !== 'function' && option.type !== 'parametric') return;
   const ys: number[] = [];
   const xs: number[] = [];
-  for (const point of series.points) {
+  for (let i = 0, n = series.pointCount; i < n; i++) {
+    const point = series.pointAt(i);
     const raw: any = point.raw;
     if (raw && typeof raw === 'object') {
       if (typeof raw.x === 'number') xs.push(raw.x);
@@ -881,7 +1311,8 @@ function applyCurveDomain(series: InternalSeries, option: SeriesOption, context?
   } else if (option.polarExpression !== undefined && option.polarExpression !== null && String(option.polarExpression).trim() !== '') {
     // 极坐标：诊断看的是 r(θ) 本身（x/y 是它的派生值，用它俩判断会给出误导性的提示）
     const radii: number[] = [];
-    for (const point of series.points) {
+    for (let i = 0, n = series.pointCount; i < n; i++) {
+      const point = series.pointAt(i);
       const raw: any = point.raw;
       if (raw && typeof raw === 'object' && typeof raw.r === 'number') radii.push(raw.r);
     }
@@ -925,6 +1356,12 @@ function buildXDomain(
   option: AxisOption
 ): { domain: any[]; categories: any[] } {
   if (type === 'category') {
+    /**
+     * 列存（虚拟）热力图：类目顺序由矩阵定死（值矩阵按这个顺序排），
+     * 优先于「轴自己声明的 data」与数据聚合 —— 顺序错了格子就整体错位。
+     */
+    const grid = series.find((s) => s.grid);
+    if (grid && grid.grid) return { domain: grid.grid.xCategories.slice(), categories: grid.grid.xCategories.slice() };
     // 轴自己声明了类目就用它（顺序即轴的顺序），否则从数据里聚合
     if (Array.isArray(option.data) && option.data.length) {
       return { domain: option.data.slice(), categories: option.data.slice() };
@@ -932,11 +1369,12 @@ function buildXDomain(
     const seen: Record<string, boolean> = {};
     const categories: any[] = [];
     for (const s of series) {
-      for (const p of s.points) {
-        const key = String(p.xValue);
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const xValue = s.xValueAt(i);
+        const key = String(xValue);
         if (!seen[key]) {
           seen[key] = true;
-          categories.push(p.xValue);
+          categories.push(xValue);
         }
       }
     }
@@ -945,13 +1383,20 @@ function buildXDomain(
 
   const values: number[] = [];
   for (const s of series) {
+    // 虚拟（列存）系列：数据域在归一化那一趟里算好了，别再扫一遍全量数据
+    const domain = storeDomainOf(s);
+    if (domain) {
+      values.push(domain.xDomain[0], domain.xDomain[1]);
+      continue;
+    }
     // 参数曲线的横坐标不是 xValue（那是参数 t），要用 x(t) 的极值
     if (s.domainXValues && s.domainXValues.length) {
       for (const v of s.domainXValues) if (isFinite(v)) values.push(v);
       continue;
     }
-    for (const p of s.points) {
-      const v = type === 'time' ? toTimestamp(p.xValue) : Number(p.xValue);
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const xValue = s.xValueAt(i);
+      const v = type === 'time' ? toTimestamp(xValue) : Number(xValue);
       if (isFinite(v)) values.push(v);
     }
   }
@@ -1030,13 +1475,20 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
     if (s.hidden) continue;
     if (s.axisIndex !== axisIndex) continue;
     if (s.type === 'bar' || s.type === 'area') includeZero = true;
+    // 虚拟（列存）系列：数据域在归一化那一趟里算好了
+    const domain = storeDomainOf(s);
+    if (domain) {
+      if (domain.yDomain) values.push(domain.yDomain[0], domain.yDomain[1]);
+      continue;
+    }
     // 函数绘图：数据域用稳健范围（分位数剪掉尖峰），而不是逐点求 min/max
     if (s.domainValues && s.domainValues.length) {
       const [lo, hi] = robustRange(s.domainValues);
       values.push(lo, hi);
       continue;
     }
-    for (const p of s.points) {
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const p = s.pointAt(i);
       if (p.y !== null) values.push(p.y);
       // 箱线图的须（min/max）也要进数据域
       if (p.boxplot) {
@@ -1094,7 +1546,7 @@ function buildRadarDomains(radar: RadarOption, series: InternalSeries[]): Array<
     let max = -Infinity;
     for (const s of series) {
       if (s.type !== 'radar' || s.hidden) continue;
-      const point = s.points[i];
+      const point = s.pointAt(i);
       if (!point || point.y === null) continue;
       if (point.y > max) max = point.y;
     }
@@ -1116,8 +1568,11 @@ function buildRadarDomains(radar: RadarOption, series: InternalSeries[]): Array<
 function applyWaterfall(series: InternalSeries[]): void {
   for (const s of series) {
     if (s.type !== 'waterfall') continue;
+    if (s.virtual) continue; // 列存系列不在这里改点（虚拟系列也不支持堆叠 / 瀑布）
     let cumulative = 0;
-    for (const point of s.points) {
+    // 写回点（列存系列在 Phase 3 换「写列」分支）
+    for (let i = 0, n = s.pointCount; i < n; i++) {
+      const point = s.pointAt(i);
       const raw: any = point.raw;
       const isTotal = !!(raw && typeof raw === 'object' && !Array.isArray(raw) && raw.total);
       const value = point.y || 0;
@@ -1160,8 +1615,12 @@ export function computeBoxplotSummary(values: number[]): [number, number, number
 function applyStacking(series: InternalSeries[]): void {
   const groups: Record<string, InternalSeries[]> = {};
   for (const s of series) {
+    // 列存（虚拟）系列不支持堆叠，也没有可写的点（列是事实来源）——
+    // 别在这里白跑 100 万次
+    if (s.virtual) continue;
     if (!s.option.stack) {
-      for (const p of s.points) {
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const p = s.pointAt(i);
         p.base = 0;
         p.top = p.y === null ? 0 : p.y;
       }
@@ -1175,7 +1634,9 @@ function applyStacking(series: InternalSeries[]): void {
     const group = groups[key];
     const cumulative: Record<string, number> = {};
     for (const s of group) {
-      for (const p of s.points) {
+      // 写回点（列存系列在 Phase 3 换「写列」分支）
+      for (let i = 0, n = s.pointCount; i < n; i++) {
+        const p = s.pointAt(i);
         const k = String(p.xValue);
         const base = cumulative[k] || 0;
         const value = p.y === null ? 0 : p.y;

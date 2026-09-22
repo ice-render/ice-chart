@@ -13,12 +13,13 @@ export class WaterfallSeries extends BarSeries {
   public seriesType: SeriesType = 'waterfall';
 
   private isTotalItem(index: number): boolean {
-    const raw: any = this.series.points[index] && this.series.points[index].raw;
+    const point = this.series.pointAt(index);
+    const raw: any = point && point.raw;
     return !!(raw && typeof raw === 'object' && !Array.isArray(raw) && raw.total);
   }
 
   private isIncrease(index: number): boolean {
-    const point = this.series.points[index];
+    const point = this.series.pointAt(index);
     return point ? (point.y || 0) >= 0 : true;
   }
 
@@ -46,7 +47,7 @@ export class WaterfallSeries extends BarSeries {
     ctx.lineWidth = unit;
     if (typeof ctx.setLineDash === 'function') ctx.setLineDash([4 * unit, 3 * unit]);
     ctx.beginPath();
-    for (let i = 0; i < this.series.points.length - 1; i++) {
+    for (let i = 0; i < this.series.pointCount - 1; i++) {
       const current = this.barRectAt(i);
       const next = this.barRectAt(i + 1);
       if (!current || !next) continue;
