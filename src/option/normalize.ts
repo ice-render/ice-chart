@@ -956,8 +956,13 @@ function buildVirtualRawPoints(option: SeriesOption, seriesIndex: number): Serie
   let monotonic = true;
   let prevX = -Infinity;
   let hasSize = false;
+  const categories: any[] = [];
+  const categoryCounts = new Map<string, number>();
   for (let i = 0; i < count; i++) {
     const parsed = readGenericPoint(raw[i], i, rule);
+    const key = String(parsed.xValue);
+    if ((categoryCounts.get(key) ?? 0) === 0) categories.push(parsed.xValue);
+    categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
     const x = Number(parsed.xValue);
     if (isFinite(x)) {
       if (x < xMin) xMin = x;
@@ -996,6 +1001,8 @@ function buildVirtualRawPoints(option: SeriesOption, seriesIndex: number): Serie
     yDomain: isFinite(yMin) ? [yMin, yMax] : null,
     xMonotonic: monotonic,
     sizeExtent: hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null,
+    categories,
+    categoryCounts,
   };
 }
 
@@ -1206,6 +1213,16 @@ export function buildCategoryValues(option: AxisOption, series: InternalSeries[]
   const seen: Record<string, boolean> = {};
   const out: any[] = [];
   for (const s of series) {
+    // 惰性原始点（自定义系列）：类目表是**增量维护**的，直接用（滚动窗口下每帧重扫是 3ms 级）
+    if (s.raw) {
+      for (const value of s.raw.categories) {
+        const key = String(value);
+        if (seen[key]) continue;
+        seen[key] = true;
+        out.push(value);
+      }
+      continue;
+    }
     for (let i = 0, n = s.pointCount; i < n; i++) {
       const point = s.pointAt(i);
       const value = point.name === undefined ? point.xValue : point.name;
@@ -1419,6 +1436,17 @@ function buildXDomain(
     const seen: Record<string, boolean> = {};
     const categories: any[] = [];
     for (const s of series) {
+      // 惰性原始点：类目表增量维护在存储里（滚动窗口下别每帧重扫）
+      if (s.raw) {
+        for (const value of s.raw.categories) {
+          const key = String(value);
+          if (!seen[key]) {
+            seen[key] = true;
+            categories.push(value);
+          }
+        }
+        continue;
+      }
       for (let i = 0, n = s.pointCount; i < n; i++) {
         const xValue = s.xValueAt(i);
         const key = String(xValue);

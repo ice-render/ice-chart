@@ -242,9 +242,17 @@ function buildAxisLayout(
   const ticks = scale.ticks(axisOption.tickCount || 5);
   const labels: string[] = [];
   let maxLabelWidth = 0;
+  /**
+   * 宽度**按样本量**（2026-09-22）：类目轴上标签宽度基本一致，而 `measureText` 是真在 ctx 上
+   * 量一次（μs 级）—— 全量量一遍就是 O(类目数)：10 万个类目、每次数据变化都要量 10 万次。
+   * `thinXAxisLabels` 本来就是按样本量宽度的，这里跟它保持同一条口径。
+   */
+  const sampleStep = Math.max(1, Math.floor(ticks.length / 64));
   for (let i = 0; i < ticks.length; i++) {
     const label = formatTick(ticks[i], scale, i, axisOption.formatter);
     labels.push(label);
+    // 首末两颗一定量（时间轴的端点常常最长/最短），其余按样本走
+    if (i % sampleStep !== 0 && i !== 0 && i !== ticks.length - 1) continue;
     const w = measureTextWidth(ctx, label, fontSize, fontFamily);
     if (w > maxLabelWidth) maxLabelWidth = w;
   }
