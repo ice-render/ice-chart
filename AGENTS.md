@@ -331,6 +331,12 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   现在在单调列上二分；② 无障碍数据表默认封顶 200 行（`A11yTreeOptions.maxTableRows`），
   超限按等步长抽样并在 caption 里写明（少给内容必须说出来）。
   新增「看一眼就完」的冷路径时先问一句：这件事需要知道**每一个点**吗？
+- **每 tick 的地板在流水线，不在存储**（2026-09-22 记录）：列存 / 环形把存储压到 O(1)
+  （实测 0.13ms/tick），剩下的成本是「数据一变就重跑归一化 + 布局 + 同步组件」这条流水线
+  （1 万根窗口 ~1.1ms、10 万根 ~1.6ms）。**要再往下压得做增量归一化 / 增量布局** ——
+  那是独立的一项，施工图与验收在 `plans/incremental-pipeline.md`，尺子是
+  `scripts/measure-pipeline.mjs`。别把「追加还是 O(n)」当成 bug 顺手乱改：
+  归一化是纯函数这条契约不能破。
 - **亿级数据用分块按需加载**（`SeriesChunks`）：`data: { sizes, rangeOf, yDomain, loadChunk }`，
   只驻留可见窗口覆盖的块（`maxResidentChunks`，LRU）。三条纪律：
   ① `rangeOf` / `yDomain` **必须声明式**（前者让窗口定位不必先加载，后者让坐标轴不随加载漂移）；
