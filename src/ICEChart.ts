@@ -8,7 +8,8 @@ import type {
   DataItem,
   LegendToggleParams,
 } from './types';
-import { storeDomainOf } from './internal';
+import { appendRawItems, storeDomainOf } from './internal';
+import type { SeriesRawPoints } from './internal';
 import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns, SeriesGrid } from './internal';
 import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains } from './util/ring';
 import type { SeriesRing } from './util/ring';
@@ -219,7 +220,11 @@ export class ICEChart {
    */
   private virtualColumns = new Map<
     string,
-    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing } | { chunks: SeriesChunks }
+    | { columns: SeriesColumns }
+    | { grid: SeriesGrid }
+    | { ring: SeriesRing }
+    | { chunks: SeriesChunks }
+    | { raw: SeriesRawPoints }
   >();
   /** 虚拟子源的版本号：任何影响「画出来是什么 / 命中什么」的变更都要 +1（引擎据此失效缓存）。 */
   private __virtualSourceVersion = 1;
@@ -462,6 +467,28 @@ export class ICEChart {
     const maxPoints = Number(options.maxPoints);
     const capacity = isFinite(maxPoints) && maxPoints > 0 ? Math.floor(maxPoints) : 0;
     const cached = this.virtualColumns.get(series.id);
+    /**
+     * **惰性原始点**（自定义系列）：追加就是往原始数据里写 ——
+     * 没给窗口就原地 push（调用方那个数组也跟着长），给了窗口就转成**原始环**（O(1)/次）。
+     * 不重建 `DataPoint`、不 concat，语义与其它形态一致。
+     */
+    if (cached && 'raw' in cached) {
+      const store = appendRawItems(cached.raw, appended, capacity);
+      this.virtualColumns.set(series.id, { raw: store });
+      if (store.capacity > 0 && series.option.data !== undefined) {
+        // 环形态下原始数据归存储所有：从 option 里摘掉（快照因此不再含它，restore 会显式报错）
+        const lean: any = { ...series.option, data: undefined };
+        const list = this.option.series;
+        if (Array.isArray(list)) {
+          const at = list.findIndex((item: any, index: number) => (item && item.id) === series.id || index === series.index);
+          if (at >= 0) list[at] = lean;
+        }
+        (series as any).option = lean;
+      }
+      this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
+      this.emit('data:change', { seriesId: series.id, seriesIndex: series.index });
+      return this;
+    }
     let ring: SeriesRing;
     if (cached && 'ring' in cached) {
       ring = cached.ring;

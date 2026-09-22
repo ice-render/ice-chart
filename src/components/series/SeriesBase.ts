@@ -424,7 +424,13 @@ export abstract class SeriesBase extends ChartComponent {
 
   /** 数据 → 像素（带缓存）。 */
   protected rebuildPixels(force = false): void {
-    if (this.series.virtual) {
+    /**
+     * 虚拟系列的像素缓存：**数值列 / 矩阵**不建（那是它们省内存的一半），
+     * 但**惰性原始点（自定义系列）照旧建** —— 自定义系列的 `doRender` 通常直接读 `this.pixels`
+     * （AGENTS 的「新增一种图表类型」清单就是这么写的），不建像素会让它**静默不画**。
+     * 对它们来说 `virtual` 省的是「每点一个 DataPoint 对象」，不是像素。
+     */
+    if (this.series.virtual && !this.series.raw) {
       // 列存系列不物化像素：只同步元信息（单调性 / 尺寸范围），像素按需现算
       this.syncVirtualMeta();
       return;
