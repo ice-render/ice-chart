@@ -1,13 +1,22 @@
 import type { AnnotationOption, AxisOption, ChartOption, ChartTheme, SeriesOption } from '../types';
 import type { GraphOption, RadarOption, SankeyNodeOption, SankeyOption } from '../types';
-import { arrayAccessors, columnAccessors, gridAccessors, storeDomainOf } from '../internal';
+import {
+  arrayAccessors,
+  columnAccessors,
+  gridAccessors,
+  rawAccessors,
+  readGenericPoint,
+  storeDomainOf,
+  toNumber,
+} from '../internal';
+import type { SeriesRawPoints } from '../internal';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption, SeriesColumns, SeriesGrid } from '../internal';
 import type { SeriesRing } from '../util/ring';
 import { ringAccessors } from '../util/ring';
 import { chunkAccessors, createChunks } from '../util/chunks';
 import type { SeriesChunks } from '../util/chunks';
 import { resolveChartTheme } from '../theme/chartTheme';
-import { extent, isFiniteNumber, isNil, niceDomain, round } from '../util/math';
+import { extent, isFiniteNumber, niceDomain, round } from '../util/math';
 import { toTimestamp } from '../scale/TimeScale';
 import { compileExpression } from '../expr/expr';
 import { diagnoseExpression } from '../expr/diagnostics';
@@ -123,7 +132,11 @@ export interface NormalizeContext {
    */
   virtualColumns?: Map<
     string,
-    { columns: SeriesColumns } | { grid: SeriesGrid } | { ring: SeriesRing } | { chunks: SeriesChunks }
+    | { columns: SeriesColumns }
+    | { grid: SeriesGrid }
+    | { ring: SeriesRing }
+    | { chunks: SeriesChunks }
+    | { raw: SeriesRawPoints }
   >;
 }
 
@@ -272,8 +285,12 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
       ? xAxisOption.type
       : 'linear'
     : resolveXAxisType(xAxisOption, series);
-  // 虚拟（列存）系列只有数值列，类目轴表达不了它（别让 100 万个数值被聚合成 100 万个类目）
-  if (series.some((s) => s.virtual && !s.grid) && (xType === 'category' || horizontal)) {
+  /**
+   * **数值列**的虚拟系列只有数值型 x（类目轴表达不了它，别让 100 万个数值被聚合成 100 万个类目）。
+   * 惰性原始点（自定义系列）不受这条限制：它的 x 可以是类目（K 线就是时间字符串）。
+   */
+  const columnarVirtual = series.some((s) => !!(s.columns || s.ring || s.chunks));
+  if (columnarVirtual && (xType === 'category' || horizontal)) {
     throw new Error('[ice-chart] 虚拟（列存）系列只支持数值型 x 轴（xAxis.type 不要写 category）。');
   }
   // 反过来：虚拟热力图的 x / y 都必须是类目轴（矩阵靠类目定行列）
@@ -432,87 +449,92 @@ function buildSeries(
     const id = option.id || `series-${i}`;
     const color = option.color || theme.colorPalette[i % theme.colorPalette.length];
     // 列存（虚拟）系列：只建列，不建数据点数组（见 plans/scatter-large-data-virtualization.md）
+    // 列存（虚拟）系列：只建存储，不建「每点一个 DataPoint」的数据点数组
     if (option.virtual) {
-      const cached = context && context.virtualColumns ? context.virtualColumns.get(id) : undefined;
-      // 没有 data（已被释放）时复用上一遍建好的列；带 data 的输入永远以 data 为准
-      const reuse = cached && option.data === undefined ? cached : null;
-      /**
-       * **释放原始 data**：建完列之后图表只保留列本身。
-       *
-       * 这里换掉的是 option.series 里的那一项本身（`merged.series === option.series`，
-       * 两处一起生效）—— 百万级输入（元组数组动辄 40~70MB）从此没有任何引用，
-       * 调用方自己留着的引用不受影响。提示框的 `params.data` 因此为空（见 types 里的说明）。
-       */
-      const leanOption: SeriesOption = { ...option, data: undefined };
-      seriesOptions[i] = leanOption;
+      const cache = context && context.virtualColumns ? context.virtualColumns : null;
+      const cached = cache ? cache.get(id) : undefined;
       const shared = {
         id,
         index: i,
         type: option.type,
         name,
         color,
-        option: leanOption,
         points: [],
         virtual: true as const,
         hasExplicitX: true,
         hidden: false,
         axisIndex: 0,
       };
+      /**
+       * 存储有**两种生命周期**，先定形态再决定要不要摘掉 `data`：
+       * - 惰性原始点（自定义系列）：**保留 `data`** —— 原始数据就是存储本身，按引用复用；
+       * - 数值列 / 矩阵 / 分块 / 环形：建完就把 `data` 从 option 里摘掉（省内存的大头，
+       *   百万级元组数组从此没有任何引用），下一遍归一化靠缓存复用同一项。
+       */
+      const reuseRaw =
+        cached &&
+        'raw' in cached &&
+        (option.data === undefined || (cached.raw as SeriesRawPoints).data === option.data)
+          ? cached.raw
+          : null;
+      const reuseStore = !reuseRaw && cached && option.data === undefined ? cached : null;
+      const takeLean = (): SeriesOption => {
+        const lean: SeriesOption = { ...option, data: undefined };
+        seriesOptions[i] = lean;
+        return lean;
+      };
+
+      if (reuseRaw) {
+        out.push({ ...shared, option, raw: reuseRaw, pointCount: reuseRaw.length, ...rawAccessors(reuseRaw) });
+        continue;
+      }
+      if (reuseStore && 'ring' in reuseStore) {
+        const ring = reuseStore.ring;
+        out.push({ ...shared, option, ring, pointCount: ring.length, ...ringAccessors(ring) });
+        continue;
+      }
+      if (reuseStore && 'chunks' in reuseStore) {
+        const chunks = reuseStore.chunks;
+        out.push({ ...shared, option, chunks, pointCount: chunks.total, ...chunkAccessors(chunks) });
+        continue;
+      }
+      if (reuseStore && 'grid' in reuseStore) {
+        const grid = reuseStore.grid;
+        out.push({ ...shared, option, grid, pointCount: grid.values.length, ...gridAccessors(grid) });
+        continue;
+      }
+      if (reuseStore && 'columns' in reuseStore) {
+        const columns = reuseStore.columns;
+        out.push({ ...shared, option, columns, pointCount: columns.y.length, ...columnAccessors(columns) });
+        continue;
+      }
+
+      // ---- 新建存储 ----
       if (option.type === 'heatmap') {
-        const grid = reuse && 'grid' in reuse ? (reuse.grid as SeriesGrid) : buildVirtualGrid(option, i);
-        if (context && context.virtualColumns) context.virtualColumns.set(id, { grid });
-        out.push({
-          ...shared,
-          grid,
-          pointCount: grid.values.length,
-          ...gridAccessors(grid),
-        });
+        const grid = buildVirtualGrid(option, i);
+        if (cache) cache.set(id, { grid });
+        out.push({ ...shared, option: takeLean(), grid, pointCount: grid.values.length, ...gridAccessors(grid) });
+        continue;
+      }
+      if (isChunkedInput(option.data)) {
+        const chunks = buildVirtualChunks(option.data, i);
+        if (cache) cache.set(id, { chunks });
+        out.push({ ...shared, option: takeLean(), chunks, pointCount: chunks.total, ...chunkAccessors(chunks) });
+        continue;
+      }
+      if (isColumnarVirtualType(option.type)) {
+        const columns = buildVirtualColumns(option, i);
+        if (cache) cache.set(id, { columns });
+        out.push({ ...shared, option: takeLean(), columns, pointCount: columns.y.length, ...columnAccessors(columns) });
         continue;
       }
       /**
-       * 环形缓冲（实时流 appendData 之后）：**别在这里重新建列** ——
-       * 数据早就释放了，缓存里的环就是当前数据。访问器按逻辑下标读环。
+       * 惰性原始点：任何其它类型（自定义系列）都走这里 —— 保留原始数据、不建 DataPoint 数组。
+       * 组件按自己的字段解析 raw，提示框照旧能拿到 `params.data`。
        */
-      if (reuse && 'ring' in reuse) {
-        const ring = reuse.ring;
-        out.push({
-          ...shared,
-          ring,
-          pointCount: ring.length,
-          ...ringAccessors(ring),
-        });
-        continue;
-      }
-      // 分块存储：逻辑点数来自块长度之和，块本身按需加载
-      if (reuse && 'chunks' in reuse) {
-        const chunks = reuse.chunks;
-        out.push({
-          ...shared,
-          chunks,
-          pointCount: chunks.total,
-          ...chunkAccessors(chunks),
-        });
-        continue;
-      }
-      if (!reuse && isChunkedInput(option.data)) {
-        const chunks = buildVirtualChunks(option.data, i);
-        if (context && context.virtualColumns) context.virtualColumns.set(id, { chunks });
-        out.push({
-          ...shared,
-          chunks,
-          pointCount: chunks.total,
-          ...chunkAccessors(chunks),
-        });
-        continue;
-      }
-      const columns = reuse && 'columns' in reuse ? (reuse.columns as SeriesColumns) : buildVirtualColumns(option, i);
-      if (context && context.virtualColumns) context.virtualColumns.set(id, { columns });
-      out.push({
-        ...shared,
-        columns,
-        pointCount: columns.y.length,
-        ...columnAccessors(columns),
-      });
+      const raw = buildVirtualRawPoints(option, i);
+      if (cache) cache.set(id, { raw });
+      out.push({ ...shared, option, raw, pointCount: raw.length, ...rawAccessors(raw) });
       continue;
     }
     const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph, context);
@@ -773,59 +795,20 @@ function buildPoints(
   }
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
-    let xValue: any = i;
-    let y: number | null = null;
-    /** 第三维（气泡尺寸）。 */
-    let size: number | undefined;
-    let explicitX = false;
-    if (Array.isArray(item)) {
-      xValue = item[0];
-      y = toNumber(item[1]);
-      // 气泡图：第三维是尺寸
-      if (item.length > 2) {
-        const parsed = toNumber(item[2]);
-        size = parsed === null ? undefined : parsed;
-      }
-      explicitX = true;
-    } else if (typeof item === 'number' || item === null) {
-      y = toNumber(item);
-    } else if (item && typeof item === 'object') {
-      const xField = option.xField || 'x';
-      const yField = option.yField || 'y';
-      if (item[xField] !== undefined) {
-        xValue = item[xField];
-        explicitX = true;
-      } else if (item.x !== undefined) {
-        xValue = item.x;
-        explicitX = true;
-      } else if (item.name !== undefined && option.type === 'bar') {
-        xValue = item.name;
-        explicitX = true;
-      }
-      if (item[yField] !== undefined) y = toNumber(item[yField]);
-      else if (item.y !== undefined) y = toNumber(item.y);
-      else if (item.value !== undefined) y = toNumber(item.value);
-      if (item.size !== undefined) {
-        const parsed = toNumber(item.size);
-        size = parsed === null ? undefined : parsed;
-      }
-    }
-    if (explicitX) hasExplicitX = true;
-    let name: string | undefined;
-    if (item && typeof item === 'object' && !Array.isArray(item) && item.name !== undefined) {
-      name = String(item.name);
-    } else if (option.type === 'pie' && Array.isArray(item) && typeof item[0] === 'string') {
-      name = item[0];
-    }
-    points.push({ index: i, xValue, y, raw: item, base: 0, top: y === null ? 0 : y, name, size });
+    const parsed = readGenericPoint(item, i, option);
+    if (parsed.explicitX) hasExplicitX = true;
+    points.push({
+      index: i,
+      xValue: parsed.xValue,
+      y: parsed.y,
+      raw: item,
+      base: 0,
+      top: parsed.y === null ? 0 : parsed.y,
+      name: parsed.name,
+      size: parsed.size,
+    });
   }
   return { points, hasExplicitX };
-}
-
-function toNumber(value: any): number | null {
-  if (isNil(value)) return null;
-  const n = Number(value);
-  return isFinite(n) ? n : null;
 }
 
 /**
@@ -942,6 +925,73 @@ function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesC
     x,
     y,
     size: hasSize ? size : null,
+    xDomain: [xMin, xMax],
+    yDomain: isFinite(yMin) ? [yMin, yMax] : null,
+    xMonotonic: monotonic,
+    sizeExtent: hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null,
+  };
+}
+
+/** 有专门列存布局的类型（数值列 / 稠密矩阵）；其余的 virtual 系列走「惰性原始点」。 */
+function isColumnarVirtualType(type: SeriesOption['type']): boolean {
+  return type === 'scatter' || type === 'line' || type === 'area' || type === 'heatmap';
+}
+
+/**
+ * 惰性原始点存储：**一趟扫描**算好数据域 / 单调性 / 尺寸范围，但**不建 `DataPoint`**。
+ *
+ * 取点规则与普通系列共用 `readGenericPoint` —— 所以 virtual 与普通系列在提示框 /
+ * 命中里表现一致，只有「对象什么时候造」不同。原始数据按引用保留（见 `SeriesRawPoints`）。
+ */
+function buildVirtualRawPoints(option: SeriesOption, seriesIndex: number): SeriesRawPoints {
+  const raw = Array.isArray(option.data) ? option.data : [];
+  const count = raw.length;
+  const rule = { type: option.type, xField: option.xField, yField: option.yField };
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  let monotonic = true;
+  let prevX = -Infinity;
+  let hasSize = false;
+  for (let i = 0; i < count; i++) {
+    const parsed = readGenericPoint(raw[i], i, rule);
+    const x = Number(parsed.xValue);
+    if (isFinite(x)) {
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (x < prevX) monotonic = false;
+      prevX = x;
+    } else {
+      // 类目 / 时间字符串：数值域没有意义，单调性按「不能证明」处理
+      monotonic = false;
+    }
+    if (parsed.y !== null) {
+      if (parsed.y < yMin) yMin = parsed.y;
+      if (parsed.y > yMax) yMax = parsed.y;
+    }
+    if (typeof parsed.size === 'number' && isFinite(parsed.size)) {
+      hasSize = true;
+      if (parsed.size < sMin) sMin = parsed.size;
+      if (parsed.size > sMax) sMax = parsed.size;
+    }
+  }
+  if (!isFinite(xMin)) {
+    xMin = 0;
+    xMax = Math.max(0, count - 1);
+  }
+  void seriesIndex;
+  return {
+    kind: 'raw',
+    data: raw,
+    start: 0,
+    length: count,
+    capacity: 0,
+    type: option.type,
+    xField: option.xField,
+    yField: option.yField,
     xDomain: [xMin, xMax],
     yDomain: isFinite(yMin) ? [yMin, yMax] : null,
     xMonotonic: monotonic,

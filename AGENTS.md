@@ -344,6 +344,18 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   数据**不复制**，窗口裁剪 / 批量落墨 / 命中归引擎，白拿「命中即物化」/ SVG 导出 /
   对齐参考线。两点注意：`forEachInBox` 是 O(窗口项数)（100 万项全窗约 30ms，按需调用，
   别每帧全窗扫）；`materialize` 只造组件，挂树由调用方做（引擎定的口径）。
+- **自定义系列也能 `virtual`（惰性原始点，`SeriesRawPoints`）**：`scatter/line/area/heatmap`
+  之外的任何类型（含 `registerSeriesType` 注册的）开 `virtual: true` 走这条 ——
+  **原始数据按引用保留**（组件按自己的字段解析、提示框照旧有 `params.data`），
+  省掉的是「每点一个 `DataPoint`」；取点规则与普通系列**共用 `readGenericPoint`**
+  （两边的 `xValue/y/name/size` 必须逐字一致，否则提示框与命中会分叉）。
+  三条别踩：① **像素缓存照旧建**（自定义系列的 `doRender` 通常直接读 `this.pixels`，
+     不建缓存会让它静默不画）—— 数值列 / 矩阵才省像素；
+  ② 追加：不给窗口就**原地 push**（调用方那个数组也跟着长），给了 `maxPoints` 就转成
+     **原始环**（`capacity`/`start`，滚动窗口 O(1)/次，不用 `shift()` 搬 10 万个元素）；
+  ③ 快照：普通形态数据还在 option 里（**能进快照**），转成环之后归存储所有、
+     option 里被摘掉 → `restore()` 显式报错（与数值列系列同一条纪律）。
+     门禁：`tests/chart/virtual-custom-series.test.ts`（渲染 / 命中 / 两种追加 / 环的绕回 / 快照）。
 - **代价要一直保持显式**（不许静默降级）：快照里没有数据 → `restore()` 直接报错；
   `appendData` 报错（改 `setData`）；数值列系列要数值型 x（类目轴、堆叠一律抛错）、
   虚拟热力图反而要求类目轴且密度够高（太稀疏报错）。相应的门禁：

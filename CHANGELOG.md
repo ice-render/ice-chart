@@ -4,6 +4,30 @@
 
 > 下一个版本发布前，改动在这里累积。
 
+## [0.30.0] - 2026-09-22
+
+### 新增
+
+- **自定义系列也能开列存（`virtual: true` 对任意类型成立）**。以前 `virtual` 只认
+  `scatter / line / area`（数值列）与 `heatmap`（稠密矩阵），其余类型直接报错 ——
+  于是注册进来的自定义系列（K 线那一类）只能按「每点一个 `DataPoint`」走。
+  现在多了一类存储：**惰性原始点**（`SeriesRawPoints`）。
+
+  取舍写在契约里：**原始数据按引用保留**（组件按自己的字段解析、提示框照旧拿得到
+  `params.data`），省掉的是「每点一个 `DataPoint` 对象」；取点规则与普通系列**共用**
+  `readGenericPoint`（两边的 `xValue / y / name / size` 必须逐字一致）。
+  **像素缓存照旧建** —— 自定义系列的 `doRender` 通常直接读 `this.pixels`，不建会让它静默不画；
+  数值列 / 矩阵才同时省像素与动画缓存。
+
+  追加也通了：`appendData(id, items)` 不给窗口就**原地 push**（调用方那个数组跟着长），
+  给了 `maxPoints` 就转成**原始环**（`capacity` / `start`，滚动窗口 O(1)/次，
+  不用 `shift()` 搬 10 万个元素；绕回之后逻辑顺序由访问器保证）。
+  快照语义与数值列一致：普通形态数据在 option 里（**能进快照**），
+  转成环之后归存储所有 → `restore()` 显式报错，而不是悄悄给一张空图。
+
+  回归：`tests/chart/virtual-custom-series.test.ts`（自定义系列端到端：渲染 / 命中 /
+  两种追加 / 环的绕回 / 快照）、`tests/option/normalize.test.ts` 的「惰性原始点」一组。
+
 ## [0.29.1] - 2026-09-22
 
 ### 修复

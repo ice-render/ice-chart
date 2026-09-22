@@ -194,13 +194,74 @@ describe('虚拟（列存）系列（scatter）', () => {
   });
 
   it('非法用法显式报错（类型 / 类目轴 / 非数值 x / 堆叠）', () => {
-    expect(() => normalizeOption({ series: [{ type: 'bar', virtual: true, data: [[0, 1]] }] })).toThrow(
-      /scatter \/ line \/ area/
-    );
     expect(() => normalizeOption({ xAxis: { type: 'category' }, series: [virtualScatter()] })).toThrow(/数值型 x 轴/);
     expect(() => normalizeOption({ series: [virtualScatter({ data: [['a', 1]] })] })).toThrow(/数值型 x/);
     expect(() => normalizeOption({ series: [virtualScatter({ stack: 'g' })] })).toThrow(/堆叠/);
     expect(() => normalizeOption({ series: [{ id: 's', type: 'scatter', virtual: true }] })).toThrow(/需要 data/);
+  });
+
+  describe('惰性原始点（自定义系列 / 非数值列类型）', () => {
+    const rows = [
+      { x: 'D1', o: 100, c: 110, l: 95, h: 115 },
+      { x: 'D2', o: 110, c: 105, l: 100, h: 118 },
+    ];
+
+    it('保留原始数据、不建 DataPoint：字段与普通系列逐字一致', () => {
+      const option: any = { xAxis: { type: 'category' }, series: [{ id: 'k', type: 'bar', virtual: true, data: rows }] };
+      const norm = normalizeOption(option);
+      const series = norm.series[0];
+      expect(series.virtual).toBe(true);
+      expect(series.points).toEqual([]);
+      expect(series.pointCount).toBe(2);
+      expect(series.raw!.length).toBe(2);
+      // 原始数据**不释放**（它是存储本身）：提示框的 params.data 仍然给得出来
+      expect(option.series[0].data).toBe(rows);
+      const lazy = series.pointAt(1);
+      expect(lazy).toMatchObject({ index: 1, xValue: 'D2', y: null, name: undefined });
+      expect(lazy.raw).toBe(rows[1]);
+      // 普通系列同一条数据：合成出来的字段应当逐字一致（同一个 readGenericPoint）
+      const plain = normalizeOption({ xAxis: { type: 'category' }, series: [{ id: 'k', type: 'bar', data: rows }] })
+        .series[0]
+        .pointAt(1);
+      expect({ ...lazy, raw: undefined, index: lazy.index }).toEqual({ ...plain, raw: undefined, index: plain.index });
+    });
+
+    it('数值型 x / y 一样算域与单调性；yField 决定 y', () => {
+      const norm = normalizeOption({
+        series: [
+          {
+            id: 'k',
+            type: 'bar',
+            virtual: true,
+            yField: 'c',
+            data: [
+              [1, 10],
+              [2, 20],
+              [3, 30],
+            ],
+          },
+        ],
+      } as any);
+      const series = norm.series[0];
+      expect(series.raw!.xDomain).toEqual([1, 3]);
+      expect(series.raw!.yDomain).toEqual([10, 30]);
+      expect(series.raw!.xMonotonic).toBe(true);
+      expect(series.pointAt(2).y).toBe(30);
+    });
+
+    it('类目 x 不算数值域、也不声称单调（数值域留给类目轴自己）', () => {
+      const norm = normalizeOption({ xAxis: { type: 'category' }, series: [{ id: 'k', type: 'bar', virtual: true, data: rows }] } as any);
+      expect(norm.series[0].raw!.xMonotonic).toBe(false);
+      expect(norm.categories).toEqual(['D1', 'D2']);
+    });
+
+    it('数据在 option 里，所以**照旧能进快照**（与数值列系列的取舍相反）', () => {
+      const option: any = { xAxis: { type: 'category' }, series: [{ id: 'k', type: 'bar', virtual: true, data: rows }] };
+      const norm = normalizeOption(option);
+      expect(norm.series[0].pointCount).toBe(2);
+      // 普通（非 ring）形态下 data 还在，快照自然带上它
+      expect(option.series[0].data).toBe(rows);
+    });
   });
 
   it('热力图：元组输入落成稠密矩阵（类目顺序即行列顺序）', () => {

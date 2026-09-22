@@ -80,7 +80,7 @@ export interface SeriesColumns {
 export function storeDomainOf(
   series: InternalSeries
 ): { xDomain: [number, number]; yDomain: [number, number] | null; xMonotonic: boolean; sizeExtent: [number, number] | null } | null {
-  const store = series.columns || series.ring || series.chunks;
+  const store = series.columns || series.ring || series.chunks || series.raw;
   if (!store) return null;
   return {
     xDomain: store.xDomain,
@@ -110,6 +110,41 @@ export interface SeriesGrid {
   yIndex: Map<any, number>;
   /** 值域（忽略 NaN）；全是空格时为 null。 */
   valueDomain: [number, number] | null;
+}
+
+/**
+ * 虚拟（列存）的**惰性原始点**存储：给「数值列 / 矩阵之外」的类型（自定义系列）用。
+ *
+ * 为什么需要它：`scatter / line / area` 的数据是 (x, y) 数值对，列存能把原始数据也省掉；
+ * 但自定义系列（K 线那种 `[x, o, c, l, h, v]` 元组）的原始数据**本身就是要保留的** ——
+ * 组件要靠它解析自己的字段，提示框要用 `point.raw`。
+ * 所以这里的取舍是：**原始数据按引用保留，省掉的是「每点一个 `DataPoint` 对象」**，
+ * 点按需合成，字段规则与 normalize 里那条通用分支逐字一致（同一个 `readGenericPoint`）。
+ *
+ * 两种形态：
+ * - 普通：`capacity === 0`，逻辑点就是 `data` 本身（`start` 恒为 0）；
+ * - 环形（`appendData(..., { maxPoints })` 之后）：`data` 是一片**定长原始环**，
+ *   逻辑第 i 个点在 `(start + i) % capacity` 上 —— 滚动窗口的追加因此是 O(1)，
+ *   不用 `shift()` 搬 10 万个元素。
+ */
+export interface SeriesRawPoints {
+  kind: 'raw';
+  /** 原始数据（引用保留；环形态下是定长数组）。 */
+  data: any[];
+  /** 逻辑起点（环形态下才有意义）。 */
+  start: number;
+  /** 逻辑点数。 */
+  length: number;
+  /** 0 = 用 `data` 本身；> 0 = 环容量。 */
+  capacity: number;
+  /** 取点规则（建存储时定下来）。 */
+  type?: string;
+  xField?: string;
+  yField?: string;
+  xDomain: [number, number];
+  yDomain: [number, number] | null;
+  xMonotonic: boolean;
+  sizeExtent: [number, number] | null;
 }
 
 export interface InternalSeries {
@@ -144,6 +179,8 @@ export interface InternalSeries {
   chunks?: SeriesChunks | null;
   /** 列存（虚拟）热力图的稠密矩阵；其它系列为 null。 */
   grid?: SeriesGrid | null;
+  /** 列存（虚拟）的惰性原始点（自定义系列用）；其它系列为 null。 */
+  raw?: SeriesRawPoints | null;
   /**
    * 数据点个数 —— **读点数量的唯一入口**。
    *
@@ -282,6 +319,207 @@ export function columnAccessors(
 /** `NaN` 判定（列存里 NaN 是「没有值」的记号，不是数值）。 */
 function isNaNNumber(value: number): boolean {
   return typeof value !== 'number' || Number.isNaN(value);
+}
+
+/** 取数值：`null` / 空串 / 非数字都算「没有值」（不是 0）。 */
+export function toNumber(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * 通用数据项的取点规则（**唯一一处**）：数组 / 数值 / 对象三种形态都认。
+ *
+ * 放在这里是因为有**两个消费方**：普通系列的 `buildPoints`，与虚拟（列存）系列的
+ * 「惰性原始点」存储（`rawAccessors`）。两边必须是同一份规则 —— 否则「普通系列」与
+ * 「virtual 系列」合成出来的 `xValue / y / name / size` 会分叉，提示框和命中跟着漂。
+ */
+export function readGenericPoint(
+  item: any,
+  index: number,
+  option: { type?: string; xField?: string; yField?: string }
+): { xValue: any; y: number | null; size?: number; name?: string; explicitX: boolean } {
+  let xValue: any = index;
+  let y: number | null = null;
+  let size: number | undefined;
+  let explicitX = false;
+  if (Array.isArray(item)) {
+    xValue = item[0];
+    y = toNumber(item[1]);
+    // 气泡图：第三维是尺寸
+    if (item.length > 2) {
+      const parsed = toNumber(item[2]);
+      size = parsed === null ? undefined : parsed;
+    }
+    explicitX = true;
+  } else if (typeof item === 'number' || item === null) {
+    y = toNumber(item);
+  } else if (item && typeof item === 'object') {
+    const xField = option.xField || 'x';
+    const yField = option.yField || 'y';
+    if (item[xField] !== undefined) {
+      xValue = item[xField];
+      explicitX = true;
+    } else if (item.x !== undefined) {
+      xValue = item.x;
+      explicitX = true;
+    } else if (item.name !== undefined && option.type === 'bar') {
+      xValue = item.name;
+      explicitX = true;
+    }
+    if (item[yField] !== undefined) y = toNumber(item[yField]);
+    else if (item.y !== undefined) y = toNumber(item.y);
+    else if (item.value !== undefined) y = toNumber(item.value);
+    if (item.size !== undefined) {
+      const parsed = toNumber(item.size);
+      size = parsed === null ? undefined : parsed;
+    }
+  }
+  let name: string | undefined;
+  if (item && typeof item === 'object' && !Array.isArray(item) && item.name !== undefined) {
+    name = String(item.name);
+  } else if (option.type === 'pie' && Array.isArray(item) && typeof item[0] === 'string') {
+    name = item[0];
+  }
+  return { xValue, y, size, name, explicitX };
+}
+
+/** 惰性原始点存储的逻辑第 i 个原始项（环形态按 `(start + i) % capacity` 取）。 */
+export function rawItemAt(store: SeriesRawPoints, index: number): any {
+  if (index < 0 || index >= store.length) return undefined;
+  if (store.capacity <= 0) return store.data[index];
+  return store.data[(store.start + index) % store.capacity];
+}
+
+/** 按逻辑顺序重算惰性原始点的数据域 / 单调性 / 尺寸范围（追加之后调用）。 */
+export function refreshRawDomains(store: SeriesRawPoints): void {
+  const rule = { type: store.type, xField: store.xField, yField: store.yField };
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  let sMin = Infinity;
+  let sMax = -Infinity;
+  let monotonic = true;
+  let prevX = -Infinity;
+  let hasSize = false;
+  for (let i = 0; i < store.length; i++) {
+    const parsed = readGenericPoint(rawItemAt(store, i), i, rule);
+    const x = Number(parsed.xValue);
+    if (isFinite(x)) {
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (x < prevX) monotonic = false;
+      prevX = x;
+    } else {
+      monotonic = false;
+    }
+    if (parsed.y !== null) {
+      if (parsed.y < yMin) yMin = parsed.y;
+      if (parsed.y > yMax) yMax = parsed.y;
+    }
+    if (typeof parsed.size === 'number' && isFinite(parsed.size)) {
+      hasSize = true;
+      if (parsed.size < sMin) sMin = parsed.size;
+      if (parsed.size > sMax) sMax = parsed.size;
+    }
+  }
+  store.xDomain = isFinite(xMin) ? [xMin, xMax] : [0, Math.max(0, store.length - 1)];
+  store.yDomain = isFinite(yMin) ? [yMin, yMax] : null;
+  store.xMonotonic = monotonic;
+  store.sizeExtent = hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null;
+}
+
+/**
+ * 往惰性原始点里追加（`appendData` 的落地）。
+ *
+ * - `capacity <= 0`：**就地** push 进原来的数组（`data` 还是同一个引用，调用方仍然持有）；
+ * - `capacity > 0`：转成**原始环** —— 第一次转换时按容量重新装一遍（只留最后 capacity 项），
+ *   之后每次追加都是「写一个槽位 + 挪一次起点」，不用 `shift()` 搬 10 万个元素。
+ *
+ * 返回（可能换了 data 的）存储；域每次都重算一趟（窗口几千项约 0.02ms，
+ * 与数值环同一个取舍：真要做百万级滚动窗口该上分块 + 增量域，而不是在这里加复杂度）。
+ */
+export function appendRawItems(store: SeriesRawPoints, items: any[], capacity: number): SeriesRawPoints {
+  if (capacity > 0 && store.capacity !== capacity) {
+    // 转成原始环（或换容量）：按逻辑顺序重装，只留最后 capacity 项
+    const keep = Math.min(store.length, capacity);
+    const buffer = new Array(capacity);
+    for (let i = 0; i < keep; i++) {
+      buffer[i] = rawItemAt(store, store.length - keep + i);
+    }
+    store.data = buffer;
+    store.capacity = capacity;
+    store.start = 0;
+    store.length = keep;
+  }
+  if (store.capacity > 0) {
+    for (const item of items) {
+      let slot: number;
+      if (store.length >= store.capacity) {
+        slot = store.start;
+        store.start = (store.start + 1) % store.capacity;
+      } else {
+        slot = (store.start + store.length) % store.capacity;
+        store.length += 1;
+      }
+      store.data[slot] = item;
+    }
+  } else {
+    for (const item of items) store.data.push(item);
+    store.length = store.data.length;
+  }
+  refreshRawDomains(store);
+  return store;
+}
+
+/**
+ * 惰性原始点的访问器：**按需合成** `DataPoint`（`raw` 仍然给得出来，这是它与数值列的区别）。
+ * 字段规则与 `buildPoints` 的通用分支共用 `readGenericPoint`。
+ */
+export function rawAccessors(
+  store: SeriesRawPoints
+): Pick<InternalSeries, 'pointAt' | 'xValueAt' | 'yValueAt' | 'baseAt' | 'topAt' | 'sizeAt'> {
+  const option = { type: store.type, xField: store.xField, yField: store.yField };
+  const readAt = (index: number): ReturnType<typeof readGenericPoint> | null => {
+    const item = rawItemAt(store, index);
+    if (item === undefined && (index < 0 || index >= store.length)) return null;
+    return readGenericPoint(item, index, option);
+  };
+  return {
+    pointAt: (index: number): DataPoint => {
+      const parsed = readAt(index);
+      if (!parsed) return undefined as unknown as DataPoint;
+      return {
+        index,
+        xValue: parsed.xValue,
+        y: parsed.y,
+        raw: rawItemAt(store, index),
+        base: 0,
+        top: parsed.y === null ? 0 : parsed.y,
+        name: parsed.name,
+        size: parsed.size,
+      };
+    },
+    xValueAt: (index: number): any => {
+      const parsed = readAt(index);
+      return parsed ? parsed.xValue : undefined;
+    },
+    yValueAt: (index: number): number | null => {
+      const parsed = readAt(index);
+      return parsed ? parsed.y : null;
+    },
+    baseAt: (): number => 0,
+    topAt: (index: number): number => {
+      const parsed = readAt(index);
+      return parsed && parsed.y !== null ? parsed.y : 0;
+    },
+    sizeAt: (index: number): number | undefined => {
+      const parsed = readAt(index);
+      return parsed ? parsed.size : undefined;
+    },
+  };
 }
 
 /**
