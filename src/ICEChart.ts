@@ -1686,6 +1686,12 @@ export class ICEChart {
 
     const polar = layout.polar;
     const isPolar = norm.kind !== 'cartesian';
+    /**
+     * 高亮环裁到绘图区里（2026-09-23）：标记是以数据点为中心画的，滑动窗口 / 缩放之后
+     * 当前点常在绘图区边界上 —— 不裁就会把半个环画进轴带（审计 `ink-over-right-axis`）。
+     * 极坐标 / 雷达 / 仪表盘这些没有「绘图区矩形」语义的场景不裁（饼图的环本来就在圆外）。
+     */
+    this.highlight?.setClipBox(isPolar ? null : { x: plot.x, y: plot.y, width: plot.width, height: plot.height });
     this.plotArea.setState({ left: plot.x, top: plot.y, width: plot.width, height: plot.height });
     this.plotArea.setBackground(theme.backgroundColor === 'transparent' ? null : theme.backgroundColor);
 

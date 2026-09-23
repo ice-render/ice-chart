@@ -26,6 +26,18 @@ export class Highlight extends ChartComponent {
   public theme: ChartTheme | null = null;
   public hoverItems: HighlightItem[] = [];
   public selectionItems: HighlightItem[] = [];
+  /**
+   * 只许画在这个矩形里（画布坐标）—— 一般就是绘图区，`null` = 不裁剪。
+   *
+   * 为什么必须有（2026-09-23，审计 `ink-over-right-axis` 的那个缺陷）：
+   * 标记环是**以数据点为中心**画的，而滑动窗口 / 缩放之后最常见的状态就是
+   * 「当前点正好落在绘图区边界上」—— 环半径那几个像素就必然画到轴带里去。
+   * 实测在 40px 宽的轴带里量到 44~58 个饱和像素，就是半颗环。
+   *
+   * 裁剪盒与 `item.x / item.y` **同一个坐标系**（都由图表按绘图区矩形给出），
+   * 所以这里直接用 `ctx.rect(clipBox)`，不需要再做任何换算。
+   */
+  public clipBox: { x: number; y: number; width: number; height: number } | null = null;
 
   constructor(props: { width: number; height: number; zIndex?: number }) {
     super({ interactive: false, ...props });
@@ -41,12 +53,32 @@ export class Highlight extends ChartComponent {
     return this.markDirty();
   }
 
+  /** 设置裁剪盒；**没变就不置脏**（否则每帧重建都会把高亮层标脏，局部重绘的收益就没了）。 */
+  public setClipBox(box: { x: number; y: number; width: number; height: number } | null): this {
+    const prev = this.clipBox;
+    const same =
+      (!prev && !box) ||
+      (!!prev &&
+        !!box &&
+        prev.x === box.x &&
+        prev.y === box.y &&
+        prev.width === box.width &&
+        prev.height === box.height);
+    this.clipBox = box;
+    return same ? this : this.markDirty();
+  }
+
   protected doRender(): void {
     if (!this.theme) return;
     const ctx = this.ctx;
     const unit = this.unit();
     ctx.beginPath();
     ctx.save();
+    if (this.clipBox) {
+      ctx.beginPath();
+      ctx.rect(this.clipBox.x, this.clipBox.y, this.clipBox.width, this.clipBox.height);
+      ctx.clip();
+    }
     for (const item of this.hoverItems) {
       if (item.shape === 'rect') {
         const w = item.width || 0;
