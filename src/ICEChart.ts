@@ -1591,7 +1591,6 @@ export class ICEChart {
   private rebuild(animate: boolean | 'enter' | 'update', domainOverride?: number[] | null): void {
     if (this.destroyed) return;
     const canvas = this.canvasRect();
-    const effectiveX = this.viewState.x || this.fullXDomain;
     const effectiveYs = this.fullYDomains.map((full, index) => {
       const view = index === 0 ? this.viewState.y : this.viewState.yAxes[index];
       return view && view.length === 2 ? view : full;
@@ -1602,7 +1601,15 @@ export class ICEChart {
       // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
       preferDark: isEngineThemeDark(this.ice),
       virtualColumns: this.virtualColumns,
-      xDomain: effectiveX && effectiveX.length === 2 ? [effectiveX[0], effectiveX[1]] : null,
+      /**
+       * 只在**真有视窗**（`dataZoom` / 手势平移缩放）时才把窗口传下去。
+       *
+       * 之前这里回退成 `this.fullXDomain`（「没有视窗」的等价物），代价是每帧都让归一化
+       * 走一趟「把窗口端点映射回类目下标」：`fullDomain.indexOf()` 两趟 O(n)，而 10 万类目
+       * 的滚动窗口里结束端点在最后一个、起始端点往往已被淘汰 —— 两趟都得扫到底，
+       * 然后结论还是「退化为原域」。语义上与传 null 完全一致（同一份数据算出来的域）。
+       */
+      xDomain: this.viewState.x && this.viewState.x.length === 2 ? [this.viewState.x[0], this.viewState.x[1]] : null,
       yDomain:
         this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
           ? null
@@ -1654,6 +1661,8 @@ export class ICEChart {
     const { plot } = this.layout;
     norm.xAxis.scale = createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, plot.width)], {
       logBase: norm.xAxis.option.logBase,
+      // 类目表是增量维护的那种轴会带查表口：有它 BandScale 就不必每帧重建索引表
+      categoryLookup: norm.xAxis.categoryLookup,
     });
     for (const axis of norm.yAxes) {
       axis.scale = createScale(axis.type, axis.domain, [Math.max(1, plot.height), 0], {

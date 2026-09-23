@@ -155,6 +155,33 @@ export interface SeriesRawPoints {
    */
   categories: any[];
   categoryCounts: Map<string, number>;
+  /**
+   * **类目 → 绝对序号**（首次出现在当前窗口里时分配的单调递增号）—— 增量维护。
+   *
+   * 为什么不把「下标」当值：滚动窗口每 tick 从头部淘汰一项，所有下标都要减一，
+   * 那样的表每帧都得整体重写（O(n)）。存**绝对序号**之后，淘汰只删一个 key，
+   * 「下标」由一个基准量相减得到（见 `rawCategoryIndex`）。
+   */
+  categorySeq: Map<string, number>;
+  /** 下一个要分配的绝对序号。不变式：`首项序号 + 类目数`。 */
+  categoryNext: number;
+}
+
+/**
+ * 类目在**当前** `categories` 里的下标 —— O(1)，给类目轴的 `BandScale.indexOf` 当查表口。
+ *
+ * 依据：绝对序号按「首次出现顺序」分配，而 `categories` 正是按首次出现顺序排的，
+ * 所以存活类目的序号是**连续的一段**（头部淘汰只让这段整体后移；万一出现空洞，
+ * `removeCategory` 会就地压紧）。于是「下标 = 自己的序号 − 首项序号」。
+ * 调用方负责把类目 `String` 化（与 `BandScale` 的查表契约一致）。
+ */
+export function rawCategoryIndex(store: SeriesRawPoints, key: string): number {
+  const pos = store.categorySeq.get(key);
+  if (pos === undefined) return -1;
+  const first = store.categories[0];
+  if (first === undefined) return 0;
+  const base = store.categorySeq.get(String(first));
+  return pos - (base === undefined ? 0 : base);
 }
 
 export interface InternalSeries {
@@ -524,13 +551,32 @@ export function appendRawItems(store: SeriesRawPoints, items: any[], capacity: n
     store.capacity = capacity;
     store.start = 0;
     store.length = keep;
+    // 类目表跟着**重装**：上面这一步可能丢掉了窗口前面的项，而 categories / categoryCounts /
+    // categorySeq 还是按「老的全量」维护的。不重置的话类目轴会把已经不在窗口里的类目也画出来。
+    store.categories = [];
+    store.categoryCounts = new Map();
+    store.categorySeq = new Map();
+    store.categoryNext = 0;
+    for (let i = 0; i < keep; i++) {
+      const parsed = readGenericPointInto(rawItemAt(store, i), 0, rule, scratch);
+      const key = String(parsed.xValue);
+      const count = store.categoryCounts.get(key) ?? 0;
+      if (count === 0) {
+        store.categories.push(parsed.xValue);
+        store.categorySeq.set(key, store.categoryNext++);
+      }
+      store.categoryCounts.set(key, count + 1);
+    }
   }
   /** 逻辑下标 → 它当前对应的原始项（环形态下就是被覆盖/淘汰的那个）。 */
   const addCategory = (item: any): void => {
     const parsed = readGenericPoint(item, 0, { type: store.type, xField: store.xField, yField: store.yField });
     const key = String(parsed.xValue);
     const count = store.categoryCounts.get(key) ?? 0;
-    if (count === 0) store.categories.push(parsed.xValue);
+    if (count === 0) {
+      store.categories.push(parsed.xValue);
+      store.categorySeq.set(key, store.categoryNext++);
+    }
     store.categoryCounts.set(key, count + 1);
   };
   const removeCategory = (item: any): void => {
@@ -541,7 +587,22 @@ export function appendRawItems(store: SeriesRawPoints, items: any[], capacity: n
     if (count <= 1) {
       store.categoryCounts.delete(key);
       const at = store.categories.findIndex((value) => String(value) === key);
-      if (at >= 0) store.categories.splice(at, 1);
+      const base = store.categories.length ? store.categorySeq.get(String(store.categories[0])) : undefined;
+      const removed = store.categorySeq.get(key);
+      store.categorySeq.delete(key);
+      if (at >= 0) {
+        store.categories.splice(at, 1);
+        // 摘掉的**不是首项**时会留下「序号空洞」（序号是单调分配的，被摘的那一号没人补），
+        // 空洞会让「序号 − 首项序号」不再等于下标 —— 就地压紧一次（这条路上 splice 本来就是
+        // O(n)，而且它只在「同一个类目在窗口里还出现第二次、且最后一次被淘汰时前面还有别的类目」
+        // 这种形态才走到；单调滚动的 K 线窗口永远走不到）。
+        if (removed !== undefined && removed !== base) {
+          for (let i = 0; i < store.categories.length; i++) {
+            store.categorySeq.set(String(store.categories[i]), i);
+          }
+          store.categoryNext = store.categories.length;
+        }
+      }
       return;
     }
     store.categoryCounts.set(key, count - 1);
@@ -681,6 +742,14 @@ export interface InternalAxis {
   index: number;
   /** y 轴位置（x 轴为 left，不使用）。 */
   position: 'left' | 'right';
+  /**
+   * 类目轴的**现成查表口**（可选）：`类目 key → 下标`，O(1)。
+   *
+   * 只有「域原样来自某个增量维护的类目表、且没有被视窗裁剪」时才给得出来
+   * （见 `buildXDomain`）。给了它等于告诉 `BandScale`：不必自己重建索引表 ——
+   * 10 万类目的滚动窗口每帧重建一次那张 Map，曾是整条流水线最大的一笔。
+   */
+  categoryLookup?: (key: string) => number;
 }
 
 export interface NormalizedOption {

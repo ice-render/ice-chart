@@ -25,12 +25,21 @@ export class BandScale implements Scale {
    */
   private indexCache: Map<string, number> | null = null;
   private indexCacheDomain: any[] | null = null;
+  /**
+   * 归一化交下来的**现成查表口**（可选）。
+   *
+   * 类目表是增量维护的那种轴（惰性原始点 / 滚动窗口）会带上它 —— 那时自建表等于
+   * 每帧重写一遍 10 万条的 Map，实测占整条流水线的一半。给了查表口就走它：
+   * 一个类目的下标是一次 Map 查询加一次减法。
+   */
+  private lookup: ((key: string) => number) | null;
 
   constructor(domain: any[], range: [number, number], options: CreateScaleOptions = {}) {
     this.domain = domain.length ? domain.slice() : [''];
     this.range = range;
     this.paddingInner = options.paddingInner === undefined ? 0.2 : options.paddingInner;
     this.paddingOuter = options.paddingOuter === undefined ? 0.1 : options.paddingOuter;
+    this.lookup = options.categoryLookup || null;
     this._step = this.computeStep();
   }
 
@@ -50,7 +59,12 @@ export class BandScale implements Scale {
       if (strict !== -1) return strict;
     }
     // 宽松匹配（数字与字符串混用：CSV 解析出来的类目常是字符串）——查表 O(1)
-    const hit = this.indices().get(String(value));
+    const key = String(value);
+    if (this.lookup) {
+      const index = this.lookup(key);
+      if (index >= 0) return index;
+    }
+    const hit = this.indices().get(key);
     if (hit !== undefined) return hit;
     // 注意：这里**不要**再退化成「把数值当类目下标」——
     // 数值类目（x 为 0/1/2…）在缩放后可见窗口是类目的子集，
@@ -169,6 +183,7 @@ export class BandScale implements Scale {
     return new BandScale(this.domain.slice(), [this.range[0], this.range[1]], {
       paddingInner: this.paddingInner,
       paddingOuter: this.paddingOuter,
+      categoryLookup: this.lookup || undefined,
     });
   }
 }

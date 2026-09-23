@@ -4,6 +4,38 @@
 
 > 下一个版本发布前，改动在这里累积。
 
+### 性能
+
+- **类目轴的「类目域 + 类目索引表」不再每帧重建 —— 滚动窗口每 tick 的地板砍掉约 8 成**。
+  这是 `plans/incremental-pipeline.md` 那条线的第一刀，但它落在的**不是**施工图原先排的 P1（布局复用）：
+  先按函数级 CPU profile 拆了一遍（10 万根窗口、默认示例页宿主），
+  `buildXDomain` 33% + `normalizeOption` 自己 25% + `BandScale.indices` 17% —— 八成在地板上游的类目域，
+  布局那一段（`computeLayout` + `buildAxisLayout`）只有 4%。按数据把优先级改成「先收类目域」。
+
+  三处改动（都不改语义）：
+  ① `rebuild()` **不再把「全量域」当视窗传下去**：原来 `xDomain` 回退成 `this.fullXDomain`，
+     于是每帧都让归一化走一趟「把窗口端点映射回类目下标」——`fullDomain.indexOf()` 两趟 O(n)，
+     而 10 万类目的滚动窗口里结束端点在最末、起始端点往往已被淘汰，两趟都得扫到底，
+     结论还是"退化为原域"。现在只有真有视窗（`dataZoom` / 手势）才传窗口，语义完全一致；
+  ② `buildXDomain()` 对**单一惰性原始点来源**走快路径：存储里那张表本来就是「去重 + 首次出现顺序」
+     且增量维护的，再走一遍 `seen` 去重等于每 tick 二十万次 `String()` 哈希（复制一份 memcpy 即可）；
+  ③ `BandScale` 新增**现成查表口**（`CreateScaleOptions.categoryLookup`）：存储把「类目 → 下标」做成
+     O(1) 查询（表里存**绝对序号**，下标 = 序号 − 首项序号，于是头部淘汰只删一个 key、不必重写整张表）。
+     表只在「域原样来自那张表、没被视窗裁剪」时才交出去，`resolveXDomain` 一裁就自动退回自建。
+
+  实测（`scripts/measure-pipeline.mjs`，真机 Chromium，默认示例页当宿主）：
+
+  | 口径（惰性原始点 + 环形追加） | 改动前 | ①+② | ①+②+③ |
+  |---|---|---|---|
+  | 1 万根窗口 每 tick | 1.4 ms | 0.6 ms | **0.4 ms** |
+  | 10 万根窗口 每 tick | 15.0 ms | 4.7 ms | **2.0 ms** |
+
+  「普通（concat + `setData`）」那条对照路不变（每 tick 要物化整窗的点，2.1 / 20.2 ms）。
+  剩下的 2.0 ms 已经摊平到布局 / 轴 / 组件同步上（见施工图里改过的优先级）。
+  回归：`verify:full`（485 单测 + 37 e2e）、`audit:interactions`（322 步 0 问题）、`audit:hover` 全绿；
+  新增 `tests/option/raw-category-index.test.ts` 锁住「增量索引表 ≡ 在类目数组里找第一次出现」这条不变式
+  （含头部淘汰、**中途淘汰**留下的序号空洞、转环重装、以及轴真正走查表口的黑盒断言）。
+
 ## [0.30.1] - 2026-09-22
 
 ### 修复

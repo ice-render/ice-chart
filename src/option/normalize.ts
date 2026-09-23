@@ -4,6 +4,7 @@ import {
   arrayAccessors,
   columnAccessors,
   gridAccessors,
+  rawCategoryIndex,
   rawAccessors,
   readGenericPoint,
   storeDomainOf,
@@ -305,6 +306,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   }
   let rawXDomain: any[];
   let categories: any[];
+  let categoryLookup: ((key: string) => number) | undefined;
   if (horizontal) {
     // 横向：x 轴承载数值（用 y 轴那套值域算法），类目搬到 y 轴
     rawXDomain = buildYDomain(series, 0, xAxisOption, xType) as any[];
@@ -317,8 +319,12 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     const built = buildXDomain(xType, series, xAxisOption);
     rawXDomain = built.domain;
     categories = built.categories;
+    categoryLookup = built.categoryLookup;
   }
   const xDomain = resolveXDomain(xType, rawXDomain, context.xDomain);
+  // 只在**域没被视窗裁剪**时才把查表口交下去：查表口的编号是按整张类目表算的，
+  // 域一旦被裁成子区间，下标就不再对齐了（宁可让 BandScale 自己建表）。
+  if (!(categoryLookup && xDomain === rawXDomain)) categoryLookup = undefined;
 
   applyStacking(series);
   applyWaterfall(series);
@@ -384,6 +390,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   });
   const yAxis = yAxes[0];
   applyEqualAspect(option, kind, xAxis, yAxes);
+  // 等比坐标会改写 x 域（把绘图区补成正方形），那时查表口同样失效 → 退回去自建
+  if (categoryLookup && xAxis.domain === xDomain) xAxis.categoryLookup = categoryLookup;
 
   return {
     labels: {
@@ -958,10 +966,14 @@ function buildVirtualRawPoints(option: SeriesOption, seriesIndex: number): Serie
   let hasSize = false;
   const categories: any[] = [];
   const categoryCounts = new Map<string, number>();
+  const categorySeq = new Map<string, number>();
   for (let i = 0; i < count; i++) {
     const parsed = readGenericPoint(raw[i], i, rule);
     const key = String(parsed.xValue);
-    if ((categoryCounts.get(key) ?? 0) === 0) categories.push(parsed.xValue);
+    if ((categoryCounts.get(key) ?? 0) === 0) {
+      categories.push(parsed.xValue);
+      categorySeq.set(key, categorySeq.size);
+    }
     categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
     const x = Number(parsed.xValue);
     if (isFinite(x)) {
@@ -1003,6 +1015,8 @@ function buildVirtualRawPoints(option: SeriesOption, seriesIndex: number): Serie
     sizeExtent: hasSize ? (sMin === sMax ? [sMin, sMin + 1] : [sMin, sMax]) : null,
     categories,
     categoryCounts,
+    categorySeq,
+    categoryNext: categorySeq.size,
   };
 }
 
@@ -1421,7 +1435,7 @@ function buildXDomain(
   type: string,
   series: InternalSeries[],
   option: AxisOption
-): { domain: any[]; categories: any[] } {
+): { domain: any[]; categories: any[]; categoryLookup?: (key: string) => number } {
   if (type === 'category') {
     /**
      * 列存（虚拟）热力图：类目顺序由矩阵定死（值矩阵按这个顺序排），
@@ -1435,6 +1449,25 @@ function buildXDomain(
     }
     const seen: Record<string, boolean> = {};
     const categories: any[] = [];
+    /**
+     * **单一「惰性原始点」来源的快路径**（2026-09-23）。
+     *
+     * 这类系列的存储里那张表本来就是「去重 + 首次出现顺序」，而且是**增量维护**的
+     * （见 `SeriesRawPoints` 的 categories / categoryCounts，滚动窗口只动两头）。
+     * 只有一个来源时再走一遍 `seen` 去重是白跑：10 万类目 × 每帧两趟归一化 =
+     * 每 tick 二十万次 `String()` 哈希，实测占整条流水线的三分之一。
+     *
+     * 多个来源（多系列各自带类目）才需要合并去重，那条路原样保留。
+     */
+    if (series.length === 1 && series[0].raw) {
+      // 复制一份再交出去：域是**只读约定**，但把存储那个数组直接共享出去的话，
+      // 下游按数组身份做的缓存（BandScale 的索引表）会在存储就地追加 / 淘汰时读到过期内容。
+      // `slice()` 只是一趟 memcpy，比重新做一遍字符串去重便宜一个量级。
+      const store = series[0].raw as SeriesRawPoints;
+      const owned = store.categories.slice();
+      // 查表口直连存储那张增量维护的表：类目轴不必每帧重建一遍 10 万条的 Map。
+      return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(store, key) };
+    }
     for (const s of series) {
       // 惰性原始点：类目表增量维护在存储里（滚动窗口下别每帧重扫）
       if (s.raw) {

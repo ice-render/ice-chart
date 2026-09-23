@@ -40,6 +40,12 @@ export interface CreateScaleOptions {
   logBase?: number;
   /** 时间刻度的期望数量。 */
   tickCount?: number;
+  /**
+   * 类目轴的**现成查表口**：`类目 key → 下标`。给了它 `BandScale` 就不自建索引表。
+   *
+   * 由归一化在「域原样来自增量维护的类目表」时给出（见 `InternalAxis.categoryLookup`）。
+   */
+  categoryLookup?: (key: string) => number;
 }
 
 export function createScale(
