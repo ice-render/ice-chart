@@ -240,7 +240,19 @@ function buildAxisLayout(
   // 隐藏的轴只是**不占排版空间**（见下面把 width/height 归零），也不画（Axis 里早就拦了）。
   const hidden = axisOption.show === false;
   const ticks = scale.ticks(axisOption.tickCount || 5);
-  const labels: string[] = [];
+  const formatLabel = (index: number): string => formatTick(ticks[index], scale, index, axisOption.formatter);
+  /**
+   * **稠密轴的标签惰性格式化**（2026-09-23）。
+   *
+   * 类目轴是「一个数据点一个刻度」，而真正画得出来的只有抽稀后那几百颗 —— 先格式化
+   * 10 万个字符串再扔掉 99.9%，是每帧一次 O(类目数) 的 `String()` 加十万条字符串的分配
+   * （GC 也跟着抖）。这里只格式化**量宽度要用的样本**，其余留空；抽稀定稿之后由
+   * `thinXAxisLabels` 按保留下来的下标现算。
+   *
+   * 门槛 512：刻度本来就少的轴（数值 / 时间轴）继续走「全量格式化」，语义不受影响。
+   */
+  const lazy = ticks.length > 512;
+  const labels: string[] = lazy ? new Array<string>(ticks.length).fill('') : [];
   let maxLabelWidth = 0;
   /**
    * 宽度**按样本量**（2026-09-22）：类目轴上标签宽度基本一致，而 `measureText` 是真在 ctx 上
@@ -249,10 +261,12 @@ function buildAxisLayout(
    */
   const sampleStep = Math.max(1, Math.floor(ticks.length / 64));
   for (let i = 0; i < ticks.length; i++) {
-    const label = formatTick(ticks[i], scale, i, axisOption.formatter);
-    labels.push(label);
     // 首末两颗一定量（时间轴的端点常常最长/最短），其余按样本走
-    if (i % sampleStep !== 0 && i !== 0 && i !== ticks.length - 1) continue;
+    const sampled = i % sampleStep === 0 || i === 0 || i === ticks.length - 1;
+    if (lazy && !sampled) continue;
+    const label = formatLabel(i);
+    labels[i] = label;
+    if (!sampled) continue;
     const w = measureTextWidth(ctx, label, fontSize, fontFamily);
     if (w > maxLabelWidth) maxLabelWidth = w;
   }
@@ -271,11 +285,23 @@ function buildAxisLayout(
   const name = axisOption.name || '';
   const nameWidth = name ? measureTextWidth(ctx, name, fontSize, fontFamily) : 0;
   if (hidden) {
-    return { ticks, labels, offset: 0, labelWidth: 0, labelHeight: 0, nameWidth: 0, nameHeight: 0 };
+    return {
+      ticks,
+      labels,
+      formatLabel: lazy ? formatLabel : undefined,
+      sampledLabelWidth: maxLabelWidth,
+      offset: 0,
+      labelWidth: 0,
+      labelHeight: 0,
+      nameWidth: 0,
+      nameHeight: 0,
+    };
   }
   return {
     ticks,
     labels,
+    formatLabel: lazy ? formatLabel : undefined,
+    sampledLabelWidth: maxLabelWidth,
     offset: 0,
     labelWidth: axis === 'y' ? maxLabelWidth : 0,
     labelHeight: axis === 'x' ? (rotate > 0 ? rotatedHeight : fontSize * 1.4) : 0,
@@ -307,19 +333,43 @@ export function thinXAxisLabels(
   const labels = axisLayout.labels;
   const axisLength = geometry.axisLength;
   if (!ticks || ticks.length <= 2 || !axisLength || axisLength <= 0) return;
-  // 量宽度按样本走：类目轴上标签宽度基本一致，全量 measureText 是 O(类目数)
-  // （缩到几千根时一次布局要量几千次，白花时间）
-  const sampleStep = Math.max(1, Math.floor(ticks.length / 64));
+  const formatLabel = axisLayout.formatLabel;
+  /** 惰性形态下 `labels` 里只有样本，不能再抽一次样 —— 直接用布局那一趟量到的宽度。 */
+  const lazy = typeof axisLayout.sampledLabelWidth === 'number';
   let maxLabelWidth = 0;
-  for (let i = 0; i < labels.length; i += sampleStep) {
-    if (!labels[i]) continue;
-    const w = measureTextWidth(ctx, labels[i], fontSize, fontFamily);
-    if (w > maxLabelWidth) maxLabelWidth = w;
+  if (lazy) {
+    maxLabelWidth = axisLayout.sampledLabelWidth as number;
+  } else {
+    // 量宽度按样本走：类目轴上标签宽度基本一致，全量 measureText 是 O(类目数)
+    // （缩到几千根时一次布局要量几千次，白花时间）
+    const sampleStep = Math.max(1, Math.floor(ticks.length / 64));
+    for (let i = 0; i < labels.length; i += sampleStep) {
+      if (!labels[i]) continue;
+      const w = measureTextWidth(ctx, labels[i], fontSize, fontFamily);
+      if (w > maxLabelWidth) maxLabelWidth = w;
+    }
   }
-  if (maxLabelWidth <= 0) return;
+  /** 惰性形态下「补标签」：这一趟才是真正决定要画哪几颗的地方。 */
+  const materialize = (indices: () => Iterable<number>): void => {
+    if (!formatLabel) return;
+    for (const index of indices()) if (!labels[index]) labels[index] = formatLabel(index);
+  };
+  if (maxLabelWidth <= 0) {
+    // 量不出宽度（空标签 / 桩上下文）就退回「全量可画」：与惰性化之前的行为一致
+    materialize(function* () {
+      for (let i = 0; i < labels.length; i++) yield i;
+    });
+    return;
+  }
   const minGap = Math.max(maxLabelWidth + 10, 64);
   const spacing = axisLength / (ticks.length - 1 || 1);
-  if (spacing >= minGap) return;
+  if (spacing >= minGap) {
+    // 抽稀用不上 → 惰性形态要把没格式化的补齐，否则整条轴只剩样本那几颗标签
+    materialize(function* () {
+      for (let i = 0; i < labels.length; i++) yield i;
+    });
+    return;
+  }
   const keepEvery = Math.max(1, Math.ceil(minGap / spacing));
   const keep = new Set<number>();
   for (let i = 0; i < ticks.length; i += keepEvery) keep.add(i);
@@ -346,6 +396,8 @@ export function thinXAxisLabels(
     const end = kept[kept.length - 1];
     if (end * spacing + half > axisLength + rightRoom) keep.delete(end);
   }
+  // 抽稀定稿：**在这里**才把保留下来的那几颗格式化出来（惰性形态；全量形态 `labels` 早已填好）
+  materialize(() => keep);
   for (let i = 0; i < labels.length; i++) {
     if (!keep.has(i)) labels[i] = '';
   }
