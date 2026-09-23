@@ -59,6 +59,21 @@ const pages = [
 
 fs.mkdirSync(outDir, { recursive: true });
 
+/**
+ * 只跑指定的页（逗号分隔）—— 排障用：整轮 322 步要几分钟，盯一页时没必要全跑。
+ *   PAGES=dashboard,dashboard-logistics node scripts/audit-interactions.mjs
+ * `INK=1` 再逐步打印每张图的墨迹量（哪一步、哪张图、左右下各多少），用来定位残留。
+ */
+const onlyPages = process.env.PAGES ? process.env.PAGES.split(',').map((s) => s.trim()) : null;
+const dumpInk = process.env.INK === '1';
+/** 每步动作之后等多久再采样（默认 220ms）。排障用：动画没停就采样会采到过渡中的一帧。 */
+const stepWait = Number(process.env.STEP_WAIT || 220);
+const runPages = onlyPages ? pages.filter((name) => onlyPages.includes(name)) : pages;
+if (onlyPages && !runPages.length) {
+  console.error(`PAGES 里没有任何已知页面：${process.env.PAGES}`);
+  process.exit(2);
+}
+
 /** 注入到页面里：收集每张图的几何信息，用于「有没有交叠/越界」的自动判断。 */
 function collectGeometry() {
   const charts = [];
@@ -173,7 +188,7 @@ function paintOverflowProbe() {
 const browser = await chromium.launch();
 const report = [];
 
-for (const name of pages) {
+for (const name of runPages) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
@@ -186,7 +201,7 @@ for (const name of pages) {
   /** 一次「交互 + 断言 + 截图」。 */
   const step = async (label, action, extra) => {
     if (action) await action();
-    await page.waitForTimeout(220);
+    await page.waitForTimeout(stepWait);
     const geometry = await page.evaluate(collectGeometry);
     const overflow = await page.evaluate(paintOverflowProbe);
     const issues = [];
@@ -199,6 +214,13 @@ for (const name of pages) {
       if (o.left > 40) pushIssue(`ink-over-y-axis(${o.left})`);
       if (o.right > 40) pushIssue(`ink-over-right-axis(${o.right})`);
       if (o.below > 40) pushIssue(`ink-over-x-axis(${o.below})`);
+    }
+    if (dumpInk) {
+      overflow.forEach((o, index) => {
+        if (o.left > 0 || o.right > 0 || o.below > 0) {
+          console.log(`  [ink] ${name} ${label} 图${index}: 左${o.left} 右${o.right} 下${o.below}`);
+        }
+      });
     }
     for (const g of geometry) {
       if (g.tooltip) {
