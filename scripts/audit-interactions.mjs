@@ -20,6 +20,11 @@ const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
  * - editable-chart：缩放后绘图区几何变化（y 轴标签变宽 → plot.x/width 变）时，
  *   标记层的旧位置会残留约 9px 的暗红线段（引擎的 __forceFullRender 单帧强刷在这条路径上没生效）。
  *   待办：给图表层补一条「布局变化 → 整帧重绘」的正规路径。
+ *
+ *   2026-09-23 复验：**豁免仍然必需**（高亮环裁剪那次修复与它无关）。
+ *   复现：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`
+ *   → 3/3 稳定，`06-drag-pan` 步**左 112 / 右 112**（左右对称的大块残留，不是 9px 级）。
+ *   注意：高亮层已经裁到绘图区了，所以这 112 不是高亮环 —— 是另一条路径上的残留，待查。
  */
 const KNOWN_ISSUES = {
   'editable-chart': ['ink-over-y-axis', 'ink-over-right-axis'],
