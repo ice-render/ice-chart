@@ -37,11 +37,17 @@ const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
  *   ④ **定位到 markLayer**：见上面的代码路径。
  *
  *   复现：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`（3/3 稳定）。
- *   修法（下一轮，二选一）：
- *   A. **把标记层做成绘图区大小 + `clipChildren: true`**，同时把 `syncMarks()` 里算出的
- *      位置改成**相对绘图区**（现在它按画布坐标写 `left/top`）—— 坐标口径要一起改，别只改盒子；
- *   B. 给引擎图元补一条"自身裁剪"能力（像高亮层那样），但那要动 ice-render，
- *      而它是 peer、要跟着发版。
+ *
+ *   2026-09-23 当天又试了方案 A（标记层做成绘图区大小 + `clipChildren`，并同步改 `syncMarks`
+ *   的写入口径与 `markDataAt` 的回读口径，两个用例的坐标断言也跟着改）——**墨迹 112 → 112，
+ *   纹丝不动**。所以标记层也被排除了（改动随即撤销：它改变了"图元 left/top 是画布坐标"这条
+ *   既有约定、还改了两个用例，却没解决目标问题，不该留）。
+ *
+ *   到目前为止的排除清单：**不是残留**（强制整屏重画）／**不是直角坐标系列**（统一开
+ *   `clipToBox` 无效）／**不是标记层**（改成绘图区大小 + 裁剪无效）／**不是 `annotation` 组件**
+ *   （示例页根本没写 `option.annotation`）。下一步建议：在页内逐个把图元 `display = false`，
+ *   二分出到底是哪一个（我上一轮的逐个隐藏做得太糙：遍历用了错的子节点属性，只走到两个节点，
+ *   那个"连 root 隐藏都在"的结论不可信，已作废）。
  */
 const KNOWN_ISSUES = {
   'editable-chart': ['ink-over-y-axis', 'ink-over-right-axis'],
