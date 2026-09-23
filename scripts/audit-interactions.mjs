@@ -17,14 +17,22 @@ const outDir = process.argv[2] || path.resolve(process.cwd(), '.audit');
 const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
 /**
  * 已知问题（显式登记，避免「把页面从门禁里删掉」这种掩盖）：
- * - editable-chart：缩放后绘图区几何变化（y 轴标签变宽 → plot.x/width 变）时，
- *   标记层的旧位置会残留约 9px 的暗红线段（引擎的 __forceFullRender 单帧强刷在这条路径上没生效）。
- *   待办：给图表层补一条「布局变化 → 整帧重绘」的正规路径。
+ * - editable-chart：拖动平移之后**左右轴带各有 112 个饱和像素**。
  *
- *   2026-09-23 复验：**豁免仍然必需**（高亮环裁剪那次修复与它无关）。
- *   复现：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`
- *   → 3/3 稳定，`06-drag-pan` 步**左 112 / 右 112**（左右对称的大块残留，不是 9px 级）。
- *   注意：高亮层已经裁到绘图区了，所以这 112 不是高亮环 —— 是另一条路径上的残留，待查。
+ *   2026-09-23 复验：**豁免仍然必需**（高亮环裁剪那次修复与它无关），但**原因要更正** ——
+ *   它**不是**旧帧残留。做法：复现出该状态后强制一次「整屏重画」（`markQueueDirty()` +
+ *   `markViewportChanged()` + 置脏），带内墨迹**一个像素都没变（124 → 124）**，
+ *   说明它是**每帧都在画的、没被裁到绘图区的系列墨迹**。
+ *
+ *   在 canvas 空间量到的形状：`plot.x = 45`，越界块 bbox = `x 36..41, y 222..242`
+ *   （6 × 21px，就在绘图区左边界外一寸）。形状像页内那个自定义系列
+ *   （火花条：每点一根小竖条）在**左边界外的第一根柱子** —— `SeriesBase.clipToBox`
+ *   默认是 `false`，而自定义系列通常不会自己打开它。
+ *
+ *   复现：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`（3/3 稳定）。
+ *   待办（两条路选一）：① 页内自定义系列自己开 `clipToBox`（改动最小，且"示例自己该不该裁"
+ *   本身是可讨论的）；② 让直角坐标的系列**默认裁到绘图区**（更彻底，但要先过一遍
+ *   所有系列类型，确认没有靠"画到绘图区外"吃饭的）。
  */
 const KNOWN_ISSUES = {
   'editable-chart': ['ink-over-y-axis', 'ink-over-right-axis'],
