@@ -334,11 +334,11 @@ export function thinXAxisLabels(
   const axisLength = geometry.axisLength;
   if (!ticks || ticks.length <= 2 || !axisLength || axisLength <= 0) return;
   const formatLabel = axisLayout.formatLabel;
-  /** 惰性形态下 `labels` 里只有样本，不能再抽一次样 —— 直接用布局那一趟量到的宽度。 */
-  const lazy = typeof axisLayout.sampledLabelWidth === 'number';
+  /** 惰性形态（稠密轴）下 `labels` 里只有样本，不能再抽一次样 —— 直接用布局那一趟量到的宽度。 */
+  const lazy = typeof formatLabel === 'function';
   let maxLabelWidth = 0;
   if (lazy) {
-    maxLabelWidth = axisLayout.sampledLabelWidth as number;
+    maxLabelWidth = Number(axisLayout.sampledLabelWidth) || 0;
   } else {
     // 量宽度按样本走：类目轴上标签宽度基本一致，全量 measureText 是 O(类目数)
     // （缩到几千根时一次布局要量几千次，白花时间）
@@ -398,6 +398,25 @@ export function thinXAxisLabels(
   }
   // 抽稀定稿：**在这里**才把保留下来的那几颗格式化出来（惰性形态；全量形态 `labels` 早已填好）
   materialize(() => keep);
+  // `kept` 这个名字上面的「首末放不下就丢掉」那段已经用过了，而且那份是**删之前**的快照 ——
+  // 这里必须重新取一次（`keep` 可能刚被删过两项）
+  const finalKept = Array.from(keep).sort((a, b) => a - b);
+  /**
+   * 交出去「要画哪几颗」的原下标 —— 热路径从此按这张表走（`Axis` / 网格线），
+   * 不必再逐项扫整条 10 万项的表。`ticks` / `labels` 的**长度与对齐关系不变**。
+   */
+  axisLayout.visible = finalKept;
+  if (lazy) {
+    /**
+     * 惰性形态：`labels` 里被填过的只有「样本 + 刚刚补上的 keep 那几颗」，
+     * 所以只要把**不在 keep 里的样本**抹掉就够 —— 省掉的就是原来那趟 O(n)（10 万次）抹白。
+     */
+    const step = Math.max(1, Math.floor(labels.length / 64));
+    for (let i = 0; i < labels.length; i += step) if (!keep.has(i)) labels[i] = '';
+    const last = labels.length - 1;
+    if (last > 0 && last % step !== 0 && !keep.has(last)) labels[last] = '';
+    return;
+  }
   for (let i = 0; i < labels.length; i++) {
     if (!keep.has(i)) labels[i] = '';
   }

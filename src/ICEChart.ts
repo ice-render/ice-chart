@@ -1696,7 +1696,13 @@ export class ICEChart {
     // 垂直网格线跟 x 轴标签是**同一批位置**：抽稀表里 `labels[i] === ''` 的就是不画的那几颗。
     // 轴藏起来（`show: false`）的 pane 也有这张表（见 `buildAxisLayout`），网格因此能对齐。
     const xLayout = layout.xAxisLayout;
-    this.grid.xTicks = xLayout.ticks.filter((_tick, index) => !xLayout.labels || xLayout.labels[index] !== '');
+    /**
+     * 竖线落点 = 抽稀之后仍要画的那几颗。给了 `visible`（稠密轴）就按它取 —— 原来这里是
+     * 对整条 10 万项的表做一次 filter，每帧白扫一趟；没给（刻度本来就少）照旧过滤。
+     */
+    this.grid.xTicks = xLayout.visible
+      ? xLayout.visible.filter((index) => !xLayout.labels || xLayout.labels[index] !== '').map((index) => xLayout.ticks[index])
+      : xLayout.ticks.filter((_tick, index) => !xLayout.labels || xLayout.labels[index] !== '');
     // 默认只有主轴画水平网格线；其它轴需要显式 showGrid: true
     this.grid.horizontal = norm.yAxes
       .map((axis, index) => ({ axis, axisLayout: layout.yAxes[index], index }))

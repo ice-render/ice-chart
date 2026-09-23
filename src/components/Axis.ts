@@ -86,19 +86,29 @@ export class Axis extends ChartComponent {
     // `Math.max(1, slot)` 的下限：间距 0.24px 时它按 1px 算，于是步长从 380 根变成 88 根）。
     const marks: AxisTickMark[] = [];
     const thinned = layoutLabels.length === ticks.length;
-    for (let i = 0; i < ticks.length; i++) {
+    /**
+     * 抽稀定稿之后**只遍历要画的那几颗**（2026-09-23）：`axisLayout.visible` 是抽稀
+     * 留下的原下标（10 万类目的轴通常只有十几项）。没给这张表（没抽稀 / 刻度本来就少）
+     * 就照旧遍历整条 — 两条路的**每一项处理完全相同**，只是范围不同。
+     */
+    const emit = (i: number): void => {
       /**
        * **抽稀掉的刻度根本不进表**（2026-09-22）：`scale.map()` 在类目轴上是线性查类目、
        * `formatTick()` 还要格式化一遍文本 —— 逐颗都算的话，10 万个类目就是每帧 O(n²)：
        * 实测 `axisX` 一次渲染 3.7s（同帧的 K 线组件只要 15ms）。
        * 画不出来的刻度既不需要位置、也不需要标签文本（网格线只看抽稀后的那批 `xTicks`）。
        */
-      if (thinned && layoutLabels[i] === '') continue;
+      if (thinned && layoutLabels[i] === '') return;
       const mapped = scale.map(ticks[i]);
       const pos = this.orientation === 'x' ? plot.x + mapped : plot.y + mapped;
-      if (!isFinite(pos)) continue;
+      if (!isFinite(pos)) return;
       const label = formatTick(ticks[i], scale, i, option.formatter) || '';
       marks.push({ key: String(ticks[i]), pos, label, drawn: !!label });
+    };
+    if (axisLayout.visible) {
+      for (const i of axisLayout.visible) emit(i);
+    } else {
+      for (let i = 0; i < ticks.length; i++) emit(i);
     }
     return marks;
   }

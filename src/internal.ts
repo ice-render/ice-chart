@@ -821,6 +821,15 @@ export interface AxisLayout {
   formatLabel?: (index: number) => string;
   /** 布局那一趟按样本量到的最大标签宽度（惰性格式化时 `labels` 里只有样本，不能再抽样）。 */
   sampledLabelWidth?: number;
+  /**
+   * **抽稀之后仍然要画的那些刻度的原下标**（升序）。
+   *
+   * `undefined` = 没有抽稀（整张 `ticks` 都要画）。给定之后，热路径只该按这张表走：
+   * `Axis` 不再遍历整条 `ticks`（10 万类目里只有十几颗要画），`GridLines` 的竖线
+   * 也直接按它取位置。`ticks` / `labels` 的长度与下标对齐关系**保持不变** ——
+   * 它们仍然是「整条轴」的事实来源，只是没人再逐项扫一遍了。
+   */
+  visible?: number[];
   /** 该轴相对绘图区边缘外扩的像素距离（多轴时同侧的轴逐层外移）。 */
   offset: number;
   /** 刻度标签的最大宽度 / 高度（像素）。 */
