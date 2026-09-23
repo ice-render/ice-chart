@@ -16,42 +16,30 @@ import path from 'path';
 const outDir = process.argv[2] || path.resolve(process.cwd(), '.audit');
 const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
 /**
- * 已知问题（显式登记，避免「把页面从门禁里删掉」这种掩盖）：
- * - editable-chart：拖动平移之后**左右轴带各有 112 个饱和像素**。
+ * 已知问题（显式登记，避免「把页面从门禁里删掉」这种掩盖）。
  *
- *   2026-09-23 复验：**豁免仍然必需**，原因经四轮排查终于定到代码上（中途我写错过一次，
- *   这一版是最终结论）：**它是 `ensureMarkLayer()` 建的那层「数据坐标图元」，
- *   而这层是按画布尺寸建的、没有任何裁剪**。
+ * **2026-09-23 起清空** —— 之前唯一的条目 `editable-chart` 已经查明并解决，机制留着备用。
  *
- *   `addMark`（阈值线 / 预测带 / 注释卡片都走它）把组件加进 `ensureMarkLayer()` 的组：
- *   `new ICEGroup({ left: 0, top: 0, width: canvas.width, height: canvas.height, ... })`
- *   → 加进 `this.root`。组是画布大小，所以图元按数据坐标算出来的位置**可以越过绘图区**
- *   一直画到轴带里；`root` 上虽然有 `clipChildren`，但它裁的是"画布外"，管不到"绘图区外"。
+ * 那个 112px 的完整故事（值得留着，因为中间错了四次）：
+ * 拖动平移之后，editable-chart 左右轴带各有 ~112 个饱和像素。逐条排除：
+ *   ① **不是旧帧残留** —— 强制整屏重画（`markQueueDirty()` + `markViewportChanged()`）不变；
+ *   ② **不是直角坐标系列** —— 统一打开 `clipToBox` 后纹丝不动；
+ *   ③ **不是 `addMark` 的标记层** —— 把它改成绘图区大小 + `clipChildren` 也纹丝不动
+ *      （顺带证明：那次改动改变了「图元 left/top 是画布坐标」这条既有约定、还改了两个用例，
+ *      却解决不了问题 —— 已撤销）；
+ *   ④ **不是 `annotation` 组件** —— 示例页根本没写 `option.annotation`。
+ *   ✅ 最后靠**画面比对 + 引擎自己的 `hitTest`** 定的案：那是个**蓝底红边的小方块 = 可拖图元的
+ *      变换手柄**（`ResizeControl`，父级 `TransformControlPanel`）。它是**交互外壳，不是数据墨迹**。
  *
- *   排除过程（每一步都能复现，留着免得下次重走）：
- *   ① **不是旧帧残留**：强制整屏重画（`markQueueDirty()` + `markViewportChanged()` + 置脏），
- *      带内墨迹 **124 → 124 一个像素都没变**；
- *   ② **不是系列**：把直角坐标系列一律打开 `clipToBox`，墨迹**纹丝不动**（112/112），
- *      同时确认 `sparkline` 的 `clipToBox` 确实变成 true；
- *   ③ canvas 空间量到的形状：`plot.x = 45`，越界块 bbox = `x 36..41, y 222..242`（6 × 21px）；
- *   ④ **定位到 markLayer**：见上面的代码路径。
+ * 所以修的是**探针**：把手柄的盒子从统计里扣掉（见 `paintOverflowProbe` 里的 `chrome`）。
+ * 关键坑：`TransformControlPanel` 是**全局单例、直接画在 canvas 上、不是任何组件的孩子**
+ * （见 `ICEControlPanelManager`），所以只走 `ice.childNodes` 永远找不到它 ——
+ * 必须从 `ice.controlPanelManager` 拿。
  *
- *   复现：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`（3/3 稳定）。
- *
- *   2026-09-23 当天又试了方案 A（标记层做成绘图区大小 + `clipChildren`，并同步改 `syncMarks`
- *   的写入口径与 `markDataAt` 的回读口径，两个用例的坐标断言也跟着改）——**墨迹 112 → 112，
- *   纹丝不动**。所以标记层也被排除了（改动随即撤销：它改变了"图元 left/top 是画布坐标"这条
- *   既有约定、还改了两个用例，却没解决目标问题，不该留）。
- *
- *   到目前为止的排除清单：**不是残留**（强制整屏重画）／**不是直角坐标系列**（统一开
- *   `clipToBox` 无效）／**不是标记层**（改成绘图区大小 + 裁剪无效）／**不是 `annotation` 组件**
- *   （示例页根本没写 `option.annotation`）。下一步建议：在页内逐个把图元 `display = false`，
- *   二分出到底是哪一个（我上一轮的逐个隐藏做得太糙：遍历用了错的子节点属性，只走到两个节点，
- *   那个"连 root 隐藏都在"的结论不可信，已作废）。
+ * 复现手段：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`
+ * （INK=1 会把每一步每张图的墨迹量打出来，豁免也拦不住它 —— 排查时就靠这个）。
  */
-const KNOWN_ISSUES = {
-  'editable-chart': ['ink-over-y-axis', 'ink-over-right-axis'],
-};
+const KNOWN_ISSUES = {};
 
 const pages = [
   'basic-line',
@@ -173,6 +161,40 @@ function paintOverflowProbe() {
       const cv = c.ice.canvasEl;
       const ctx = cv.getContext('2d');
       const dpr = c.ice.dpr || 1;
+      /**
+       * **交互手柄不算数据墨迹**（2026-09-23）。
+       *
+       * `editable-chart` 那条 112px 排查了很久，最后靠引擎的 `hitTest` 定位到：
+       * 那个蓝底红边的小方块是**可拖图元的变换手柄**（`ResizeControl`，父级
+       * `TransformControlPanel`），画在图元边界上、半个落在轴带里 —— 它是**交互外壳**，
+       * 不是数据画到了坐标轴上。探针的立意是「数据墨迹不许进轴带」，所以这里把手柄的盒子
+       * 扣掉（和上面扣图例带同一个道理）。
+       *
+       * 用引擎自己的 `__paintWorldBox()` 拿画布坐标（它本来就用这套做裁剪）。
+       *
+       * ⚠️ 面板**不是组件的孩子**：`TransformControlPanel` 是全局单例、直接画在 canvas 上
+       * （见 `ICEControlPanelManager`），所以只走 `ice.childNodes` 永远找不到它 ——
+       * 必须从 `ice.controlPanelManager` 拿。
+       */
+      const chrome = [];
+      const collectChrome = (node) => {
+        if (!node) return;
+        const name = (node.constructor && node.constructor.name) || '';
+        if (/Control|Handle/.test(name) && node.state && node.state.display !== false && typeof node.__paintWorldBox === 'function') {
+          const b = node.__paintWorldBox();
+          if (b && b.every((v) => isFinite(v))) chrome.push([b[0] * dpr - 2, b[1] * dpr - 2, b[2] * dpr + 2, b[3] * dpr + 2]);
+        }
+        const kids = node.childNodes;
+        if (Array.isArray(kids)) for (const k of kids) collectChrome(k);
+      };
+      if (Array.isArray(c.ice.childNodes)) for (const node of c.ice.childNodes) collectChrome(node);
+      const panelManager = c.ice.controlPanelManager;
+      if (panelManager) {
+        if (panelManager.transformControlPanel) collectChrome(panelManager.transformControlPanel);
+        if (panelManager.lineControlPanel) collectChrome(panelManager.lineControlPanel);
+      }
+      const inChrome = (x, y) =>
+        chrome.some((b) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]);
       const plot = c.layout.plot;
       const slider = c.layout.slider;
       const W = cv.width / dpr;
@@ -185,15 +207,21 @@ function paintOverflowProbe() {
         if (PW <= 0 || PH <= 0 || X < 0 || Y < 0 || X + PW > cv.width || Y + PH > cv.height) return 0;
         const data = ctx.getImageData(X, Y, PW, PH).data;
         let n = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const a = data[i + 3];
-          if (a < 60) continue;
-          if (Math.max(r, g, b) - Math.min(r, g, b) > 45) n++;
-        }
-        return n;
+          // 逐像素走（要按坐标跳过手柄盒子），不再用一维步进
+          for (let row = 0; row < PH; row++) {
+            for (let col = 0; col < PW; col++) {
+              const i = (row * PW + col) * 4;
+              const a = data[i + 3];
+              if (a < 60) continue;
+              const r = data[i];
+              const g = data[i + 1];
+              const b = data[i + 2];
+              if (Math.max(r, g, b) - Math.min(r, g, b) <= 45) continue;
+              if (inChrome(X + col, Y + row)) continue;
+              n++;
+            }
+          }
+          return n;
       };
       // 图例带不算「越界墨迹」：图例色块本来就是饱和色，而且它画在绘图区外面。
       // 等比坐标（aspect: 'equal'）会把绘图区缩成正方形并居中，左轴带随之变宽 ——
