@@ -198,6 +198,26 @@ static 常量/字段  →  static 方法  →  实例字段  →  构造函数  
   不需要合成 DOM 事件；需要真实浏览器行为时用 `examples/` + Playwright 手工验证。
 - 新增能力时同步补三类用例：纯函数（scale/normalize/layout）、组件命中（series）、端到端交互（chart）。
 
+### ⚠️ `npm publish` 报成功 ≠ 包已经可用（2026-09-23 实测）
+
+发布 0.30.2 时踩到：`npm publish` 打印了 `+ @damoqiongqiu/ice-chart@0.30.2`，但紧接着
+`npm view @damoqiongqiu/ice-chart version` 仍是旧版本、tarball 直连 **404**。这是 npm 的
+**发布后异步处理**（输出里那句 "may take a few minutes to become available"）—— 本仓这次约
+**90 秒**后 packument 里才出现新版本。三条纪律：
+
+1. **别急着重发**：看到 404 再来一次 `npm publish`，是在赌一个「重复发布」的报错。
+   先等 1~2 分钟。
+2. **核验以 packument 为准，不以 `npm view` 为准**（`npm view` 自带缓存，在落地窗口里
+   它和「发布失败」长得一模一样）：
+
+   ```bash
+   curl -s "https://registry.npmjs.org/@damoqiongqiu%2Fice-chart" \
+     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);console.log(d["dist-tags"], Object.keys(d.versions).slice(-3))})'
+   ```
+
+3. tag 与双推可以照旧先做（不受这个窗口影响），但**「发版完成」的结论要等 packument 上
+   看得到、且 `dist-tags.latest` 指过去之后**才下。
+
 ## 提交前自检
 
 ```bash
