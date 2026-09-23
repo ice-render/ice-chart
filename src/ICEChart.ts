@@ -2029,6 +2029,17 @@ export class ICEChart {
       if (series.type === 'pie' || series.type === 'funnel') {
         component.setHiddenSlices(hiddenSliceIndexes(norm, series.id));
       }
+      /**
+       * **直角坐标的系列一律裁到绘图区**（2026-09-23）。
+       *
+       * `SeriesBase` 的注释早就写着「直角坐标系列必须开」，但默认值是 false、
+       * 只靠每个内置类型自己声明 —— **自定义系列（`registerSeriesType`）会静默漏掉**，
+       * 于是左/右边界外的那根柱子一直画进轴带（审计的 `ink-over-*`）。
+       * 这里按布局类型统一兜住：直角坐标开；饼 / 雷达 / 桑基 / 关系图 / 矩形树图
+       * 这些没有「绘图区矩形」语义的场景一律不动（它们的盒子虽然也是 plot，但要画到圆外、
+       * 节点外，裁了就是画不出来）。
+       */
+      if (norm.kind === 'cartesian') component.setClipToBox(true);
       component.setCoord(coord as any);
       component.markDirty();
       if (animate && visible) {

@@ -82,6 +82,20 @@ export abstract class SeriesBase extends ChartComponent {
   protected clipToBox = false;
   private localBoxScratch: number[] = [0, 0, 0, 0];
 
+  /**
+   * 由**图表**按布局类型统一打开（直角坐标开，饼 / 雷达 / 桑基 / 关系图这些不动）。
+   *
+   * 为什么要做成外部可设：上面那条「直角坐标系列必须开」以前只靠每个内置类型自己声明，
+   * **自定义系列会静默漏掉**（`registerSeriesType` 进来的东西没人提醒它）。
+   * 实测（2026-09-23）：示例页那个自定义系列在拖动平移后，左边界外的那根柱子一直画进 y 轴带，
+   * 40px 带宽里 112 个饱和像素 —— 强制整屏重画也抹不掉，因为它本来就在画。
+   */
+  public setClipToBox(flag: boolean): this {
+    if (this.clipToBox === flag) return this;
+    this.clipToBox = flag;
+    return this.markDirty();
+  }
+
   constructor(series: InternalSeries, props: { left: number; top: number; width: number; height: number; zIndex?: number }) {
     super({ interactive: true, ...props });
     this.series = series;
