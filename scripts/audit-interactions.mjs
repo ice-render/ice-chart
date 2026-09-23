@@ -19,24 +19,29 @@ const baseUrl = process.argv[3] || 'http://localhost:5177/examples';
  * 已知问题（显式登记，避免「把页面从门禁里删掉」这种掩盖）：
  * - editable-chart：拖动平移之后**左右轴带各有 112 个饱和像素**。
  *
- *   2026-09-23 复验：**豁免仍然必需**，原因经三轮排除法更正过两次，现在是：
- *   **它是示例页自己挂到引擎上的图元**（页内那条"阈值线 / ICEText 挂在数据坐标上"），
- *   不是残留、也不是 ice-chart 的系列。
+ *   2026-09-23 复验：**豁免仍然必需**，原因经四轮排查终于定到代码上（中途我写错过一次，
+ *   这一版是最终结论）：**它是 `ensureMarkLayer()` 建的那层「数据坐标图元」，
+ *   而这层是按画布尺寸建的、没有任何裁剪**。
  *
- *   排除过程（照着做可以复现）：
- *   ① **不是旧帧残留**：复现后强制整屏重画（`markQueueDirty()` + `markViewportChanged()`
- *      + 置脏），带内墨迹 **124 → 124 一个像素都没变**；
- *   ② **不是系列**：把直角坐标的系列一律打开 `clipToBox`（就是本仓那次的改动），
- *      墨迹**纹丝不动**（还是 112/112）—— 同时确认 `sparkline` 组件的 `clipToBox` 确实变成 true；
- *   ③ **不在图表的组件树里**：逐个隐藏组件、连 `chart.root` 都隐藏，墨迹**依然在**
- *      → 它挂在 ICE 实例上（`ice.addChild`），在 ice-chart 的 `root` 之外。
+ *   `addMark`（阈值线 / 预测带 / 注释卡片都走它）把组件加进 `ensureMarkLayer()` 的组：
+ *   `new ICEGroup({ left: 0, top: 0, width: canvas.width, height: canvas.height, ... })`
+ *   → 加进 `this.root`。组是画布大小，所以图元按数据坐标算出来的位置**可以越过绘图区**
+ *   一直画到轴带里；`root` 上虽然有 `clipChildren`，但它裁的是"画布外"，管不到"绘图区外"。
  *
- *   canvas 空间量到的形状：`plot.x = 45`，越界块 bbox = `x 36..41, y 222..242`（6 × 21px）。
+ *   排除过程（每一步都能复现，留着免得下次重走）：
+ *   ① **不是旧帧残留**：强制整屏重画（`markQueueDirty()` + `markViewportChanged()` + 置脏），
+ *      带内墨迹 **124 → 124 一个像素都没变**；
+ *   ② **不是系列**：把直角坐标系列一律打开 `clipToBox`，墨迹**纹丝不动**（112/112），
+ *      同时确认 `sparkline` 的 `clipToBox` 确实变成 true；
+ *   ③ canvas 空间量到的形状：`plot.x = 45`，越界块 bbox = `x 36..41, y 222..242`（6 × 21px）；
+ *   ④ **定位到 markLayer**：见上面的代码路径。
  *
  *   复现：`PAGES=editable-chart INK=1 node scripts/audit-interactions.mjs`（3/3 稳定）。
- *   待办：**修在示例页**（`examples/editable-chart.html` 给那条阈值线自己加绘图区裁剪），
- *   或者在页内接受这段溢出、把豁免留在本文件里。ice-chart 侧已经无处可修 ——
- *   该裁的都裁了（高亮环 + 直角坐标系列），剩下的墨不归它管。
+ *   修法（下一轮，二选一）：
+ *   A. **把标记层做成绘图区大小 + `clipChildren: true`**，同时把 `syncMarks()` 里算出的
+ *      位置改成**相对绘图区**（现在它按画布坐标写 `left/top`）—— 坐标口径要一起改，别只改盒子；
+ *   B. 给引擎图元补一条"自身裁剪"能力（像高亮层那样），但那要动 ice-render，
+ *      而它是 peer、要跟着发版。
  */
 const KNOWN_ISSUES = {
   'editable-chart': ['ink-over-y-axis', 'ink-over-right-axis'],
