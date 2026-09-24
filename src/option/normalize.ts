@@ -171,7 +171,27 @@ export interface NormalizeView {
   yDomains?: Array<[number, number] | null>;
 }
 
+/**
+ * 普通系列**点物化的复用缓存**（图表实例持有，按系列 id）。
+ *
+ * 为什么要：`buildPoints` 每趟归一化都要给每个系列物化一遍 `DataPoint`（10 万点约 1.5~2ms
+ * 加一堆垃圾），而**平移 / 缩放 / 重复归一化时数据根本没变** —— 重建纯属白烧。
+ *
+ * 判据（与类目域那套同源）：**数据数组身份 + 长度 + 解析规则**（`type|xField|yField`）
+ * 都没变才复用；换了数组、换了长度、换了字段一律重建 —— 宁可多算一次，不给错的数据。
+ * 只对「点完全由自己那份 data 决定」的类型生效：`radar / sankey / graph` 的点来自旁边的
+ * `radar` / `sankey` / `graph` 配置块，不在这条路上（它们照样每趟重建）。
+ */
+export interface PointCacheEntry {
+  rows: any[];
+  rule: string;
+  points: DataPoint[];
+  hasExplicitX: boolean;
+}
+
 export interface NormalizeContext extends NormalizeView {
+  /** 见 `PointCacheEntry`。 */
+  pointCache?: Map<string, PointCacheEntry>;
   hiddenIds?: Record<string, boolean>;
   /** 类目（合并）域的一次性缓存（图表实例持有；见 `CategoryDomainCache`）。 */
   categoryCache?: CategoryDomainCache;
@@ -692,7 +712,30 @@ function buildSeries(
       out.push({ ...shared, option, raw, pointCount: raw.length, ...rawAccessors(raw) });
       continue;
     }
-    const { points, hasExplicitX } = buildPoints(option, radar, sankey, graph, context);
+    /**
+     * **点物化的复用**：同一份数据数组 + 同一条解析规则 + 同长度 → 直接复用上一趟那批点
+     * （平移 / 缩放 / 重复归一化的常见形状）。`radar / sankey / graph` 的点由旁边的配置块
+     * 决定，不在这条路上。见 `PointCacheEntry`。
+     */
+    const pointCache = context && context.pointCache ? context.pointCache : null;
+    const sourceRows = Array.isArray(option.data) ? (option.data as any[]) : null;
+    const parseRule = `${option.type}|${option.xField || ''}|${option.yField || ''}`;
+    const shard = pointCache && sourceRows ? pointCache.get(id) : undefined;
+    const reusable =
+      shard &&
+      shard.rows === sourceRows &&
+      shard.rule === parseRule &&
+      shard.points.length === sourceRows.length &&
+      option.type !== 'radar' &&
+      option.type !== 'sankey' &&
+      option.type !== 'graph'
+        ? shard
+        : null;
+    const built = reusable
+      ? { points: reusable.points, hasExplicitX: reusable.hasExplicitX }
+      : buildPoints(option, radar, sankey, graph, context);
+    const { points, hasExplicitX } = built;
+    if (pointCache && sourceRows && !reusable) pointCache.set(id, { rows: sourceRows, rule: parseRule, points, hasExplicitX });
     if (option.type === 'pie') {
       // 饼图：每个扇区一个颜色（可被数据项自身的 color 覆盖）
       for (let p = 0; p < points.length; p++) {

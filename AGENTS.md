@@ -579,6 +579,11 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   **多来源但 x 逐项相同**（K 线 + 量柱 + 均线那种形状）也走这条：先算第一条的表，
   再逐项验其余来源与它同一。⚠️ 多个系列**各自** `setData` 时中间态天然不对齐，
   那条路请声明 `series[i].xFrom` 或改成同帧批更新（见 `plans/incremental-pipeline.md` 第 5 期）。
+- **普通系列的点集也按「数据数组身份 + 长度 + 解析规则」复用**（2026-09-24）：只换视窗
+  （平移 / 缩放）时不再重建 10 万个 `DataPoint` —— 判据在 `PointCacheEntry`，
+  **新增任何影响点值的 option 字段（例如新的字段名 / 解析开关）必须同时进那条规则指纹**，
+  否则会拿旧点糊弄（门禁 `tests/option/point-cache.test.ts`）。点集只在「同一份数组」时复用，
+  换数组（含滑动窗口）一律重建。
 - **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。
   `ICEChart.domainTransition` + `stepDomainTransition()` 每帧按系列进度插值数据域；
   过渡期间同步组件必须传 `preserveAnimation=true`（只换 series 引用，不清 `fromEffective`），

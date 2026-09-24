@@ -15,7 +15,7 @@ import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains
 import type { SeriesRing } from './util/ring';
 import type { SeriesChunks } from './util/chunks';
 import { applyViewToNormalized, canApplyView, normalizeOption, toSerializableOption } from './option/normalize';
-import type { CategoryDomainCache } from './option/normalize';
+import type { CategoryDomainCache, PointCacheEntry } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
 import { createScale, formatTick, type Scale } from './scale';
@@ -235,6 +235,8 @@ export class ICEChart {
     | { chunks: SeriesChunks }
     | { raw: SeriesRawPoints }
   >();
+  /** 普通系列点物化的复用缓存（同一份 data 数组不重建 `DataPoint`，见 `PointCacheEntry`）。 */
+  private __pointCache = new Map<string, PointCacheEntry>();
   /** 虚拟子源的版本号：任何影响「画出来是什么 / 命中什么」的变更都要 +1（引擎据此失效缓存）。 */
   private __virtualSourceVersion = 1;
   /**
@@ -1562,6 +1564,7 @@ export class ICEChart {
       // theme:'auto' = 跟随引擎实例主题：明暗由引擎主题的背景色亮度判定（归一化层保持纯函数）
       preferDark: isEngineThemeDark(this.ice),
       virtualColumns: this.virtualColumns,
+      pointCache: this.__pointCache,
       categoryCache: this.__categoryCache,
     });
     // 图表主题 → 引擎主题：图表实例里那些**引擎自己画的东西**（默认样式 / 交互外壳 /
@@ -1737,6 +1740,7 @@ export class ICEChart {
         // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
         preferDark: isEngineThemeDark(this.ice),
         virtualColumns: this.virtualColumns,
+        pointCache: this.__pointCache,
         categoryCache: this.__categoryCache,
         /**
          * 只在**真有视窗**（`dataZoom` / 手势平移缩放）时才把窗口传下去。
