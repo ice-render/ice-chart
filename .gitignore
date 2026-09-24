@@ -13,3 +13,4 @@ examples/vendor
 .hover-sweep-baseline
 test-results
 playwright-report
+.audit-*
