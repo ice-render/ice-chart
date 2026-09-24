@@ -167,6 +167,21 @@ export interface TreemapOption {
   depthFade?: number;
 }
 
+/**
+ * 面板矩阵配置（小倍数）：把绘图区切成 N 个同构面板。
+ *
+ * 面板彼此**共享数据域**（只是 range 不同），所以「一张图看六个渠道」时六个面板的刻度一致、
+ * 可以横向比较。不给 `matrix` 时是现在的单绘图区行为（逐像素不变）。
+ */
+export interface MatrixOption {
+  /** 行数（等分）或每行的高度权重（数组，按顺序）。 */
+  rows: number | number[];
+  /** 每列的宽度权重或列数；`[4, 1]` 即「主图 + 右侧窄条」。 */
+  columns: number | number[];
+  /** 面板之间的间距（设备像素），默认 8。 */
+  gap?: number;
+}
+
 /** 瀑布图配置。 */
 export interface WaterfallOption {
   increaseColor?: string;
@@ -359,6 +374,12 @@ export interface LiquidOption {
 export interface SeriesOption {
   id?: string;
   type: SeriesType;
+  /**
+   * 所属面板下标（**行优先**：`row · cols + col`）。不给时为 0。
+   *
+   * 只有配了 `option.matrix` 才有意义；越界 / 负数会被夹到合法范围（不抛异常）。
+   */
+  panel?: number;
   /** 绑定的 y 轴下标，默认 0（对应 option.yAxis 数组下标）。 */
   yAxisIndex?: number;
   name?: string;
@@ -846,6 +867,11 @@ export interface ChartOption {
   graph?: GraphOption;
   /** 极坐标网格（画 `r(θ)` 时的同心圆 + 辐条底图）。 */
   polarGrid?: boolean | PolarGridOption;
+  /**
+   * 面板矩阵（小倍数）：把绘图区切成 N 个同构面板，`series[].panel` 指定归属。
+   * 不给就是单绘图区（现有行为，逐像素不变）。
+   */
+  matrix?: MatrixOption;
   /** 标注图层：目标线 / 阈值线、异常点、目标区间（见 `AnnotationOption`）。 */
   annotation?: AnnotationOption;
   /**
