@@ -93,7 +93,7 @@
 ## 6. 标注
 
 `option.annotation` 是**声明式图层**，不是新系列类型：目标线 / 阈值线 / 异常点 / 目标区间。
-设计细节见 [`annotation-design.md`](./annotation-design.md)；两条纪律：
+设计细节见 [`09-annotation-design.md`](./09-annotation-design.md)；两条纪律：
 
 1. 解析（`resolveAnnotation`）在归一化里完成，标注与数据同源；
 2. 坏标注**不让图表崩**，也不影响其它标注 —— 错误经 `chart.annotationErrors()` 暴露（表单据此标红）。

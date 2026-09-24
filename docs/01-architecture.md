@@ -27,7 +27,7 @@ ice-chart 是建在 **ice-render**（Canvas 引擎，peer 依赖）之上的**�
    局部重绘、坐标变换全归引擎；图表层只在组件的 `containsLocalPoint()` 里回答
    「这个本地坐标命中了我的哪个数据点」。
 2. **渲染与命中必须同源**。同一份几何既要画出来、又要被点得到，所以图表层把
-   「点集合 → 像素」这一步固化成**唯一一份**缓存（见 `rendering.md` §2）。
+   「点集合 → 像素」这一步固化成**唯一一份**缓存（见 `03-rendering.md` §2）。
 
 不支持的能力也写在这里：**地图明确不做**（体量、定位都不合适），关系数据一律用力导向关系图表达。
 
@@ -87,7 +87,7 @@ setData(id, rows)
 
 要点：
 
-1. **一次更新只跑一遍归一化**（`applyViewToNormalized`），表达式系列与等比坐标例外（见 `pipeline.md` §3）。
+1. **一次更新只跑一遍归一化**（`applyViewToNormalized`），表达式系列与等比坐标例外（见 `02-pipeline.md` §3）。
 2. **视窗（缩放 / 平移）不是数据**：`viewState` 只影响域，不影响点集。
 3. **脏矩形靠组件自己标**：`markDirty()` 是唯一的脏来源，图表层不整幅重绘。
 4. **悬停 / 准星 / 提示框是独立覆盖层**，数据更新只让它们重新定位（`refreshHover`），不重绘系列。
@@ -143,7 +143,7 @@ setData(id, rows)
 | `viewState`（x/y/yAxes 窗口） | 图表实例 | 用户手势 / `setDomain` / 联动；`preserveView:false` 时重置 |
 | `hiddenIds` / `hiddenSlices` | 图表实例 | 图例 / 扇区切换 |
 | `virtualColumns` | 图表实例 | 存储不再对应任何虚拟系列时清掉 |
-| `__categoryCache` / `__pointCache` | 图表实例 | 「输入指纹变了」时自动失效；详见 `pipeline.md` §4 |
+| `__categoryCache` / `__pointCache` | 图表实例 | 「输入指纹变了」时自动失效；详见 `02-pipeline.md` §4 |
 | `seriesComponents[].pixels/effective/itemProgress` | 组件 | 由 `buildSeriesKey()`（含坐标系指纹 + 动画进度）失效 |
 | `domainTransition` / 动画补间 | 图表 / 组件 | `finishAnimations()` 收尾；`__` 前缀的循环补间**不收** |
 

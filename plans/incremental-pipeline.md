@@ -355,7 +355,7 @@ P2 剩下最容易的一刀：`buildPoints` 每趟归一化都要给每个普通
 
 ## 6. 相关
 
-- `docs/column-store-virtual-series.md`：列存那条线做到哪一步了（存储侧已经收尾）
+- `docs/10-column-store-virtual-series.md`：列存那条线做到哪一步了（存储侧已经收尾）
 - `AGENTS.md` 的「虚拟（列存）系列」与「实时数据流」两节（纪律与已知账）
 - `scripts/measure-pipeline.mjs`：尺子。默认打本仓示例页，也可以指向 trading 的
   `examples/streaming-candles.html`（要先把它起在 8102）

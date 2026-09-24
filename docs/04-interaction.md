@@ -50,7 +50,7 @@ handlePointerMove(x, y)
 
 两条要点：
 
-- **`containsLocalPoint` 就是数据命中判定**（见 `rendering.md` §3）：解析链只做「组件 → 数据」的翻译，
+- **`containsLocalPoint` 就是数据命中判定**（见 `03-rendering.md` §3）：解析链只做「组件 → 数据」的翻译，
   不重算几何。
 - **`nearestIndexByX` 走组件自己的 `nearestIndexAtX`**：单调序列二分、非单调退化为线性扫描，
   语义与像素缓存版一致。
@@ -144,6 +144,6 @@ handlePointerMove(x, y)
 
 1. **悬停反馈用独立覆盖层**：鼠标移动只让 `Highlight` / `Crosshair` / `Tooltip` 变脏，**不重绘系列**。
 2. **压暗其他系列只在「悬停系列变化」时写一次 state**：每次 mousemove 写系列 state 会让脏矩形失效。
-3. **准星 / 游标按距离给时长**（见 `rendering.md` §6.4），不要用固定时长补间。
+3. **准星 / 游标按距离给时长**（见 `03-rendering.md` §6.4），不要用固定时长补间。
 4. **悬停要能探测到「真的画出来了」**：断言 `hoverIndex` 只说明状态对了，
    交互用例要断言 `barDrawRectAt()` / `highlightRectAt()` / `panelOpacity()` 这类**真正参与绘制**的值。

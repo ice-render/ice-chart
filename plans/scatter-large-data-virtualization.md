@@ -68,7 +68,7 @@ series: [{ type: 'scatter', virtual: true, data: { x: Float64Array, y: Float64Ar
 
 ## Phase 2 之后：把这条思路铺开（2026-09-21 同批）
 
-同一个设计思想继续往全仓铺，三处落地（细节见 `docs/column-store-virtual-series.md`）：
+同一个设计思想继续往全仓铺，三处落地（细节见 `docs/10-column-store-virtual-series.md`）：
 
 1. **折线 / 面积也能开列存**：虚拟内核上移到 `SeriesBase`（窗口二分 / 现算像素 / 最近邻），
    折线按**像素列**分桶保留「首 / 最低 / 最高 / 末」四点 —— 折线丢极值就是撒谎。

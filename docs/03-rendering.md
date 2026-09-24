@@ -1,6 +1,6 @@
 # 渲染层与组件契约
 
-> 组件怎么写、几何怎么缓存、什么时候可以少画。命中判定与交互见 `interaction.md`。
+> 组件怎么写、几何怎么缓存、什么时候可以少画。命中判定与交互见 `04-interaction.md`。
 
 ## 目录
 
@@ -131,7 +131,7 @@ class SeriesBase {
    要在图上盖控件就另起一块 canvas（宿主页的控件条就是这么做的），
    并注意 `isOverCanvas()` 会把指针判给「面积上真正的那张图」。
 3. **数据坐标图元**（`chart.addMark(...)`）挂在独立的 `markLayer` 上，随比例尺摆动
-   （`syncMarks()`）；拖拽时交互要给图元让路（见 `interaction.md` §7）。
+   （`syncMarks()`）；拖拽时交互要给图元让路（见 `04-interaction.md` §7）。
 
 ## 8. 视觉硬约束
 
