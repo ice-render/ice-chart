@@ -120,3 +120,53 @@ describe('computeLayout', () => {
     expect(kept[kept.length - 1].i).toBe(ticks.length - 1);
   });
 });
+
+describe('面板矩阵（layout.panels）', () => {
+  it('没有 matrix 时 panels 就是旧的 plot（逐像素一致）', () => {
+    const { layout } = layoutOf({ series: [{ type: 'line', data: [1, 5, 3] }] });
+    expect(layout.panels).toHaveLength(1);
+    expect(layout.panels[0]).toEqual(layout.plot);
+  });
+
+  it('2×2 面板：四个矩形互不重叠，plot 是它们的并集', () => {
+    const { layout } = layoutOf({
+      matrix: { rows: 2, columns: 2, gap: 6 },
+      series: [
+        { type: 'line', data: [1, 5, 3], panel: 0 },
+        { type: 'line', data: [3, 1, 2], panel: 3 },
+      ],
+    });
+    expect(layout.panels).toHaveLength(4);
+    // 列方向：右边那块从第一块的右边缘之后才开始（gap 真的留出来了）
+    expect(layout.panels[1].x).toBeGreaterThanOrEqual(layout.panels[0].x + layout.panels[0].width);
+    // 行方向同理
+    expect(layout.panels[2].y).toBeGreaterThanOrEqual(layout.panels[0].y + layout.panels[0].height);
+    // 并集贴着最后一块的右下角
+    const last = layout.panels[3];
+    expect(layout.plot.x + layout.plot.width).toBeCloseTo(last.x + last.width);
+    expect(layout.plot.y + layout.plot.height).toBeCloseTo(last.y + last.height);
+    expect(layout.plot.x).toBeCloseTo(layout.panels[0].x);
+    expect(layout.plot.y).toBeCloseTo(layout.panels[0].y);
+  });
+
+  it('权重矩阵：列宽 4:1', () => {
+    const { layout } = layoutOf({
+      matrix: { rows: 1, columns: [4, 1], gap: 10 },
+      series: [
+        { type: 'line', data: [1, 5, 3], panel: 0 },
+        { type: 'bar', data: [1, 2, 3], panel: 1 },
+      ],
+    });
+    expect(layout.panels[0].width / layout.panels[1].width).toBeCloseTo(4);
+    expect(layout.panels[1].x).toBeCloseTo(layout.panels[0].x + layout.panels[0].width + 10);
+  });
+
+  it('非直角坐标场景不吃 matrix（面板只在直角坐标生效）', () => {
+    const { layout } = layoutOf({
+      matrix: { rows: 2, columns: 2 },
+      series: [{ type: 'pie', data: [{ name: 'A', value: 1 }] }],
+    });
+    expect(layout.panels).toHaveLength(1);
+    expect(layout.panels[0]).toEqual(layout.plot);
+  });
+});

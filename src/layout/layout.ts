@@ -9,6 +9,7 @@ import type {
 } from '../internal';
 import { createScale, formatTick } from '../scale';
 import { measureTextWidth } from '../util/text';
+import { computePanelRects } from './panels';
 
 const TICK_LENGTH = 4;
 const LABEL_GAP = 6;
@@ -178,6 +179,27 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     title.y = margin.top;
   }
 
+  /**
+   * 面板矩阵：把绘图区切成 N 块，`plot` 收缩成**面板的并集**。
+   *
+   * 没有 `matrix` 时 `panels = [plot]`，与从前逐像素一致 —— 这是回归基线，
+   * 不是「顺手统一一下」。面板只在直角坐标场景生效（饼图 / 桑基那些没有「多块绘图区」的语义）。
+   */
+  const panels: Rect[] =
+    norm.matrix && norm.kind === 'cartesian' ? computePanelRects(plot, norm.matrix) : [plot];
+  const panelUnion: Rect = { x: plot.x, y: plot.y, width: plot.width, height: plot.height };
+  if (panels.length > 1) {
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const panel of panels) {
+      right = Math.max(right, panel.x + panel.width);
+      bottom = Math.max(bottom, panel.y + panel.height);
+    }
+    panelUnion.width = right - panelUnion.x;
+    panelUnion.height = bottom - panelUnion.y;
+  }
+  plot = panelUnion;
+
   const slider: Rect | null =
     showSlider && sliderY !== null
       ? { x: plot.x, y: Math.round(sliderY), width: plot.width, height: Math.round(sliderHeight) }
@@ -185,6 +207,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   return {
     canvas,
+    panels,
     plot,
     titleRect: title ? { x: title.x, y: title.y, width: 0, height: titleHeight } : null,
     legendRect: legend ? legendBoundingRect(legend) : null,

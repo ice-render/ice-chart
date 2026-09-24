@@ -877,6 +877,9 @@ export interface AxisLayout {
 
 export interface ChartLayout {
   canvas: Rect;
+  /** 面板矩阵的各面板矩形（行优先）。没有 `option.matrix` 时就是 `[plot]`。 */
+  panels: Rect[];
+  /** 绘图区；有面板矩阵时是**面板的并集**（无 matrix 时与 `panels[0]` 逐像素相同）。 */
   plot: Rect;
   titleRect: Rect | null;
   legendRect: Rect | null;
