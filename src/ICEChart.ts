@@ -15,6 +15,7 @@ import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains
 import type { SeriesRing } from './util/ring';
 import type { SeriesChunks } from './util/chunks';
 import { normalizeOption, toSerializableOption } from './option/normalize';
+import type { CategoryDomainCache } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
 import { createScale, formatTick, type Scale } from './scale';
@@ -202,6 +203,14 @@ export class ICEChart {
   private silenceDepth = 0;
   /** 上一次推给引擎的图表主题指纹（避免重复推：推一次会让引擎整棵树标脏）。 */
   private __appliedEngineThemeKey: string | null = null;
+  /**
+   * 类目（合并）域的一次性缓存（见 `CategoryDomainCache`）。
+   *
+   * 一次 `applyOption` 要归一化两遍，同一帧里还常有视窗推进再触发一遍 ——
+   * 而多来源类目轴的合并要对每张表跑一趟 `String()` + 哈希（100 万 × 2 ≈ 38ms/次）。
+   * 同一批存储在两次归一化之间不可能变，按指纹复用一次即可（实测每帧 6 次 → 2 次）。
+   */
+  private __categoryCache: CategoryDomainCache = { key: '', result: { domain: [], categories: [] } };
   /**
    * 引擎主题变更的退订函数（`theme:'auto'` 被动跟随，见 `onThemeChange`）。
    *
@@ -1477,6 +1486,7 @@ export class ICEChart {
       // theme:'auto' = 跟随引擎实例主题：明暗由引擎主题的背景色亮度判定（归一化层保持纯函数）
       preferDark: isEngineThemeDark(this.ice),
       virtualColumns: this.virtualColumns,
+      categoryCache: this.__categoryCache,
     });
     // 图表主题 → 引擎主题：图表实例里那些**引擎自己画的东西**（默认样式 / 交互外壳 /
     // 应用后加的自定义图元）跟着图表的主题走，避免"图表是暗的、外壳还是亮的"。
@@ -1601,6 +1611,7 @@ export class ICEChart {
       // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
       preferDark: isEngineThemeDark(this.ice),
       virtualColumns: this.virtualColumns,
+      categoryCache: this.__categoryCache,
       /**
        * 只在**真有视窗**（`dataZoom` / 手势平移缩放）时才把窗口传下去。
        *

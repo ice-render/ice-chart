@@ -108,8 +108,28 @@ export function normalizeAnnotation(input: any): AnnotationOption | null {
   return { lines, points, areas };
 }
 
+/**
+ * 类目（合并）域的**一次性缓存**：按「存储指纹」判命中（见 `buildXDomain`）。
+ *
+ * 为什么需要它：一次 `applyOption` 要归一化两遍（applyOption 一遍、rebuild 一遍），
+ * 同一帧里往往还有视窗更新再触发一遍 —— 而类目轴的多来源合并要对**每张表**跑一趟
+ * `String()` + 哈希（100 万 × 2 ≈ 38ms/次）。同一批存储在两次归一化之间不可能变，
+ * 所以按指纹复用一次就够（实测 1M + 量柱 + 均线：每帧 6 次合并 → 2 次）。
+ *
+ * 指纹取值（每个系列一项）：惰性原始点用 `长度 / categoryNext / 计数表大小 / 首末类目`
+ * —— `categoryNext` 只在**新增类目**时自增，`categoryCounts.size` 只在增删类目时变，
+ * 两者叠上首末键，覆盖了「滚动窗口只动两头」与「中间类目被淘汰」两种改法；
+ * 普通系列用 `点数 / 首末 x`。判不中就重算 —— **宁可多算一次，不能给出错的轴**。
+ */
+export interface CategoryDomainCache {
+  key: string;
+  result: { domain: any[]; categories: any[]; categoryLookup?: (key: string) => number };
+}
+
 export interface NormalizeContext {
   hiddenIds?: Record<string, boolean>;
+  /** 类目（合并）域的一次性缓存（图表实例持有；见 `CategoryDomainCache`）。 */
+  categoryCache?: CategoryDomainCache;
   /**
    * 引擎实例主题是不是暗色（`theme: 'auto'` 时用来决定跟亮色还是暗色主题）。
    * 由 `ICEChart` 按 `ice.getTheme()` 算出后传进来 —— 归一化层本身不碰引擎实例，保持纯函数。
@@ -316,7 +336,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     yAxisOptions[0] = { ...yAxisOptions[0], type: 'category' };
     (yAxisOptions[0] as any).__categories = yCategories;
   } else {
-    const built = buildXDomain(xType, series, xAxisOption);
+    const built = buildXDomain(xType, series, xAxisOption, context.categoryCache);
     rawXDomain = built.domain;
     categories = built.categories;
     categoryLookup = built.categoryLookup;
@@ -1502,18 +1522,43 @@ function sameCategories(a: SeriesRawPoints, b: SeriesRawPoints): boolean {
 function buildXDomain(
   type: string,
   series: InternalSeries[],
-  option: AxisOption
+  option: AxisOption,
+  cache?: CategoryDomainCache
 ): { domain: any[]; categories: any[]; categoryLookup?: (key: string) => number } {
+  /** 类目域的指纹：任一存储变了（长度 / 新增计数 / 类目表大小 / 首末键）就不再命中。 */
+  const cacheKey = (): string => {
+    let key = type;
+    for (let i = 0; i < series.length; i++) {
+      const s = series[i];
+      if (s.raw) {
+        const cat = s.raw.categories;
+        key += `|r${i}:${cat.length}:${s.raw.categoryNext}:${s.raw.categoryCounts.size}:${String(cat[0])}:${String(cat[cat.length - 1])}`;
+      } else {
+        const n = s.pointCount;
+        key += `|p${i}:${n}:${n ? String(s.xValueAt(0)) : ''}:${n ? String(s.xValueAt(n - 1)) : ''}`;
+      }
+    }
+    return key;
+  };
+  const hit = cache ? cache.key === cacheKey() : false;
+  if (hit && cache) return cache.result;
+  const remember = (result: { domain: any[]; categories: any[]; categoryLookup?: (key: string) => number }) => {
+    if (cache) {
+      cache.key = cacheKey();
+      cache.result = result;
+    }
+    return result;
+  };
   if (type === 'category') {
     /**
      * 列存（虚拟）热力图：类目顺序由矩阵定死（值矩阵按这个顺序排），
      * 优先于「轴自己声明的 data」与数据聚合 —— 顺序错了格子就整体错位。
      */
     const grid = series.find((s) => s.grid);
-    if (grid && grid.grid) return { domain: grid.grid.xCategories.slice(), categories: grid.grid.xCategories.slice() };
+    if (grid && grid.grid) return remember({ domain: grid.grid.xCategories.slice(), categories: grid.grid.xCategories.slice() });
     // 轴自己声明了类目就用它（顺序即轴的顺序），否则从数据里聚合
     if (Array.isArray(option.data) && option.data.length) {
-      return { domain: option.data.slice(), categories: option.data.slice() };
+      return remember({ domain: option.data.slice(), categories: option.data.slice() });
     }
     /**
      * 合并去重：`Map<key, 下标>` —— 它一趟同时给出「见没见过」和「在合并域里的下标」，
@@ -1538,7 +1583,7 @@ function buildXDomain(
       const store = series[0].raw as SeriesRawPoints;
       const owned = store.categories.slice();
       // 查表口直连存储那张增量维护的表：类目轴不必每帧重建一遍 10 万条的 Map。
-      return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(store, key) };
+      return remember({ domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(store, key) });
     }
     /**
      * **多个来源但类目表逐项相同**：直接复用第一张表（连查表口一起）。
@@ -1573,7 +1618,7 @@ function buildXDomain(
       if (distinct.length === 1) {
         const only = distinct[0];
         const owned = only.categories.slice();
-        return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(only, key) };
+        return remember({ domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(only, key) });
       }
       for (const store of distinct) {
         for (const value of store.categories) {
@@ -1584,7 +1629,7 @@ function buildXDomain(
           }
         }
       }
-      return { domain: categories, categories, categoryLookup: (key: string) => { const at = seen.get(key); return at === undefined ? -1 : at; } };
+      return remember({ domain: categories, categories, categoryLookup: (key: string) => { const at = seen.get(key); return at === undefined ? -1 : at; } });
     }
     for (const s of series) {
       // 惰性原始点：类目表增量维护在存储里（滚动窗口下别每帧重扫）
@@ -1607,14 +1652,14 @@ function buildXDomain(
         }
       }
     }
-    return {
+    return remember({
       domain: categories,
       categories,
       categoryLookup: (key: string) => {
         const at = seen.get(key);
         return at === undefined ? -1 : at;
       },
-    };
+    });
   }
 
   const values: number[] = [];
