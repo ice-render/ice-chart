@@ -14,7 +14,7 @@ import type { ChartLayout, InternalSeries, NormalizedOption, Rect, SeriesColumns
 import { createRing, ringAppend, ringLastX, ringXAt, ringYAt, refreshRingDomains } from './util/ring';
 import type { SeriesRing } from './util/ring';
 import type { SeriesChunks } from './util/chunks';
-import { normalizeOption, toSerializableOption } from './option/normalize';
+import { applyViewToNormalized, canApplyView, normalizeOption, toSerializableOption } from './option/normalize';
 import type { CategoryDomainCache } from './option/normalize';
 import { applyChartThemeToEngine } from './theme/chartEngineBridge';
 import { computeLayout } from './layout/layout';
@@ -246,6 +246,14 @@ export class ICEChart {
    */
   private domainTransition: { from: number[]; to: number[] } | null = null;
   private domainFrameHandler: any = null;
+  /** `batch()` 的嵌套深度：> 0 时数据更新只记账，出批（回到 0）才跑流水线。 */
+  private batchDepth = 0;
+  /** 批内是否有待重建的数据更新。 */
+  private batchPending = false;
+  /** 批内的动画标志（取与：任何一次不要动画，整批都不插值）。 */
+  private batchAnimate = true;
+  /** 批内累积的 `data:change`（出批后按调用顺序补发）。 */
+  private batchEvents: Array<{ seriesId: string; seriesIndex: number }> = [];
 
   constructor(target: any, option: ChartOption, chartOptions: ICEChartOptions = {}) {
     if (!target) throw new Error('[ice-chart] 初始化失败：缺少 canvas 元素或其 id。');
@@ -388,14 +396,76 @@ export class ICEChart {
     return this.annotationDiagnostics().filter((item) => item.severity === 'error');
   }
 
+  /**
+   * **同帧批合并**：把一帧里对多个系列的更新合成一次流水线。
+   *
+   * 为什么需要（实测，10 万点 × 3 系列）：逐系列 `setData` 是 **51.8ms/tick** ——
+   * 每次调用都跑一整条「归一化 + 布局 + 同步」，而且**中间态里各系列天然不对齐**
+   * （第一条已经滑过去、第二三条还没），类目域的「逐项同一」增量因此也用不上。
+   * 包进 `batch()` 之后只跑一次流水线，并且流水线看到的是**全部更新完**的一致状态。
+   *
+   * ```ts
+   * chart.batch(() => {
+   *   chart.setData('k', candles);
+   *   chart.setData('volume', volumes);
+   *   chart.setData('ma7', maValues);
+   * });
+   * ```
+   *
+   * 语义（三条都别破）：
+   * ① **同步**：`batch()` 返回时图表已经是新状态，不是「下一帧才生效」；
+   * ② **事件在出批后按调用顺序补发** —— 批内不发布 `data:change`，监听者读到的图永远自洽；
+   * ③ **异常也 flush**（`finally`）：批内抛错不会让图表停在半路，异常照常往外抛。
+   *
+   * 只作用于数据更新（`setData` / `appendData`）；批内的 `setOption` / `setDomain` 照旧立即生效。
+   * 批内只要有任意一次更新不要求动画，整批就不做值插值（滚动窗口那条纪律优先）。
+   */
+  public batch<T>(fn: () => T): T {
+    this.batchDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this.batchDepth -= 1;
+      if (!this.batchDepth) this.flushBatch();
+    }
+  }
+
+  /** 出批：跑一次流水线，再按调用顺序补发 `data:change`。 */
+  private flushBatch(): void {
+    const events = this.batchEvents;
+    const pending = this.batchPending;
+    const animate = this.batchAnimate;
+    this.batchEvents = [];
+    this.batchPending = false;
+    this.batchAnimate = true;
+    if (pending) this.applyOption(this.option, { animate, preserveView: true });
+    for (const event of events) this.emit('data:change', event);
+  }
+
+  /**
+   * 数据更新之后的收尾：批内只记账（出批时一次跑完），批外照旧立刻重建 + 发事件。
+   *
+   * 批内的动画标志取**与**：只要有一次更新不要求动画（例如滑动窗口的 `appendData`），
+   * 整批就不插值 —— 「窗口滑动时插值会把点插向邻居」那条纪律不能被批合并绕过。
+   */
+  private afterDataChange(seriesId: string, seriesIndex: number, animate: boolean): void {
+    if (this.batchDepth > 0) {
+      this.batchPending = true;
+      this.batchAnimate = this.batchAnimate && animate;
+      this.batchEvents.push({ seriesId, seriesIndex });
+      return;
+    }
+    this.applyOption(this.option, { animate, preserveView: true });
+    this.emit('data:change', { seriesId, seriesIndex });
+  }
+
   /** 更新单个系列的数据。 */
   public setData(seriesIdOrIndex: string | number, data: DataItem[]): this {
     const series = (this.option.series || []).map((item, index) => ({ item, index }));
     const target = series.find((s) => (typeof seriesIdOrIndex === 'number' ? s.index === seriesIdOrIndex : s.item.id === seriesIdOrIndex || s.item.name === seriesIdOrIndex));
     if (!target) throw new Error(`[ice-chart] 找不到系列：${seriesIdOrIndex}`);
     target.item.data = data;
-    this.applyOption(this.option, { animate: true, preserveView: true });
-    this.emit('data:change', { seriesId: target.item.id, seriesIndex: target.index });
+    this.afterDataChange(String(target.item.id), target.index, true);
     return this;
   }
 
@@ -441,10 +511,18 @@ export class ICEChart {
     }
     const next = (current || []).concat(appended);
     const maxPoints = Number(options.maxPoints);
+    /**
+     * ⚠️ **不要改成原地 push / splice**（试过，又退回来了）。
+     *
+     * 曾经以为这里的 `concat` + `slice` 是滑动窗口的大头，实测**不是**：
+     * 10 万个元素的两趟拷贝只要 **0.055ms**（`push + splice(0,1)` 0.005ms），
+     * 而同一 tick 里「类目域重建」是 **3.5ms**（见 `plans/incremental-pipeline.md`）。
+     * 原地改会**动到调用方自己那个数组**（调用方普遍会留着引用），
+     * 拿契约换 0.05ms 不划算 —— 这个数组的身份与内容都属于调用方。
+     */
     target.item.data =
       isFinite(maxPoints) && maxPoints > 0 && next.length > maxPoints ? next.slice(next.length - maxPoints) : next;
-    this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
-    this.emit('data:change', { seriesId: target.item.id, seriesIndex: target.index });
+    this.afterDataChange(String(target.item.id), target.index, options.animate === true);
     return this;
   }
 
@@ -494,8 +572,7 @@ export class ICEChart {
         }
         (series as any).option = lean;
       }
-      this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
-      this.emit('data:change', { seriesId: series.id, seriesIndex: series.index });
+      this.afterDataChange(series.id, series.index, options.animate === true);
       return this;
     }
     let ring: SeriesRing;
@@ -537,8 +614,7 @@ export class ICEChart {
     refreshRingDomains(ring);
     // 换掉缓存里的连续列：下一次归一化（applyOption 里）就会用环形的访问器
     this.virtualColumns.set(series.id, { ring });
-    this.applyOption(this.option, { animate: options.animate === true, preserveView: true });
-    this.emit('data:change', { seriesId: series.id, seriesIndex: series.index });
+    this.afterDataChange(series.id, series.index, options.animate === true);
     return this;
   }
 
@@ -1516,7 +1592,16 @@ export class ICEChart {
     }
     this.hiddenIds = normalized.hiddenIds;
     this.hiddenSlices = normalized.hiddenSlices;
-    this.rebuild(options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update');
+    /**
+     * 把刚刚这遍**全域名归化**的结果交给 `rebuild`：视窗（数据缩放窗口）只要
+     * 「套上去」就行，没必要再归一化一遍。表达式系列 / 等比坐标会退回整条重跑
+     * （见 `canApplyView`），语义与从前逐项一致。
+     */
+    this.rebuild(
+      options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update',
+      null,
+      normalized
+    );
     const trigger = options.animate === 'enter' ? 'enter' : options.animate === false ? false : 'update';
     // 只有直角坐标才需要 y 域过渡：极坐标 / 雷达 / 仪表盘 / 水位 / 树图这些场景不按 y 轴排布，
     // 数据一更新就启动过渡只会让它们每帧跑一次全量重建（而且永远不会结束 ——
@@ -1598,46 +1683,75 @@ export class ICEChart {
     this.domainFrameHandler = null;
   }
 
-  private rebuild(animate: boolean | 'enter' | 'update', domainOverride?: number[] | null): void {
+  /**
+   * `prepared` = 调用方刚跑过的**全域名归化**结果（`applyOption` 那条路会给）。
+   *
+   * 给的时候不再跑第二遍归一化，而是把视窗**套**上去（`applyViewToNormalized`）——
+   * 视窗在归一化里只影响「域」，事后套用与重跑逐项一致
+   * （门禁：`tests/option/apply-view.test.ts` + `tests/chart/single-normalize.test.ts`）。
+   * 表达式系列 / 等比坐标由 `canApplyView` 挡下来，照旧整条重跑。
+   */
+  private rebuild(
+    animate: boolean | 'enter' | 'update',
+    domainOverride?: number[] | null,
+    prepared?: NormalizedOption
+  ): void {
     if (this.destroyed) return;
     const canvas = this.canvasRect();
     const effectiveYs = this.fullYDomains.map((full, index) => {
       const view = index === 0 ? this.viewState.y : this.viewState.yAxes[index];
       return view && view.length === 2 ? view : full;
     });
-    const norm = normalizeOption(this.option, {
-      hiddenIds: this.hiddenIds,
-      hiddenSlices: this.hiddenSlices,
-      // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
-      preferDark: isEngineThemeDark(this.ice),
-      virtualColumns: this.virtualColumns,
-      categoryCache: this.__categoryCache,
-      /**
-       * 只在**真有视窗**（`dataZoom` / 手势平移缩放）时才把窗口传下去。
-       *
-       * 之前这里回退成 `this.fullXDomain`（「没有视窗」的等价物），代价是每帧都让归一化
-       * 走一趟「把窗口端点映射回类目下标」：`fullDomain.indexOf()` 两趟 O(n)，而 10 万类目
-       * 的滚动窗口里结束端点在最后一个、起始端点往往已被淘汰 —— 两趟都得扫到底，
-       * 然后结论还是「退化为原域」。语义上与传 null 完全一致（同一份数据算出来的域）。
-       */
-      xDomain: this.viewState.x && this.viewState.x.length === 2 ? [this.viewState.x[0], this.viewState.x[1]] : null,
+    /**
+     * 视窗的三个入口。只要 `prepared` 可用，这一组就**只**用来套域；
+     * 否则原样传给归一化（老路子）。
+     */
+    const view = {
+      xDomain:
+        this.viewState.x && this.viewState.x.length === 2
+          ? ([this.viewState.x[0], this.viewState.x[1]] as [any, any])
+          : null,
       yDomain:
         this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
           ? null
           : domainOverride && domainOverride.length === 2
-          ? [Number(domainOverride[0]), Number(domainOverride[1])]
-          : effectiveYs[0] && effectiveYs[0].length === 2
-            ? [Number(effectiveYs[0][0]), Number(effectiveYs[0][1])]
-            : null,
+            ? ([Number(domainOverride[0]), Number(domainOverride[1])] as [number, number])
+            : effectiveYs[0] && effectiveYs[0].length === 2
+              ? ([Number(effectiveYs[0][0]), Number(effectiveYs[0][1])] as [number, number])
+              : null,
       yDomains: effectiveYs.map((domain) =>
         this.autoYCurve && !this.viewState.y && !(domainOverride && domainOverride.length === 2)
           ? null
           : domain && domain.length === 2
-            ? [Number(domain[0]), Number(domain[1])]
+            ? ([Number(domain[0]), Number(domain[1])] as [number, number])
             : null
       ),
-    });
-    // 第二次归一化后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
+    };
+    let norm: NormalizedOption;
+    if (prepared && canApplyView(prepared)) {
+      norm = applyViewToNormalized(prepared, view);
+    } else {
+      norm = normalizeOption(this.option, {
+        hiddenIds: this.hiddenIds,
+        hiddenSlices: this.hiddenSlices,
+        // this.norm 来自这一遍归一化 —— `theme:'auto'` 的明暗判定必须在这里也给到
+        preferDark: isEngineThemeDark(this.ice),
+        virtualColumns: this.virtualColumns,
+        categoryCache: this.__categoryCache,
+        /**
+         * 只在**真有视窗**（`dataZoom` / 手势平移缩放）时才把窗口传下去。
+         *
+         * 之前这里回退成 `this.fullXDomain`（「没有视窗」的等价物），代价是每帧都让归一化
+         * 走一趟「把窗口端点映射回类目下标」：`fullDomain.indexOf()` 两趟 O(n)，而 10 万类目
+         * 的滚动窗口里结束端点在最后一个、起始端点往往已被淘汰 —— 两趟都得扫到底，
+         * 然后结论还是「退化为原域」。语义上与传 null 完全一致（同一份数据算出来的域）。
+         */
+        xDomain: view.xDomain,
+        yDomain: view.yDomain,
+        yDomains: view.yDomains,
+      });
+    }
+    // 归一化（或事后套视窗）之后，y 轴可能因为堆叠 / 可见性变化而需要重算：保持用户窗口优先
     this.norm = norm;
     // 虚拟子源的版本：数据 / 窗口 / 布局变了都算「画出来是什么」变了（引擎据此失效缓存）
     this.__virtualSourceVersion += 1;

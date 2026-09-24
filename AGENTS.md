@@ -67,6 +67,13 @@ ice-chart 是构建在 **ice-render** Canvas 引擎之上的交互式图表库�
     没有 canvas 的环境下运行与测试。
 11. **用户输入的表达式一律走 `src/expr`**：禁止 `eval` / `new Function`（CSP 与安全），
     编译失败要能给出位置，且**不能让图表崩**（错误经 `chart.expressionErrors()` 暴露）。
+12. **视窗只影响「域」，不要为它重跑整条归一化**（2026-09-24）：视窗在 `normalizeOption` 里
+    只落在三处 —— x 域裁剪（`resolveXDomain`）、y 轴显式域、表达式系列的采样区间。
+    所以一次更新只跑一遍**全域**归一化，视窗由纯函数 `applyViewToNormalized` 事后套上；
+    只有「视窗会改变系列构造」的两种情形（表达式系列 / 等比坐标）才照旧整条重跑，
+    由 `canApplyView` 判定。**新增任何依赖视窗的字段，必须同步改 `canApplyView`**
+    （拿不准就让它返回 `false`），否则 `tests/option/apply-view.test.ts` 的等价性用例
+    （对着参照实现逐项比）会红。别拿「域以外的东西」当视窗的隐性输入。
 
 ## 成员顺序（2026-09-17 定）
 
@@ -543,6 +550,12 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
 
 - **滑动窗口的下标会整体前移**，所以追加路径**默认不做值插值**（`animate: false`）：
   插值会把每个点插向「邻居的值」。要插值就显式 `animate: true`（窗口不滑动时才有意义）。
+- **一帧里更新多个系列就走 `chart.batch(fn)`**（2026-09-24，P4 落地）：批内只改数据 + 记账，
+  出批跑**一次**流水线。逐系列 `setData` 是「每次调用一整条流水线」**且中间态各系列不对齐**
+  （类目域的增量也用不上）—— 10 万点 × 3 系列实测 **45.4 → 10.4 ms/tick**。
+  语义：出批时图表已是新状态（同步）；`data:change` 出批后按调用顺序补发；
+  批内抛异常也 flush；动画标志取**与**（有一次不要动画就整批不插值）。
+  门禁 `tests/chart/batch.test.ts`。
 - 推送频率就是流畅度：60Hz 推送 = 60fps 滚动。实测成本（2 系列 / 每次各追加 1 点）：
   120 点窗口 **1.6ms/tick**、600 点 4.9ms、1500 点 11ms（成本随窗口近似线性，因为每 tick 都会
   归一化 + 布局 + 重建像素）。监控类示例用 120~300 点窗口最划算。
@@ -558,6 +571,14 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   真要做百万级窗口的实时流，该换的是「分块 + 增量域」，而不是在这里加复杂度。
 - `appendData`/`setData` 会**就地改传入的 option**（`series[i].data = ...`），
   测试与调用方要传自己的副本，否则模块级常量会在用例之间互相污染（踩过）。
+- **普通（非列存）系列的类目域现在是增量维护的**（2026-09-24，与惰性原始点同一套口径）：
+  缓存键按**数据数组身份**记（不是「点数 + 首末 x」—— 那样中间被换掉会命中过期的域，
+  这是修掉的一条真 bug），滚动窗口的「头部淘汰 + 尾部追加」由 `tryIncrementalCategoryDomain`
+  O(delta) 维护（`values` + **绝对序号** `seq`），**逐项验过才认**，判不中就退回全量聚合。
+  新增任何依赖类目域的东西别绕过这张表；门禁 `tests/option/category-domain-cache.test.ts`。
+  **多来源但 x 逐项相同**（K 线 + 量柱 + 均线那种形状）也走这条：先算第一条的表，
+  再逐项验其余来源与它同一。⚠️ 多个系列**各自** `setData` 时中间态天然不对齐，
+  那条路请声明 `series[i].xFrom` 或改成同帧批更新（见 `plans/incremental-pipeline.md` 第 5 期）。
 - **数据域要跟动画一起过渡**：更新时 y 轴数据域常变（最大值 50 → 40），域瞬跳会让图形先蹦一下。
   `ICEChart.domainTransition` + `stepDomainTransition()` 每帧按系列进度插值数据域；
   过渡期间同步组件必须传 `preserveAnimation=true`（只换 series 引用，不清 `fromEffective`），

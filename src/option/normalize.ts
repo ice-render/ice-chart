@@ -124,9 +124,54 @@ export function normalizeAnnotation(input: any): AnnotationOption | null {
 export interface CategoryDomainCache {
   key: string;
   result: { domain: any[]; categories: any[]; categoryLookup?: (key: string) => number };
+  /**
+   * **单来源普通系列的增量类目表**（2026-09-24，见 `OrdinaryCategoryIncremental`）。
+   *
+   * 惰性原始点那条路把这张表维护在**存储**里；普通系列的数据在 `option` 里，
+   * 于是维护在图表实例的缓存上。判不中就置空 → 下一帧全量重算。
+   */
+  incremental?: OrdinaryCategoryIncremental | null;
 }
 
-export interface NormalizeContext {
+/**
+ * 单来源普通系列的**增量类目表**：把「头部淘汰 + 尾部追加」这趟滚动窗口，
+ * 从「每 tick 把 10 万类目重新去重一遍（10 万点实测 2.9ms）」降到「验一遍 + O(delta) 维护」。
+ *
+ * 与 `SeriesRawPoints` 的类目表同一套口径（那里维护在存储上）：
+ * - `values`：上一次的 x 值序列。**只在「窗口内类目互不相同」时才等于类目表**，
+ *   所以 `unique` 是这套增量的前提，一旦不成立就整表重建；
+ * - `seq`：类目 → **绝对序号**（不是下标）。下标由「自己的序号 − 首项序号」算出，
+ *   于是头部淘汰只是删一个 key，不必把整张表重写一遍。
+ *
+ * 纪律：增量只在**逐项验过**之后才认（宁可多算一次，不给错的轴）；
+ * 任何一处对不上（换了数据源 / 中间被改过 / 出现重复类目）都退回全量聚合。
+ */
+export interface OrdinaryCategoryIncremental {
+  /** 上一次那批数据属于哪个系列（换了系列就整表重建）。 */
+  seriesId: string;
+  values: any[];
+  seq: Map<string, number>;
+  /** 下一个要分配的绝对序号。不变式：`首项序号 + 类目数`。 */
+  next: number;
+  unique: boolean;
+}
+
+/**
+ * 视窗（数据缩放 / 手势平移产生的窗口）：归一化的**域**输入口径。
+ *
+ * 抽成独立接口是为了 `applyViewToNormalized` —— 它接受的就是这一组字段，
+ * 语义与「带视窗重跑一遍归一化」逐项一致（见那里的注释与 `tests/option/apply-view.test.ts`）。
+ */
+export interface NormalizeView {
+  /** 当前 x 数据域（数据缩放后）。不传表示自动。 */
+  xDomain?: [any, any] | null;
+  /** 主 y 轴的数据域（缩放后），等价于 yDomains[0]。 */
+  yDomain?: [number, number] | null;
+  /** 每个 y 轴的数据域（多轴时按 index 区分）。 */
+  yDomains?: Array<[number, number] | null>;
+}
+
+export interface NormalizeContext extends NormalizeView {
   hiddenIds?: Record<string, boolean>;
   /** 类目（合并）域的一次性缓存（图表实例持有；见 `CategoryDomainCache`）。 */
   categoryCache?: CategoryDomainCache;
@@ -137,18 +182,13 @@ export interface NormalizeContext {
   preferDark?: boolean;
   /** 被隐藏的扇区（饼图），key 为 `seriesId#dataIndex`。 */
   hiddenSlices?: Record<string, boolean>;
-  /** 当前 x 数据域（数据缩放后）。不传表示自动。 */
-  xDomain?: [any, any] | null;
-  /** 主 y 轴的数据域（缩放后），等价于 yDomains[0]。 */
-  yDomain?: [number, number] | null;
-  /** 每个 y 轴的数据域（多轴时按 index 区分）。 */
-  yDomains?: Array<[number, number] | null>;
   /**
    * 虚拟（列存）系列的存储缓存，key 为系列 id。
    *
    * 为什么需要：`data` 在第一次归一化之后就被释放了（这正是虚拟化省内存的地方），
-   * 而一次 `applyOption` 会归一化两遍（applyOption 自己一遍、rebuild 一遍）。
-   * 于是列存要在**图表实例**上留一份：第一遍建列并放进缓存，第二遍直接复用。
+   * 而**下一次**更新（`setData` / `appendData` / 手势）还要再归一化一遍 —— 那时
+   * `option` 里已经没有 `data` 了。于是列存要在**图表实例**上留一份：
+   * 第一次建列并放进缓存，后面的归一化直接复用。
    * 带 data 的输入永远以 data 为准（缓存只是「没有 data 时怎么办」的答案）。
    */
   virtualColumns?: Map<
@@ -371,6 +411,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
         scale: null,
         index,
         position: option.position || 'left',
+        // 横向图的类目在 y 轴上，值在 x 轴上 —— y 视窗对这根轴无效
+        categoryDomain: true,
       };
     }
     // 热力图需要「类目 y 轴」：y 方向也是离散类目
@@ -398,7 +440,16 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
           }
         }
       }
-      return { option, type: 'category' as const, domain: categories, scale: null, index, position: option.position || (index === 0 ? 'left' : 'right') };
+      return {
+        option,
+        type: 'category' as const,
+        domain: categories,
+        scale: null,
+        index,
+        position: option.position || (index === 0 ? 'left' : 'right'),
+        // 热力图的行类目：同上，不接受 y 视窗
+        categoryDomain: true,
+      };
     }
     const type = option.type || 'linear';
     const explicit = context.yDomains ? context.yDomains[index] : index === 0 ? context.yDomain : null;
@@ -453,6 +504,67 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     hiddenIds,
     hiddenSlices,
   };
+}
+
+/**
+ * 视窗是不是只影响「域」，不影响系列本身的构造。
+ *
+ * 视窗在归一化里一共只有三处作用：① x 域裁剪（`resolveXDomain`）；
+ * ② y 轴的显式数据域；③ 表达式系列的**采样区间**（`function` / `parametric` 的
+ * 采样点按可视窗口现算，见 `buildCurvePoints` 的 `context.xDomain` 分支）。
+ * ① ② 可以事后套用（`applyViewToNormalized`），③ 不行 —— 那必须整条重跑。
+ *
+ * 等比坐标（`aspect: 'equal'`）同理：它按两个轴的**跨度**重新拉齐，
+ * 跨度随视窗变，事后套用会算错。
+ */
+export function canApplyView(norm: NormalizedOption): boolean {
+  if (!norm) return false;
+  if (norm.option && (norm.option as any).aspect === 'equal') return false;
+  for (const series of norm.series) {
+    if (series.type === 'function' || series.type === 'parametric') return false;
+  }
+  return true;
+}
+
+/**
+ * 把**全域**归一化结果套上视窗。
+ *
+ * 结果与 `normalizeOption(option, view)` 逐项一致，但省掉一整遍归一化
+ * （点物化 / 类目（合并）表 / 轴域都复用全域那一遍）—— 10 万点普通系列上
+ * 那一遍实测约 3ms/次（见 `plans/incremental-pipeline.md`）。
+ *
+ * 之所以能省：视窗只落在这几个「域」字段上，而域是归一化**最后**才算的
+ * （x 域裁剪在 `resolveXDomain`、y 轴域在轴的构造里），所以事后套用等价 ——
+ * 这条等价性由 `tests/option/apply-view.test.ts` 对着参照实现逐项锁住。
+ *
+ * ⚠️ 调用方必须先过 `canApplyView`：表达式系列 / 等比坐标套用会算错
+ * （采样区间与跨度都由视窗决定），那两种情形只能整条重跑。
+ */
+export function applyViewToNormalized(norm: NormalizedOption, view: NormalizeView): NormalizedOption {
+  const window = view && Array.isArray(view.xDomain) && view.xDomain.length >= 2 ? (view.xDomain as [any, any]) : null;
+  const hasYWindow = !!(view && (view.yDomains || (Array.isArray(view.yDomain) && view.yDomain.length === 2)));
+  if (!window && !hasYWindow) return norm;
+
+  const xAxis: InternalAxis = { ...norm.xAxis };
+  if (window) {
+    // 与 `normalizeOption` 里那条完全同源：同一个 resolveXDomain、同一份查表口
+    const resolved = resolveXDomain(xAxis.type, xAxis.domain, window, norm.xAxis.categoryLookup);
+    xAxis.domain = resolved.domain;
+    if (norm.xAxis.categoryLookup) {
+      xAxis.categoryLookup = norm.xAxis.categoryLookup;
+      xAxis.categoryOffset = resolved.offset;
+    }
+  }
+
+  const yAxes: InternalAxis[] = norm.yAxes.map((axis, index) => {
+    // 类目 y 轴（横向图 / 热力图的行）不吃 y 视窗 —— 与带视窗重跑一遍的规则一致
+    if (axis.categoryDomain) return axis;
+    const explicit = view.yDomains ? view.yDomains[index] : index === 0 ? view.yDomain : null;
+    if (!explicit || explicit.length !== 2) return axis;
+    return { ...axis, domain: [explicit[0], explicit[1]] };
+  });
+
+  return { ...norm, xAxis, yAxes, yAxis: yAxes[0] };
 }
 
 function buildSeries(
@@ -1541,6 +1653,140 @@ function withoutAliasedX(series: InternalSeries[]): InternalSeries[] {
   });
 }
 
+/**
+ * 数组 / 对象的稳定身份编号（WeakMap：不阻止回收，也不长期持有）。
+ *
+ * 只用来当**缓存键**：同一个数组对象 = 同一份数据。调用方就地改内容属于越界用法 ——
+ * 这与惰性原始点那条「原始数据按引用保留」是同一条口径（见 `AGENTS.md` 的虚拟化一节）。
+ */
+const sourceIdentities = new WeakMap<object, number>();
+let sourceIdentitySeq = 0;
+function identityOf(value: any): number {
+  if (!value || typeof value !== 'object') return 0;
+  const existing = sourceIdentities.get(value);
+  if (existing !== undefined) return existing;
+  sourceIdentitySeq += 1;
+  sourceIdentities.set(value, sourceIdentitySeq);
+  return sourceIdentitySeq;
+}
+
+/**
+ * 增量表的查表口：下标 = 自己的绝对序号 − 首项序号（与 `rawCategoryIndex` 同一口径）。
+ *
+ * ⚠️ 它读的是**增量维护中的那张 Map**，所以只对「当前这一帧的域」有效 ——
+ * `BandScale` 每次重建都会拿到新查表口（`buildScales` 里现取），照常使用没问题；
+ * 别把它存下来跨帧用（下一帧头部淘汰后同一个 key 的绝对序号没变，但基准变了）。
+ */
+function incrementalLookup(state: OrdinaryCategoryIncremental): (key: string) => number {
+  const base = state.values.length ? state.seq.get(String(state.values[0])) : undefined;
+  const from = base === undefined ? 0 : base;
+  return (key: string) => {
+    const at = state.seq.get(key);
+    return at === undefined ? -1 : at - from;
+  };
+}
+
+function incrementalResult(state: OrdinaryCategoryIncremental): {
+  domain: any[];
+  categories: any[];
+  categoryLookup: (key: string) => number;
+} {
+  // 域是**只读约定**：交一份拷贝出去，表自己的数组留着继续增量维护
+  const owned = state.values.slice();
+  return { domain: owned, categories: owned, categoryLookup: incrementalLookup(state) };
+}
+
+/**
+ * 增量：只认「头部淘汰 + 尾部追加」这一种形状，而且**逐项验过**才认。
+ *
+ * 验不过返回 null —— 调用方走全量聚合（宁可多算一次，不给错的轴）。
+ * 验证用的是「上一次的 x 值序列」和这一次的逐项**同一性**比较（不做字符串转换），
+ * 所以中间被换掉、换了数据源、窗口内出现重复类目，都会当场被挡下来。
+ */
+function tryIncrementalCategoryDomain(
+  series: InternalSeries,
+  state: OrdinaryCategoryIncremental
+): { domain: any[]; categories: any[]; categoryLookup: (key: string) => number } | null {
+  const n = series.pointCount;
+  const values = state.values;
+  if (!state.unique || !n || !values.length) return null;
+  const head = state.seq.get(String(series.xValueAt(0)));
+  const base = state.seq.get(String(values[0]));
+  if (head === undefined || base === undefined || head < base) return null;
+  const shift = head - base; // 头部淘汰了几项
+  const overlap = Math.min(n, values.length - shift);
+  if (overlap <= 0) return null;
+  for (let i = 0; i < overlap; i++) {
+    if (series.xValueAt(i) !== values[i + shift]) return null;
+  }
+  const added: any[] = [];
+  const addedKeys: string[] = [];
+  for (let i = overlap; i < n; i++) {
+    const value = series.xValueAt(i);
+    const key = String(value);
+    if (state.seq.has(key)) return null; // 出现重复类目 → 增量前提不成立
+    added.push(value);
+    addedKeys.push(key);
+  }
+  // 全验过了才动状态：上面任何一处 return null 都不许留下半成品
+  for (let i = 0; i < shift; i++) state.seq.delete(String(values[i]));
+  const kept = values.slice(shift, shift + overlap);
+  if (shift + overlap < values.length) {
+    /**
+     * 尾部被裁掉：这几个序号也一并作废，并把 `next` 压回「最后一个存活序号 + 1」。
+     *
+     * 不压回去就会留下**空洞**（存活序号不连续），而下标 = 序号 − 首项序号 ——
+     * 空洞会让后面追加的类目下标整体偏大：`BandScale` 一看越界就判「不在域里」，
+     * 那些柱子 / 点直接不画（实测：窗口先变短、再追加一项就会踩到）。
+     */
+    for (let i = shift + overlap; i < values.length; i++) state.seq.delete(String(values[i]));
+    const lastSeq = kept.length ? state.seq.get(String(kept[kept.length - 1])) : undefined;
+    state.next = lastSeq === undefined ? 0 : lastSeq + 1;
+  }
+  for (let i = 0; i < addedKeys.length; i++) state.seq.set(addedKeys[i], state.next++);
+  state.values = kept.concat(added);
+  return incrementalResult(state);
+}
+
+/**
+ * 这些来源的 x 是不是与给定域**逐项同一**（值相同、顺序相同）？
+ *
+ * 单来源时它是「窗口内类目互不相同」的判据（那时域就是那串 x）；
+ * 多来源时它还多一个用途 —— **逐项相同时，合并域必然就是这张表本身**，
+ * 于是「K 线 + 量柱 + 均线共用同一批 x」这种形状不必每帧再合并一遍
+ * （实测 10 万点 3 系列：48.3ms/tick → 只剩增量那几毫秒）。
+ */
+function sourcesMatchDomain(series: InternalSeries[], domain: any[]): boolean {
+  for (const item of series) {
+    if (item.pointCount !== domain.length) return false;
+    for (let i = 0; i < domain.length; i++) {
+      if (item.xValueAt(i) !== domain[i]) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * 全量聚合之后把状态记下来（下次才有得增量）；类目有重复就不记（前提不成立）。
+ *
+ * `seq` 直接**复用聚合那趟的 `seen`**（同样是「key → 下标」，而此时序号恰好就是下标 ——
+ * 类目互不相同的窗口里序号从 0 连号排下来），`values` 也复用那份类目数组 ——
+ * 否则「验证没过、退回全量」的每一帧都会白建一张 10 万条的 Map（实测 +2.3ms/tick）。
+ */
+function recordOrdinaryCategoryIncremental(
+  series: InternalSeries,
+  categories: any[],
+  seen: Map<string, number>,
+  cache?: CategoryDomainCache
+): void {
+  if (!cache) return;
+  if (categories.length !== series.pointCount) {
+    cache.incremental = null;
+    return;
+  }
+  cache.incremental = { seriesId: series.id, values: categories, seq: seen, next: categories.length, unique: true };
+}
+
 function buildXDomain(
   type: string,
   series: InternalSeries[],
@@ -1551,11 +1797,29 @@ function buildXDomain(
   /** 类目域的指纹：任一存储变了（长度 / 新增计数 / 类目表大小 / 首末键）就不再命中。 */
   const cacheKey = (): string => {
     let key = type;
+    /**
+     * 轴自己声明的类目：域直接来自这个数组 —— 它的**身份**必须进键。
+     *
+     * 只按「系列的长度 / 首末 x」记键是不健全的：换一份同长度、首末相同的
+     * `axis.data`（改中间一项）会命中过期的域（已修，见 `tests/option/category-domain-cache.test.ts`）。
+     */
+    const axisData = (option as any).data;
+    if (Array.isArray(axisData) && axisData.length) {
+      key += `|ax:${identityOf(axisData)}:${axisData.length}`;
+    }
     for (let i = 0; i < series.length; i++) {
       const s = series[i];
       if (s.raw) {
         const cat = s.raw.categories;
         key += `|r${i}:${cat.length}:${s.raw.categoryNext}:${s.raw.categoryCounts.size}:${String(cat[0])}:${String(cat[cat.length - 1])}`;
+      } else if (s.option && Array.isArray(s.option.data)) {
+        /**
+         * 普通系列：**数组身份**（同一份数组 = 同一份数据）。长度与首末照旧带着 ——
+         * 就地改首末仍然是能认出来的（改中间认不出来，那是「原始数据按引用保留」的既定口径）。
+         */
+        const rows = s.option.data as any[];
+        const n = s.pointCount;
+        key += `|d${i}:${identityOf(rows)}:${n}:${n ? String(s.xValueAt(0)) : ''}:${n ? String(s.xValueAt(n - 1)) : ''}`;
       } else {
         const n = s.pointCount;
         key += `|p${i}:${n}:${n ? String(s.xValueAt(0)) : ''}:${n ? String(s.xValueAt(n - 1)) : ''}`;
@@ -1582,6 +1846,22 @@ function buildXDomain(
     // 轴自己声明了类目就用它（顺序即轴的顺序），否则从数据里聚合
     if (Array.isArray(option.data) && option.data.length) {
       return remember({ domain: option.data.slice(), categories: option.data.slice() });
+    }
+    /**
+     * **普通来源：先试增量**（滚动窗口那趟「头部淘汰 + 尾部追加」）。
+     *
+     * 背景：这条路上每 tick 都要把类目重新去重一遍 —— 10 万点实测 2.9ms/tick，
+     * 是普通路径里最大的一笔（函数级 profile 见 `plans/incremental-pipeline.md` 第 5 期）。
+     * 多来源时先算第一条的增量表，再验证**其余来源与它逐项同一** —— 同一就不必再合并
+     * （K 线 + 量柱 + 均线共用同一批 x 的形状，实测 3 系列 10 万点 48.3ms/tick）。
+     * 具体形状与纪律见 `OrdinaryCategoryIncremental`。
+     */
+    const plainSource = (item: InternalSeries): boolean => !!(item && !item.raw && !item.grid && item.option && Array.isArray(item.option.data));
+    const leader = series.length && series.every(plainSource) ? series[0] : null;
+    const incremental = cache && cache.incremental ? cache.incremental : null;
+    if (leader && incremental && incremental.seriesId === leader.id) {
+      const built = tryIncrementalCategoryDomain(leader, incremental);
+      if (built && sourcesMatchDomain(series, built.categories)) return remember(built);
     }
     /**
      * 合并去重：`Map<key, 下标>` —— 它一趟同时给出「见没见过」和「在合并域里的下标」，
@@ -1675,6 +1955,12 @@ function buildXDomain(
         }
       }
     }
+    /**
+     * 全量聚合完，把状态记下来 —— 下一帧的滚动窗口就能走增量。
+     * 只有「所有来源与这张表逐项同一」才记：多来源时合并域通常不等于任何单条的 x 序列，
+     * 那种形状没法用增量表表示（记了就是错的域），退回每帧全量合并。
+     */
+    if (leader && sourcesMatchDomain(series, categories)) recordOrdinaryCategoryIncremental(leader, categories, seen, cache);
     return remember({
       domain: categories,
       categories,
