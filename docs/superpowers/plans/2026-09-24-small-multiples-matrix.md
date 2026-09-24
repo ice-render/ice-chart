@@ -342,3 +342,25 @@ it('框选跨面板时，所有面板的 x 窗口一致（y 只影响指针所�
 - [ ] **Step 1: 回写文档**
 - [ ] **Step 2: 跑全量门禁**：`npm run verify`（lint → types → build → jest 全绿）
 - [ ] **Step 3: 提交**：`docs(matrix): 面板矩阵文档回写 + 全量门禁`
+
+---
+
+## 执行记录（本次内联执行，分支 `feat/small-multiples`）
+
+| 任务 | 提交 | 状态 |
+|---|---|---|
+| 设计 spec | `8cdb08d` | ✅ |
+| 本计划 | `c4267af` | ✅ |
+| Task 1 面板几何纯函数 | `b230ca6` | ✅ 9 条单测 |
+| Task 2 归一化接入 | `e1f5860` | ✅ 4 条单测 |
+| Task 3 布局产出面板矩形 | `52a27da` | ✅ 4 条单测（含「无 matrix 逐像素一致」） |
+| Task 4 `Axis` per-instance plot | `7d568e0` | ✅ 1 条单测 |
+| Task 5 每面板比例尺与组件实例化 | `d2c3c3a` | ✅ 5 条集成测试 |
+| Task 6 交互按面板解析 | `82b04be` | ✅ 5 条交互测试 |
+| Task 7 `addMark` 支持 panel | `5150c29` | ✅ 1 条 |
+| Task 8 示例页与审计 | `72a5ecb` | ✅ 单页审计 11 步 0 问题 |
+| Task 9 文档回写与门禁 | （见下一条提交） | ✅ |
+
+执行期的取舍与踩坑（完整账本在 `.superpowers/sdd/2026-09-24-small-multiples-matrix/progress.md`，
+那是 git-ignored 的临时账本）：矩阵 + 多 y 轴不在 v1；标注固定画面板 0；窄列（< 128px）不画 x 轴；
+`Tooltip` 的避让边界改为指针所在面板（审计抓到的 `tooltip-over-axis-label`）。

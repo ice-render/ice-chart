@@ -456,6 +456,22 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
 （连 `rawCategoryIndex` 查表口一起，视窗裁剪下的偏移也照旧），任何一处不同就退回合并 ——
 两条路的结论逐项一致（`1` 与 `'1'` 这种「字符串相等但类型不同」会走合并那条，语义不变）。
 
+## 面板矩阵（`option.matrix`，改动前必读）
+
+1. **面板只有 range 不同，数据域是全图共享的一份**。`layout.panels` 给矩形、`panelScales` 给每面板一套
+   比例尺（域同、range 不同）；`norm.xAxis.scale` / `norm.yAxes[].scale` 仍然指向**面板 0**，
+   因为内部多处调用点与测试都按这个语义读。谁要在组件里用别的面板，走 `panelScalesOf()`，
+   **不许自己再造一套坐标**。
+2. **`matrix` 缺席时一切退回单实例**：`panels = [plot]`、`series.panel = 0`、`grids[0] === this.grid`、
+   `panelAxisX[0] === this.axisX`。所有面板逻辑必须能在这一条上短路 —— 这是 580 条测试盯着的回归基线。
+3. **新增要放进面板的组件，必须像 `Axis` / `GridLines` / `Crosshair` / `Tooltip` 一样接受
+   per-instance 的 `plot`**（`null` = 读 `layout.plot`，即旧行为）。直接读 `this.layout.plot`
+   的组件在面板里一定会画错位置。
+4. **交互先问面板**：`HitResolver.panelAt()` 是总入口；轴触发的列、准星、框选、缩放 / 平移的锚点
+   都按「指针所在那块面板」解析。框选是唯一的例外：x 夹到**并集**（刷一段 x 看所有面板）、
+   y 夹到起手那块面板。
+5. 面板不参与的场景（饼 / 雷达 / 桑基 / 矩形树图 / 关系图）不吃 `matrix`：`layout.panels` 在那边恒为 `[plot]`。
+
 ## 序列化契约（改持久化相关代码前必读）
 
 - **唯一事实来源是 option 快照**：`{ version, option, view, hidden, hiddenSlices }`。
