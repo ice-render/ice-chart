@@ -43,9 +43,19 @@ export interface CreateScaleOptions {
   /**
    * 类目轴的**现成查表口**：`类目 key → 下标`。给了它 `BandScale` 就不自建索引表。
    *
-   * 由归一化在「域原样来自增量维护的类目表」时给出（见 `InternalAxis.categoryLookup`）。
+   * 由归一化在「域来自增量维护的类目表」时给出（见 `InternalAxis.categoryLookup`）——
+   * **包括被视窗裁成一段的情况**：那种时候查表口给的是**整张表**的下标，
+   * 配上 `categoryOffset`（窗口起点在整张表里的下标）就能算出窗口内下标。
    */
   categoryLookup?: (key: string) => number;
+  /**
+   * 窗口起点在**整张类目表**里的下标（域是整张表时为 0）。
+   *
+   * 为什么需要它：滚动窗口的类目轴每帧的域都是「整张表的一段」，
+   * 而查表口是按整张表编号的 —— 没有偏移量就只能退回自建索引表
+   * （10 万类目 ≈ 1ms/次，实测是这类页面最大的一笔归一化开销）。
+   */
+  categoryOffset?: number;
 }
 
 export function createScale(

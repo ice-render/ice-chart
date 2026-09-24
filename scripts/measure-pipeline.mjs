@@ -32,9 +32,14 @@ page.on('pageerror', (error) => console.error('PAGEERROR', error.message));
 await page.goto(URL, { waitUntil: 'load' });
 await page.waitForTimeout(2000);
 
-const measure = async (virtual) =>
+/**
+ * `withWindow`：每 tick 追加之后顺手把**视窗**推到最新一段（真实看盘场景 ——
+ * 轴只显示窗口里那一段类目）。这一档专门量「视窗裁剪之后类目轴还认不认增量查表」：
+ * 不认的话 `BandScale` 会为整张 10 万条的类目表每帧重建一张索引 Map。
+ */
+const measure = async (virtual, withWindow = false) =>
   page.evaluate(
-    async ({ POINTS, TICKS, virtual }) => {
+    async ({ POINTS, TICKS, virtual, withWindow }) => {
       const host = document.createElement('div');
       host.style.cssText = 'position:absolute;left:0;top:0;z-index:9;background:#fff';
       const canvas = document.createElement('canvas');
@@ -119,6 +124,7 @@ const measure = async (virtual) =>
         } else {
           chart.appendData('s', [row], { maxPoints: POINTS });
         }
+        if (withWindow) chart.setDomainFromFractions(0.6, 1, 'api');
       };
       const windowRows = data.slice();
       const total = [];
@@ -132,16 +138,16 @@ const measure = async (virtual) =>
       chart.destroy();
       host.remove();
       return {
-        模式: virtual ? '惰性原始点 + 环形' : '普通（concat + 重建）',
+        模式: virtual ? (withWindow ? '惰性原始点 + 环形 + 视窗' : '惰性原始点 + 环形') : '普通（concat + 重建）',
         点数: POINTS,
         '每 tick p50 ms': Math.round(median * 100) / 100,
         '其中 applyOption（流水线）ms': Math.round((applyMs / TICKS) * 100) / 100,
       };
     },
-    { POINTS, TICKS, virtual }
+    { POINTS, TICKS, virtual, withWindow }
   );
 
-const rows = [await measure(false), await measure(true)];
+const rows = [await measure(false), await measure(true), await measure(true, true)];
 await cdp.send('HeapProfiler.collectGarbage');
 const usage = await cdp.send('Runtime.getHeapUsage');
 console.log(JSON.stringify({ url: URL, 堆MB: Math.round((usage.usedSize / 1048576) * 10) / 10, rows }, null, 1));

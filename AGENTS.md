@@ -357,6 +357,12 @@ README 的截图由 `scripts/readme-shots.mjs` 生成（同一套浏览器环境
   那是独立的一项，施工图与验收在 `plans/incremental-pipeline.md`，尺子是
   `scripts/measure-pipeline.mjs`。别把「追加还是 O(n)」当成 bug 顺手乱改：
   归一化是纯函数这条契约不能破。
+   ⚠️ **有视窗的滚动看盘是另一档**（2026-09-24 第 3 期）：`measure-pipeline` 新增的
+   「环形 + 视窗」档位原来比「环形」还慢（10 万点 1.6ms vs 0.6ms）—— 因为类目查表口只在
+   「域=整张表」时才交出去，**一被视窗裁剪就退回自建索引表**（每帧为 10 万类目重建一张 Map）。
+   现在查表口连同 `categoryOffset`（窗口起点在整张表里的下标）一起交，`BandScale` 用
+   「全表下标 − 偏移」换算窗口内下标：10 万点 **1.6ms → 0.3ms**、1 万点 0.5 → 0.2ms。
+   加新轴 / 新比例尺时的自查：**你的域是不是「某张增量表的一段」？是的话把偏移一起带上。**
 - **亿级数据用分块按需加载**（`SeriesChunks`）：`data: { sizes, rangeOf, yDomain, loadChunk }`，
   只驻留可见窗口覆盖的块（`maxResidentChunks`，LRU）。三条纪律：
   ① `rangeOf` / `yDomain` **必须声明式**（前者让窗口定位不必先加载，后者让坐标轴不随加载漂移）；

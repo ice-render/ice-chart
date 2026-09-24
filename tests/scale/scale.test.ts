@@ -69,6 +69,48 @@ describe('BandScale', () => {
     const numeric = new BandScale(['0', '1', '2'], [0, 300], { paddingInner: 0, paddingOuter: 0 });
     expect(numeric.bandStart(1)).toBeCloseTo(100, 6);
   });
+
+  /**
+   * 查表口 + 偏移（滚动窗口的类目轴）。
+   *
+   * 查表口给的是**整张类目表**的下标；域被视窗裁成一段之后要减去 `categoryOffset`
+   * 才是窗口内下标。不这么做就只能让 BandScale 自建索引表 ——
+   * 10 万类目的滚动窗口每帧重建一张 10 万条的 Map（实测 ~1ms/次）。
+   */
+  it('查表口 + 偏移：窗口内的类目按「全表下标 − 偏移」定位，窗口外的不认', () => {
+    const all = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const lookup = (key: string) => all.indexOf(key);
+    // 域 = 整张表的一段（C..E），偏移 2
+    const windowed = new BandScale(['C', 'D', 'E'], [0, 300], {
+      paddingInner: 0,
+      paddingOuter: 0,
+      categoryLookup: lookup,
+      categoryOffset: 2,
+    });
+    expect(windowed.bandStart('C')).toBeCloseTo(0, 6);
+    expect(windowed.bandStart('E')).toBeCloseTo(200, 6);
+    expect(windowed.map('D')).toBeCloseTo(150, 6);
+    // 窗口外的类目（A / F）**不能**被锚到窗口内 —— 那条纪律见 indexOf 的注释
+    expect(Number.isNaN(windowed.bandStart('A'))).toBe(true);
+    expect(Number.isNaN(windowed.bandStart('F'))).toBe(true);
+    // 克隆（`withRange` / `clone`）要把偏移带上，否则克隆出来的尺子会整体错位
+    const cloned = windowed.clone();
+    expect(cloned.bandStart('C')).toBeCloseTo(0, 6);
+    expect(cloned.map('D')).toBeCloseTo(150, 6);
+  });
+
+  it('查表口不带偏移时（域就是整张表）行为不变', () => {
+    const all = ['A', 'B', 'C'];
+    const whole = new BandScale(all.slice(), [0, 300], {
+      paddingInner: 0,
+      paddingOuter: 0,
+      categoryLookup: (key: string) => all.indexOf(key),
+    });
+    expect(whole.map('A')).toBeCloseTo(50, 6);
+    expect(whole.map('C')).toBeCloseTo(250, 6);
+    // 查表口认了、但域里没有的 key 同样不认（-1 语义与 indexOf 一致）
+    expect(Number.isNaN(whole.bandStart('Z'))).toBe(true);
+  });
 });
 
 describe('TimeScale', () => {

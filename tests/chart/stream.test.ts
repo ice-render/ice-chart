@@ -1,4 +1,5 @@
 import { createChart, setMotionPreference } from '../../src/index';
+import { BandScale } from '../../src/scale/BandScale';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
 
@@ -56,6 +57,45 @@ describe('实时数据流 appendData', () => {
     expect(data.map((d) => d[0])).toEqual([1, 2, 3, 4]); // 头部裁掉，窗口向右滑
     expect(c.norm.series[0].points.length).toBe(4);
     expect(c.norm.series[0].points[3].y).toBe(50);
+  });
+
+  /**
+   * 滚动窗口的**类目轴**：视窗裁剪之后仍然走增量查表（`categoryLookup` + `categoryOffset`）。
+   *
+   * 契约（2026-09-24）：惰性原始点的类目表是增量维护的，归一化要把查表口**连窗口偏移一起**
+   * 交下去 —— 否则 BandScale 会为「整张 10 万条的表」每帧重建一张索引 Map（实测 ~1ms/次，
+   * 10 万类目的滚动窗口里是归一化最大的一笔）。这里锁住映射结果与「自建表」逐点一致。
+   */
+  it('视窗裁剪后仍然带着查表口：窗口内的类目映射与自建表逐点一致，窗口外的不认', async () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({ x: `D${i}`, y: 100 + (i % 7) }));
+    const c = await mount({
+      legend: { show: false },
+      animation: { enabled: false },
+      xAxis: { type: 'category' },
+      yAxis: {},
+      series: [{ id: 's', type: 'bar', name: 'S', virtual: true, data: rows }],
+    } as any);
+    // 视窗落在中间一段（两端都在类目表里）
+    c.setDomain('x', ['D50', 'D59'], 'api');
+    await c.render();
+
+    const axis = c.norm.xAxis;
+    expect(axis.domain).toEqual(rows.slice(50, 60).map((row) => row.x));
+    // 窗口起点在整张表里的下标
+    expect(axis.categoryOffset).toBe(50);
+    // 查表口不该因为视窗裁剪被丢掉
+    expect(typeof axis.categoryLookup).toBe('function');
+
+    // 参照实现：同一段域、**不给**查表口（走自建索引表那条老路）
+    const reference = new BandScale(axis.domain.slice(), [0, Math.max(1, c.layout.plot.width)]);
+    for (const key of ['D50', 'D52', 'D59']) {
+      expect(axis.scale!.map(key)).toBeCloseTo(reference.map(key), 6);
+    }
+    // 窗口外的类目不许被锚到窗口内（那条纪律见 BandScale.indexOf）
+    expect(Number.isNaN(axis.scale!.bandStart('D49'))).toBe(true);
+    expect(Number.isNaN(axis.scale!.bandStart('D60'))).toBe(true);
+    // 自建表那条路对窗口外的类目同样「不认」—— 两条路的结论必须一致
+    expect(Number.isNaN(reference.bandStart('D49'))).toBe(true);
   });
 
   it('窗口滑动后 x 轴窗口跟着右移（不需要手动 setDomain）', async () => {

@@ -31,8 +31,12 @@ export class BandScale implements Scale {
    * 类目表是增量维护的那种轴（惰性原始点 / 滚动窗口）会带上它 —— 那时自建表等于
    * 每帧重写一遍 10 万条的 Map，实测占整条流水线的一半。给了查表口就走它：
    * 一个类目的下标是一次 Map 查询加一次减法。
+   *
+   * 查表口按**整张类目表**编号；域是「整张表的一段」时（视窗裁剪）再减去 `offset`。
    */
   private lookup: ((key: string) => number) | null;
+  /** 域起点在整张类目表里的下标（域就是整张表时为 0）。 */
+  private offset: number;
 
   constructor(domain: any[], range: [number, number], options: CreateScaleOptions = {}) {
     this.domain = domain.length ? domain.slice() : [''];
@@ -40,6 +44,8 @@ export class BandScale implements Scale {
     this.paddingInner = options.paddingInner === undefined ? 0.2 : options.paddingInner;
     this.paddingOuter = options.paddingOuter === undefined ? 0.1 : options.paddingOuter;
     this.lookup = options.categoryLookup || null;
+    const offset = Number(options.categoryOffset);
+    this.offset = isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
     this._step = this.computeStep();
   }
 
@@ -62,7 +68,10 @@ export class BandScale implements Scale {
     const key = String(value);
     if (this.lookup) {
       const index = this.lookup(key);
-      if (index >= 0) return index;
+      // 查表口给的是**整张表**的下标：减去域起点偏移，越界（类目不在当前域里）就不认
+      const local = index - this.offset;
+      if (index >= 0 && local >= 0 && local < this.domain.length) return local;
+      return -1;
     }
     const hit = this.indices().get(key);
     if (hit !== undefined) return hit;
@@ -184,6 +193,7 @@ export class BandScale implements Scale {
       paddingInner: this.paddingInner,
       paddingOuter: this.paddingOuter,
       categoryLookup: this.lookup || undefined,
+      categoryOffset: this.offset,
     });
   }
 }

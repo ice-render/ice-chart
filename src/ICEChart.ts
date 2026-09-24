@@ -1663,6 +1663,8 @@ export class ICEChart {
       logBase: norm.xAxis.option.logBase,
       // 类目表是增量维护的那种轴会带查表口：有它 BandScale 就不必每帧重建索引表
       categoryLookup: norm.xAxis.categoryLookup,
+      // 域被视窗裁成一段时，查表口按整张表编号 —— 偏移量把「全表下标」换算成窗口内下标
+      categoryOffset: norm.xAxis.categoryOffset,
     });
     for (const axis of norm.yAxes) {
       axis.scale = createScale(axis.type, axis.domain, [Math.max(1, plot.height), 0], {
@@ -1862,8 +1864,9 @@ export class ICEChart {
     if (this.norm.xAxis.type === 'category') {
       const n = full.length;
       if (n <= 1) return [0, 1];
-      const from = Math.max(0, full.indexOf(domain[0]));
-      const to = full.indexOf(domain[domain.length - 1]);
+      // 走增量维护的查表口（有的话）：`indexOf` 是两趟 O(n)，10 万类目滚动窗口每帧都调这里
+      const from = Math.max(0, this.categoryIndexOf(full, domain[0]));
+      const to = this.categoryIndexOf(full, domain[domain.length - 1]);
       // 类目轴的窗口比例按「类目数」计：窗口 [from..to] 对应 [from/n, (to+1)/n]，
       // 与 dataZoom.start/end 的语义（占类目总数的百分比）保持一致。
       return [from / n, ((to < 0 ? n - 1 : to) + 1) / n];
@@ -1872,6 +1875,22 @@ export class ICEChart {
     const f1 = Number(full[1]);
     const span = f1 - f0 || 1;
     return [(Number(domain[0]) - f0) / span, (Number(domain[1]) - f0) / span];
+  }
+
+  /**
+   * 类目在**整张类目表**里的下标：有增量维护的查表口走它（O(1)），否则退回 `indexOf`。
+   *
+   * 三类调用方都吃这个口径：`domainFractions` / `clampAxisDomain`（联动窗口的夹取）
+   * —— 它们原本都是全表 `indexOf`，10 万类目的滚动窗口里每次手势 / 每次比例换算都要
+   * 扫到底。
+   */
+  private categoryIndexOf(full: any[], value: any): number {
+    const lookup = this.norm && this.norm.xAxis ? this.norm.xAxis.categoryLookup : undefined;
+    if (lookup) {
+      const index = lookup(String(value));
+      return index >= 0 && index < full.length ? index : -1;
+    }
+    return full.indexOf(value);
   }
 
   /**
@@ -2149,8 +2168,8 @@ export class ICEChart {
     if (!internal) return null;
     if (internal.type === 'category') {
       const all = full;
-      let from = all.indexOf(domain[0]);
-      let to = all.indexOf(domain[1]);
+      let from = this.categoryIndexOf(all, domain[0]);
+      let to = this.categoryIndexOf(all, domain[1]);
       // 两端都不在这份数据里：这个窗口表达不出来，**保持原窗口**。
       // 早先这里退化成了「整段数据」（`from = 0` / `to = length-1`），
       // 于是一份类目比别人短的系列会把联动过来的窗口整幅放大（实测：量图被拉成整幅）。

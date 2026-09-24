@@ -321,10 +321,14 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     categories = built.categories;
     categoryLookup = built.categoryLookup;
   }
-  const xDomain = resolveXDomain(xType, rawXDomain, context.xDomain);
-  // 只在**域没被视窗裁剪**时才把查表口交下去：查表口的编号是按整张类目表算的，
-  // 域一旦被裁成子区间，下标就不再对齐了（宁可让 BandScale 自己建表）。
-  if (!(categoryLookup && xDomain === rawXDomain)) categoryLookup = undefined;
+  const resolved = resolveXDomain(xType, rawXDomain, context.xDomain, categoryLookup);
+  const xDomain = resolved.domain;
+  /**
+   * 查表口按**整张类目表**编号，域是整张表的一段时靠 `categoryOffset` 换算 ——
+   * 所以「被视窗裁剪」不再需要把查表口丢掉（丢掉等于让 BandScale 每帧重写一张
+   * 10 万条的 Map，实测 1ms/次，是这类页面归一化里最大的一笔）。
+   */
+  const categoryOffset = categoryLookup ? resolved.offset : 0;
 
   applyStacking(series);
   applyWaterfall(series);
@@ -391,7 +395,10 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
   const yAxis = yAxes[0];
   applyEqualAspect(option, kind, xAxis, yAxes);
   // 等比坐标会改写 x 域（把绘图区补成正方形），那时查表口同样失效 → 退回去自建
-  if (categoryLookup && xAxis.domain === xDomain) xAxis.categoryLookup = categoryLookup;
+  if (categoryLookup && xAxis.domain === xDomain) {
+    xAxis.categoryLookup = categoryLookup;
+    xAxis.categoryOffset = categoryOffset;
+  }
 
   return {
     labels: {
@@ -1533,14 +1540,30 @@ function buildXDomain(
  * 直接赋值成 `[起始类目, 结束类目]` 会把 36 个类目的轴塌缩成 2 个类目，
  * 表现是柱子突然变得极宽、刻度只剩两个（这是真实踩过的坑）。
  */
-function resolveXDomain(type: string, fullDomain: any[], window: [any, any] | null | undefined): any[] {
-  if (!window) return fullDomain;
-  if (type !== 'category') return [window[0], window[1]];
-  const from = fullDomain.indexOf(window[0]);
-  const to = fullDomain.indexOf(window[1]);
-  if (from >= 0 && to >= from) return fullDomain.slice(from, to + 1);
+function resolveXDomain(
+  type: string,
+  fullDomain: any[],
+  window: [any, any] | null | undefined,
+  lookup?: (key: string) => number
+): { domain: any[]; offset: number } {
+  if (!window) return { domain: fullDomain, offset: 0 };
+  if (type !== 'category') return { domain: [window[0], window[1]], offset: 0 };
+  /**
+   * 端点在**整张类目表**里的下标。有现成查表口就别 `indexOf`：那是两趟 O(n)，
+   * 10 万类目的滚动窗口每次归一化都要扫到底（实测 0.3ms/次）——
+   * 而查表口是一次 Map 查询（`rawCategoryIndex`）。
+   */
+  const at = (value: any): number => {
+    if (!lookup) return fullDomain.indexOf(value);
+    const index = lookup(String(value));
+    return index >= 0 && index < fullDomain.length ? index : -1;
+  };
+  const from = at(window[0]);
+  const to = at(window[1]);
+  // `offset` 一并交出去：窗口的域是整张表的一段，BandScale 要靠它把「全表下标」换算成窗口内下标
+  if (from >= 0 && to >= from) return { domain: fullDomain.slice(from, to + 1), offset: from };
   // 窗口端点不在类目里（例如来自滑块的比例换算抖动）：退化为原域
-  return fullDomain;
+  return { domain: fullDomain, offset: 0 };
 }
 
 /**

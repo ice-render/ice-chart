@@ -745,11 +745,19 @@ export interface InternalAxis {
   /**
    * 类目轴的**现成查表口**（可选）：`类目 key → 下标`，O(1)。
    *
-   * 只有「域原样来自某个增量维护的类目表、且没有被视窗裁剪」时才给得出来
-   * （见 `buildXDomain`）。给了它等于告诉 `BandScale`：不必自己重建索引表 ——
-   * 10 万类目的滚动窗口每帧重建一次那张 Map，曾是整条流水线最大的一笔。
+   * 域来自某个增量维护的类目表时给得出来（见 `buildXDomain`），**包括被视窗裁成一段**的
+   * 情况（那时查表口给整张表的下标，配上 `categoryOffset` 换算成窗口内下标）。
+   * 给了它等于告诉 `BandScale`：不必自己重建索引表 —— 10 万类目的滚动窗口每帧重建一次
+   * 那张 Map，曾是整条流水线最大的一笔。
    */
   categoryLookup?: (key: string) => number;
+  /**
+   * 域起点在**整张类目表**里的下标（域就是整张表时为 0）。
+   *
+   * 与 `categoryLookup` 成对使用：查表口按整张表编号，域被视窗裁成一段之后，
+   * 「窗口内下标 = 全表下标 − 这个偏移」。
+   */
+  categoryOffset?: number;
 }
 
 export interface NormalizedOption {
