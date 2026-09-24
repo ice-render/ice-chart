@@ -181,6 +181,40 @@ describe('BarSeries 命中与布局', () => {
 });
 
 describe('BarSeries 逐项配色', () => {
+  const denseCoord = (count: number): SeriesCoord => ({
+    plot,
+    canvas: { x: 0, y: 0, width: 400, height: 300 },
+    xScale: new BandScale(
+      Array.from({ length: count }, (_, i) => `c${i}`),
+      [0, 400],
+      { paddingInner: 0.2, paddingOuter: 0.1 }
+    ),
+    yScale: new LinearScale([0, 100], [300, 0]),
+    theme,
+  });
+
+  const denseSeries = (values: number[]): InternalSeries => {
+    const series = makeSeries('bar', values);
+    series.points.forEach((p, i) => {
+      p.xValue = `c${i}`;
+    });
+    return series;
+  };
+
+  const ctxStub = (rects: any[]) => ({
+    fillStyle: '',
+    fillRect: (x: number, y: number, w: number, h: number) => rects.push({ x, y, w, h }),
+    beginPath: () => undefined,
+    save: () => undefined,
+    restore: () => undefined,
+    rect: () => undefined,
+    clip: () => undefined,
+    fill: () => undefined,
+    lineJoin: '',
+    lineCap: '',
+    globalAlpha: 1,
+  });
+
   it('数据项带 color 时按项取色（红涨绿跌 / 告警分级都靠它）', () => {
     const series = makeSeries('bar', [10, 20, 30]);
     series.points.forEach((p, i) => {
@@ -198,6 +232,52 @@ describe('BarSeries 逐项配色', () => {
     const component: any = new BarSeries(series, { left: 0, top: 0, width: 400, height: 300 });
     component.setCoord(bandCoord());
     expect(component.barColorAt(0)).toBe('#3B82F6');
+  });
+
+  it('一屏柱子数远超像素列数时走稠密模式（4 根时不走）', () => {
+    const wide = new BarSeries(denseSeries(Array.from({ length: 4000 }, () => 30)), { left: 0, top: 0, width: 400, height: 300 });
+    wide.setCoord(denseCoord(4000));
+    expect((wide as any).shouldDrawDense((wide as any).coord)).toBe(true);
+
+    const few = new BarSeries(denseSeries([30, 60, 90, 20]), { left: 0, top: 0, width: 400, height: 300 });
+    few.setCoord(denseCoord(4));
+    expect((few as any).shouldDrawDense((few as any).coord)).toBe(false);
+  });
+
+  it('稠密绘制：每像素列一根聚合矩形（远少于根数），列内极值不丢', () => {
+    // 每 37 根插一个尖峰：抽样也得把尖峰带出来（每列至少 1 个样本，且首样本在列首）
+    const values = Array.from({ length: 4000 }, (_, i) => (i % 37 === 0 ? 90 : 10 + (i % 5)));
+    const component: any = new BarSeries(denseSeries(values), { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord(denseCoord(4000));
+    const rects: any[] = [];
+    component.ctx = ctxStub(rects);
+    component.drawDense(component.coord);
+
+    expect(rects.length).toBeGreaterThan(0);
+    // 落墨量按像素列封顶
+    expect(rects.length).toBeLessThanOrEqual(400);
+    // 不再逐根画
+    expect(rects.length).toBeLessThan(values.length / 4);
+    // 第一列含 values[0]=90（尖峰）→ 柱高应当接近 y(0)→y(90) 那一段（≈270px）
+    const tallest = rects.reduce((max, r) => Math.max(max, r.h), 0);
+    expect(tallest).toBeGreaterThan(200);
+  });
+
+  it('稠密模式不建「每根一个」的像素缓存，命中仍然给出真实下标附近的那一根', () => {
+    const values = Array.from({ length: 4000 }, () => 40);
+    const component: any = new BarSeries(denseSeries(values), { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord(denseCoord(4000));
+    component.ctx = ctxStub([]);
+    expect(component.pixels.length).toBe(0);
+    component.doRender();
+    // 稠密绘制不该物化 4000 个像素点
+    expect(component.pixels.length).toBe(0);
+
+    // 命中：取第 2000 根的矩形中心，返回的下标必须落在同一个像素列附近
+    const rect = component.barRectAt(2000);
+    const hit = component.hitTestIndex(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    expect(hit).toBeGreaterThan(1900);
+    expect(hit).toBeLessThan(2100);
   });
 });
 

@@ -757,8 +757,8 @@ export abstract class SeriesBase extends ChartComponent {
    * 非单调数据退化为线性扫描。
    */
   public nearestIndexAtX(localX: number): number {
-    this.rebuildPixels();
     if (this.series.virtual) return this.virtualNearestIndexAtX(localX);
+    this.rebuildPixels();
     const n = this.pixels.length / 2;
     if (!n) return -1;
     if (!this.xMonotonic) {

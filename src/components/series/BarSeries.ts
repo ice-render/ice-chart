@@ -4,11 +4,27 @@ import type { Rect } from '../../internal';
 import { roundRect } from '../Legend';
 import { hexToRgba } from './LineSeries';
 
+/**
+ * 稠密模式下**每个像素列最多抽几根**（与散点 / 折线的密度抽稀同一条思路）。
+ *
+ * 为什么需要：柱子细到亚像素之后，一列里塞着几十几百根（1M 根挤 800px），
+ * 逐根 `beginPath + roundRect + 渐变 + fill` 实测 **1.7s/帧**（那还只是绘制，
+ * 渐变对象本身 180ms、`barRectAt` 167ms）。抽样之后落墨量与像素数同级。
+ */
+const DENSE_SAMPLES_PER_PIXEL = 8;
+/** 每像素列超过这么多根就走稠密模式（再密下去 1px 的柱子已经完全叠在一起了）。 */
+const DENSE_BARS_PER_PIXEL = 2;
+
 /** 柱状图（支持分组与堆叠）。 */
 export class BarSeries extends SeriesBase {
   public seriesType: SeriesType = 'bar';
   protected clipToBox = true;
   private barCacheKey = '';
+  /** 稠密模式的聚合缓冲（按组件复用，不每帧分配）：每列一个 [base, top] 区间。 */
+  private denseLow = new Float64Array(0);
+  private denseHigh = new Float64Array(0);
+  private denseSeen = new Uint8Array(0);
+  private denseLimit = 0;
 
   /** 横向柱状图：类目在 y 轴上（排行榜最常见的形式）。 */
   private isHorizontal(): boolean {
@@ -50,8 +66,10 @@ export class BarSeries extends SeriesBase {
   /** 单根柱子的像素矩形（组件本地坐标）。 */
   public barRectAt(index: number): Rect | null {
     const coord = this.coord;
-    const point = this.series.pointAt(index);
-    if (!coord || !point) return null;
+    // 热路径（`rebuildPixels` 每根都要调）走**标量访问器**：`pointAt` 会为每根合成一个
+    // `DataPoint` 对象，100 万根就是 100 万个短命对象（实测 rebuildPixels 704ms/3s）。
+    const xValue = this.series.xValueAt(index);
+    if (!coord || xValue === undefined) return null;
     // 纯几何函数：不触发 rebuildPixels（否则 rebuildPixels → barRectAt 会递归）
     if (this.effective.length !== this.series.pointCount * 2) this.computeEffective();
     const top = this.effective[index * 2 + 1];
@@ -59,7 +77,7 @@ export class BarSeries extends SeriesBase {
     if (!isFinite(top)) return null;
     if (this.isHorizontal()) {
       // 横向：类目在 y 轴（band），数值在 x 轴（value）
-      const bandStart = coord.yScale.bandStart(point.xValue);
+      const bandStart = coord.yScale.bandStart(xValue);
       if (!isFinite(bandStart)) return null;
       const bandWidth = coord.yScale.bandwidth() || coord.yScale.step() * 0.6;
       const slotCount = Math.max(1, this.barSlot.count);
@@ -78,7 +96,7 @@ export class BarSeries extends SeriesBase {
     }
     // 必须按「类目值」定位，不能传数据下标：类目轴缩放后可见窗口是类目的一个子集，
     // 用下标会被当成可见窗口内的位置，把窗口外的柱子画到错误的地方（曾因此把高亮框画到右轴上）。
-    const bandStart = coord.xScale.bandStart(point.xValue);
+    const bandStart = coord.xScale.bandStart(xValue);
     if (!isFinite(bandStart)) return null;
     const bandWidth = coord.xScale.bandwidth() || coord.xScale.step() * 0.6;
     const slotCount = Math.max(1, this.barSlot.count);
@@ -145,12 +163,20 @@ export class BarSeries extends SeriesBase {
   }
 
   protected doRender(): void {
-    this.rebuildPixels();
     const coord = this.coord;
     if (!coord) return;
     const radius = Number(this.series.option.barRadius);
     const ctx = this.ctx;
     this.beginDraw();
+    // 稠密模式：柱子已经细到亚像素（一列叠着好几根）→ 每像素列画一根聚合矩形
+    if (this.shouldDrawDense(coord)) {
+      // 稠密模式**不建每根一个的像素缓存**（100 万根 ≈ 5.6ms/帧，而绘制用不到它 ——
+      // 悬停锚点走 `pixelAt` → 虚拟系列的按需分支，命中走下面的稠密分支）
+      this.drawDense(coord);
+      this.endDraw();
+      return;
+    }
+    this.rebuildPixels();
     for (let i = 0; i < this.series.pointCount; i++) {
       const rect = this.barDrawRectAt(i);
       if (!rect || rect.height <= 0) continue;
@@ -158,7 +184,13 @@ export class BarSeries extends SeriesBase {
       const drawRect = rect;
       ctx.beginPath();
       roundRect(ctx, drawRect.x, drawRect.y, drawRect.width, drawRect.height, isFinite(radius) ? radius : 0);
-      if (ctx.createLinearGradient) {
+      /**
+       * 渐变只在柱子**看得出来**的时候建：每根柱子 new 一个 CanvasGradient（+2 个色停）
+       * 在几千根时无所谓，到了十万根量级就是纯浪费 —— 那时柱高常常只有几像素。
+       * 阈值定在「柱高 ≥ 3 设备像素」：再矮的柱子上渐变与纯色肉眼无差。
+       */
+      const gradientWorthy = drawRect.height >= 3 * this.unit();
+      if (gradientWorthy && ctx.createLinearGradient) {
         // 渐变方向跟着柱子的长度方向走
         const gradient = this.isHorizontal()
           ? ctx.createLinearGradient(drawRect.x, 0, drawRect.x + drawRect.width, 0)
@@ -174,9 +206,98 @@ export class BarSeries extends SeriesBase {
     this.endDraw();
   }
 
-  public hitTestIndex(localX: number, localY: number): number {
-    this.rebuildPixels();
+  /** 要不要走稠密模式：类目轴 + 一屏柱子数远超像素列数（亚像素）。 */
+  private shouldDrawDense(coord: NonNullable<BarSeries['coord']>): boolean {
     const n = this.series.pointCount;
+    const width = Math.max(1, coord.plot.width);
+    // 只有类目轴能按「下标比例」分列；数值轴上的柱子位置由值决定，抽样会改变摆放
+    if (!coord.xScale.isBand()) return false;
+    return n / width > DENSE_BARS_PER_PIXEL;
+  }
+
+  /**
+   * 稠密模式的绘制：**每个像素列一根聚合矩形**，画的是该列所有柱子的并集
+   * （`[min(base, 最低值), max(base, 最高值)]`），颜色取该列最后一根的取色规则。
+   *
+   * 两条纪律与散点 / 折线的密度抽稀一致：
+   * 1. **列内均匀抽 8 个样本**（`DENSE_SAMPLES_PER_PIXEL`）—— 一列几千根时逐根扫是
+   *    白白烧时间；密度没到「每列 8 根」时 `stride = 1`，与逐根绘制**逐像素一致**；
+   * 2. **命中与提示框不受影响**：`hitTestIndex` 仍然给出真实的柱子下标（见那里的稠密分支）。
+   */
+  private drawDense(coord: NonNullable<BarSeries['coord']>): void {
+    const n = this.series.pointCount;
+    const plot = coord.plot;
+    // 稠密模式跳过了 `rebuildPixels`（那会物化每根一个的像素点），所以 effective 自己保证
+    if (this.effective.length !== n * 2) this.computeEffective();
+    const limit = Math.max(1, Math.round(plot.width));
+    if (this.denseLimit !== limit) {
+      this.denseLow = new Float64Array(limit);
+      this.denseHigh = new Float64Array(limit);
+      this.denseSeen = new Uint8Array(limit);
+      this.denseLimit = limit;
+    }
+    const low = this.denseLow;
+    const high = this.denseHigh;
+    const seen = this.denseSeen;
+    seen.fill(0);
+    const perPixel = n / limit;
+    const stride = perPixel > DENSE_SAMPLES_PER_PIXEL ? Math.max(1, Math.floor(perPixel / DENSE_SAMPLES_PER_PIXEL)) : 1;
+    const scale = limit / n;
+    const ctx = this.ctx;
+    for (let i = 0; i < n; i += stride) {
+      const top = this.effective[i * 2 + 1];
+      const base = this.effective[i * 2];
+      if (!isFinite(top) || !isFinite(base)) continue;
+      const column = Math.max(0, Math.min(limit - 1, Math.floor(i * scale)));
+      const lo = Math.min(base, top);
+      const hi = Math.max(base, top);
+      if (!seen[column]) {
+        seen[column] = 1;
+        low[column] = lo;
+        high[column] = hi;
+        continue;
+      }
+      if (lo < low[column]) low[column] = lo;
+      if (hi > high[column]) high[column] = hi;
+    }
+    const step = plot.width / limit;
+    const barWidth = Math.max(1, step);
+    for (let column = 0; column < limit; column++) {
+      if (!seen[column]) continue;
+      // 颜色取该列**最后一根**的取色规则（与逐根绘制同一口径）
+      const last = Math.min(n - 1, Math.max(0, Math.ceil((column + 1) / scale) - 1));
+      const color = this.barColorAt(last);
+      // 组件本地坐标（比例尺的 range 已经从 0 起算，见 buildScales）
+      const top = coord.yScale.map(high[column]);
+      const bottom = coord.yScale.map(low[column]);
+      if (!isFinite(top) || !isFinite(bottom)) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(column * step, Math.min(top, bottom), barWidth, Math.max(1, Math.abs(bottom - top)));
+    }
+  }
+
+  /**
+   * 命中：**稠密模式下不逐根扫**（1M 根时每次 mousemove 扫 1M 个矩形 = 掉帧）。
+   *
+   * 类目轴的带宽等距，柱子又是按类目排的 —— 所以「指针在哪一根」可以直接由 x 的比例
+   * 反推出下标，再验一根的矩形就够。非稠密（或数值轴）仍然逐根扫，保证语义不变。
+   */
+  public hitTestIndex(localX: number, localY: number): number {
+    const n = this.series.pointCount;
+    const coord = this.coord;
+    if (coord && n && this.shouldDrawDense(coord)) {
+      const step = coord.plot.width / n;
+      if (!(step > 0)) return -1;
+      const guess = Math.round(localX / step - 0.5);
+      // 邻域各扫 2 根：柱宽可能大于步距（barWidth 显式给大时），也可能因取整落偏
+      for (let i = Math.max(0, guess - 2); i <= Math.min(n - 1, guess + 2); i++) {
+        const rect = this.barRectAt(i);
+        if (!rect) continue;
+        if (localX >= rect.x && localX <= rect.x + rect.width && localY >= rect.y && localY <= rect.y + rect.height) return i;
+      }
+      return -1;
+    }
+    this.rebuildPixels();
     for (let i = 0; i < n; i++) {
       const rect = this.barRectAt(i);
       if (!rect) continue;

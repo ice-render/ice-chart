@@ -1475,6 +1475,40 @@ function buildXDomain(
       // 查表口直连存储那张增量维护的表：类目轴不必每帧重建一遍 10 万条的 Map。
       return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(store, key) };
     }
+    /**
+     * **多个来源但类目表逐项相同**：直接复用第一张表（连查表口一起）。
+     *
+     * 滚动看盘就是这种形状：K 线、量柱、均线的 x 本来就是同一批，而下面那条合并去重
+     * 要对**每一张表**跑一遍 `String()` + 哈希 —— 100 万 × 2 实测 **200ms/次**
+     * （整帧从 4ms 掉到 4fps 的元凶）。
+     *
+     * 判据是**逐项同一性**（`!==`，不做字符串转换）：通过就意味着两张表连值的类型都一样，
+     * 「合并去重」的结果必然就是第一张表本身 —— 与下面那条路的结论**逐项一致**；
+     * 任何一处不同（哪怕只是 `1` 与 `'1'` 这类字符串相等），就老实退回下面合并。
+     */
+    if (series.length > 1 && series.every((s) => !!s.raw)) {
+      const first = series[0].raw as SeriesRawPoints;
+      let sameTable = true;
+      for (let k = 1; k < series.length && sameTable; k++) {
+        const other = series[k].raw as SeriesRawPoints;
+        if (other.categories.length !== first.categories.length) {
+          sameTable = false;
+          break;
+        }
+        const a = first.categories;
+        const b = other.categories;
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] !== b[i]) {
+            sameTable = false;
+            break;
+          }
+        }
+      }
+      if (sameTable) {
+        const owned = first.categories.slice();
+        return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(first, key) };
+      }
+    }
     for (const s of series) {
       // 惰性原始点：类目表增量维护在存储里（滚动窗口下别每帧重扫）
       if (s.raw) {
