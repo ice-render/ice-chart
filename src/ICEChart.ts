@@ -1887,7 +1887,8 @@ export class ICEChart {
     const canvas = layout.canvas;
     const panels = layout.panels;
     const matrix = norm.matrix;
-    const multi = !!matrix && norm.kind === 'cartesian' && panels.length > 1;
+    const isPolar = norm.kind !== 'cartesian';
+    const multi = !!matrix && !isPolar && panels.length > 1;
     const rows = multi && matrix ? matrix.rows.length : 1;
     const columns = multi && matrix ? matrix.columns.length : 1;
 
@@ -1924,7 +1925,9 @@ export class ICEChart {
       const panelIndex = Math.min(panels.length - 1, r * columns);
       const scales = this.panelScales[panelIndex] || this.panelScales[0];
       const primary = norm.yAxes[0] || norm.yAxis;
-      component.setState({ width: canvas.width, height: canvas.height, display: multi });
+      // ⚠️ 单面板 / 非直角场景必须回到「轴照常显示」的旧口径：这里写 `display: multi`
+      // 会把普通折线图的 y / x 轴一起藏掉（自查抓到的回归，单面板路径一行都不能漏）。
+      component.setState({ width: canvas.width, height: canvas.height, display: multi || !isPolar });
       component.layout = layout;
       component.theme = norm.theme;
       component.plot = multi ? panels[panelIndex] : null;
@@ -1960,7 +1963,7 @@ export class ICEChart {
        */
       const columnPanel = panels[panelIndex];
       const tooNarrow = multi && !!columnPanel && columnPanel.width < 128;
-      component.setState({ width: canvas.width, height: canvas.height, display: multi && !tooNarrow });
+      component.setState({ width: canvas.width, height: canvas.height, display: multi ? !tooNarrow : !isPolar });
       component.layout = layout;
       component.theme = norm.theme;
       component.plot = multi ? panels[panelIndex] : null;

@@ -101,6 +101,10 @@ describe('面板矩阵（引擎集成）', () => {
     expect(c.layout.panels).toHaveLength(1);
     expect(((c as any).grids as any[]).length).toBe(1);
     expect((c.seriesComponents[0] as any).state.left).toBe(c.layout.plot.x);
+    // 轴必须照常显示 —— 面板逻辑不许把它们藏起来（这条曾经真实漏过：单面板时
+    // `display: multi && ...` 求值成 false，整张图的 x 轴直接不见了）
+    expect((c as any).axisX.state.display).not.toBe(false);
+    expect(((c as any).axisYList[0] as any).state.display).not.toBe(false);
   });
 
   it('轴触发提示框只列指针所在面板的系列', async () => {
