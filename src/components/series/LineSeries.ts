@@ -10,7 +10,10 @@ export class LineSeries extends SeriesBase {
   public fillArea = false;
 
   protected doRender(): void {
-    this.rebuildPixels();
+    // 虚拟系列（数值列 / 惰性原始点）走按需访问器，**不建逐点像素缓存**：
+    // 惰性原始点原来照旧建（基类那条「自定义系列的 doRender 直读 pixels」），
+    // 但折线 / 面积 / 散点的虚拟分支根本不读它 —— 100 万点白建一趟 ≈ 每帧 1s 量级。
+    if (!this.series.virtual) this.rebuildPixels();
     const { pts, indices } = this.renderSequence();
     if (!pts.length) return;
     const option = this.series.option;
@@ -57,8 +60,8 @@ export class LineSeries extends SeriesBase {
    * 下标单独给一份，是因为加了断点标记之后「第 k 个绘制点」不再等于「第 k 个像素」。
    */
   protected renderSequence(): { pts: Array<[number, number] | null>; indices: number[] } {
-    this.rebuildPixels();
     if (this.series.virtual) return this.virtualRenderSequence();
+    this.rebuildPixels();
     const pts: Array<[number, number] | null> = [];
     const indices: number[] = [];
     let count = this.renderCount();

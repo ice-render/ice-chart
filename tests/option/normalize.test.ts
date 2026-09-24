@@ -193,11 +193,40 @@ describe('虚拟（列存）系列（scatter）', () => {
     expect(norm.series[0].sizeAt(0)).toBe(5);
   });
 
-  it('非法用法显式报错（类型 / 类目轴 / 非数值 x / 堆叠）', () => {
+  it('非法用法显式报错（类型 / 类目轴 + 数值 x / 堆叠 / 缺 data）', () => {
     expect(() => normalizeOption({ xAxis: { type: 'category' }, series: [virtualScatter()] })).toThrow(/数值型 x 轴/);
-    expect(() => normalizeOption({ series: [virtualScatter({ data: [['a', 1]] })] })).toThrow(/数值型 x/);
     expect(() => normalizeOption({ series: [virtualScatter({ stack: 'g' })] })).toThrow(/堆叠/);
     expect(() => normalizeOption({ series: [{ id: 's', type: 'scatter', virtual: true }] })).toThrow(/需要 data/);
+  });
+
+  /**
+   * 类目轴上的虚拟系列（2026-09-24）：**x 不是数值**时不再报错，而是退回惰性原始点 ——
+   * 一样不建 `DataPoint`、一样走虚拟绘制（每像素列抽样），于是「均线挂在时间类目上」
+   * 这种百万点派生系列也能用列存，而不是被逼回普通系列（物化 100 万个对象 + 逐帧 LTTB）。
+   */
+  it('非数值 x 退回惰性原始点（类目轴上的大系列也能开 virtual）', () => {
+    const norm = normalizeOption({
+      xAxis: { type: 'category' },
+      series: [virtualScatter({ data: [['a', 1], ['b', 2], ['c', 3]] })],
+    });
+    const series = norm.series[0];
+    expect(series.virtual).toBe(true);
+    expect(series.raw).toBeTruthy();
+    expect(series.columns || null).toBeNull();
+    expect(series.pointCount).toBe(3);
+    // 类目 x 原样保留（提示框与命中靠它定位）
+    expect(series.xValueAt(1)).toBe('b');
+    expect(series.yValueAt(1)).toBe(2);
+  });
+
+  it('对象行按 xField / yField 解析（与普通系列同一套取点规则）', () => {
+    const norm = normalizeOption({
+      series: [virtualScatter({ data: [{ x: 1, y: 5 }, { x: 2, y: 9 }] })],
+    });
+    const series = norm.series[0];
+    expect(series.columns!.y.length).toBe(2);
+    expect(series.xValueAt(0)).toBe(1);
+    expect(series.yValueAt(1)).toBe(9);
   });
 
   describe('惰性原始点（自定义系列 / 非数值列类型）', () => {

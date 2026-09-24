@@ -148,6 +148,36 @@ describe('折线断点（null = 没有数据）', () => {
     expect(sequence.pts.filter((p: any) => p === null)).toHaveLength(1);
     expect(component.pixelAt(1)).toBeNull();
   });
+
+  /**
+   * 类目轴上的虚拟折线（惰性原始点，2026-09-24）：
+   * 「均线挂在时间类目上」这种形状也能开 `virtual` —— 不建 `DataPoint`、**也不建逐点像素缓存**，
+   * 绘制走「每像素列抽样」那条路。这是 1M 根窗口里派生折线最大的两块开销。
+   */
+  it('虚拟折线（类目 x）绘制不物化像素缓存，但照常画出来', () => {
+    const norm = normalizeOption({
+      xAxis: { type: 'category' },
+      yAxis: {},
+      series: [{ id: 'ma', type: 'line', virtual: true, data: [['a', 10], ['b', 12], ['c', null], ['d', 9]] }],
+    } as any);
+    const series: any = norm.series[0];
+    // 类目 x 退回惰性原始点
+    expect(series.raw).toBeTruthy();
+    const component: any = new LineSeries(series, { left: 0, top: 0, width: 400, height: 300 });
+    component.setCoord({
+      plot: { x: 0, y: 0, width: 400, height: 300 },
+      canvas: { x: 0, y: 0, width: 400, height: 300 },
+      xScale: new BandScale(norm.xAxis.domain, [0, 400], { paddingInner: 0.2, paddingOuter: 0.1 }),
+      yScale: new LinearScale([0, 20], [300, 0]),
+      theme: resolveChartTheme('light'),
+    });
+    const sequence = component.renderSequence();
+    expect(sequence.pts.length).toBeGreaterThan(0);
+    // 虚拟折线不建逐点像素缓存
+    expect(component.pixels.length).toBe(0);
+    // 断点仍然抬笔（列里的 null 读出来还是 null）
+    expect(sequence.pts.filter((p: any) => p === null).length).toBe(1);
+  });
 });
 
 describe('BarSeries 命中与布局', () => {

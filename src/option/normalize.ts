@@ -538,10 +538,18 @@ function buildSeries(
         continue;
       }
       if (isColumnarVirtualType(option.type)) {
-        const columns = buildVirtualColumns(option, i);
-        if (cache) cache.set(id, { columns });
-        out.push({ ...shared, option: takeLean(), columns, pointCount: columns.y.length, ...columnAccessors(columns) });
-        continue;
+        /**
+         * 数值列只吃**数值型 x**。x 不是数值时（类目轴上的字符串 x，比如均线挂在时间类目上）
+         * 不要抛错 —— 退回下面的**惰性原始点**：一样不建 `DataPoint` 数组、一样不建逐点像素，
+         * 组件走虚拟绘制那条路（每像素列抽样）。这条让「类目轴 + 百万点折线」也可行，
+         * 不再逼应用把它降级成普通系列（那会物化 100 万个对象 + 逐帧 LTTB）。
+         */
+        const columns = tryBuildVirtualColumns(option, i);
+        if (columns) {
+          if (cache) cache.set(id, { columns });
+          out.push({ ...shared, option: takeLean(), columns, pointCount: columns.y.length, ...columnAccessors(columns) });
+          continue;
+        }
       }
       /**
        * 惰性原始点：任何其它类型（自定义系列）都走这里 —— 保留原始数据、不建 DataPoint 数组。
@@ -837,6 +845,20 @@ function buildPoints(
  * 2. `[[x, y], ...]` 元组数组；
  * 3. `[y, y, ...]` 纯数值数组（x 取下标）。
  */
+/**
+ * 试建数值列：**只有「x 不是数值」这一种失败**返回 `null`（调用方退回惰性原始点），
+ * 其余问题（堆叠、长度不一致、空数据…）照旧抛错 —— 那些是用法错误，静默降级更难查。
+ */
+function tryBuildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesColumns | null {
+  try {
+    return buildVirtualColumns(option, seriesIndex);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.indexOf('需要数值型 x') >= 0) return null;
+    throw error;
+  }
+}
+
 function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesColumns {
   const fail: (reason: string) => never = (reason) => {
     throw new Error(`[ice-chart] series[${seriesIndex}].virtual ${reason}`);
@@ -868,9 +890,31 @@ function buildVirtualColumns(option: SeriesOption, seriesIndex: number): SeriesC
     adoptSize = cols.size instanceof Float64Array ? cols.size : null;
   } else if (Array.isArray(data)) {
     count = data.length;
-    readX = (i) => (Array.isArray(data[i]) ? data[i][0] : i);
-    readY = (i) => (Array.isArray(data[i]) ? data[i][1] : data[i]);
-    readSize = (i) => (Array.isArray(data[i]) && data[i].length > 2 ? data[i][2] : undefined);
+    /**
+     * 取点规则与**普通系列逐字一致**（`readGenericPoint` 那套）：
+     * - 元组 `[x, y, size]` 按位置取；
+     * - 对象行按 `xField` / `yField`（默认 `x` / `y`）取，缺了才退下标 ——
+     *   原来对象行一律退成「x = 下标、y = 整行」，于是 `{ x, y }` 形状的 data
+     *   在虚拟系列里**解析不出来**（y 是 NaN 直接判失败），而普通系列一直读得出来。
+     *   这条曾把「大系列 + 对象行」逼回普通路径（每点一个 DataPoint）。
+     */
+    const xField = option.xField || 'x';
+    const yField = option.yField || 'y';
+    const readRow = (row: any): { x: any; y: any; size: any } => {
+      if (Array.isArray(row)) return { x: row[0], y: row[1], size: row.length > 2 ? row[2] : undefined };
+      if (row && typeof row === 'object') {
+        const x = row[xField] !== undefined ? row[xField] : row.x !== undefined ? row.x : undefined;
+        const y = row[yField] !== undefined ? row[yField] : row.y !== undefined ? row.y : row.value;
+        return { x, y, size: row.size };
+      }
+      return { x: undefined, y: row, size: undefined };
+    };
+    readX = (i) => {
+      const parsed = readRow(data[i]);
+      return parsed.x === undefined ? i : parsed.x;
+    };
+    readY = (i) => readRow(data[i]).y;
+    readSize = (i) => readRow(data[i]).size;
   } else {
     fail('需要 data（列式 { x, y }、元组数组或数值数组）。');
   }
@@ -1438,6 +1482,23 @@ function expressionVariables(source: string): string[] {
   }
 }
 
+/**
+ * 两张类目表是否**逐项同一**（`!==`，不做字符串转换）。
+ *
+ * 用它当「同一张表」的判据：通过就意味着两张表连值的类型都一样，
+ * 合并去重的结果必然与其中一张相同 —— 于是可以省掉一整趟 `String()` + 哈希。
+ * 任何一处不同（哪怕只是 `1` 与 `'1'` 这类字符串相等）就老实退回合并。
+ */
+function sameCategories(a: SeriesRawPoints, b: SeriesRawPoints): boolean {
+  const left = a.categories;
+  const right = b.categories;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+}
+
 function buildXDomain(
   type: string,
   series: InternalSeries[],
@@ -1454,7 +1515,11 @@ function buildXDomain(
     if (Array.isArray(option.data) && option.data.length) {
       return { domain: option.data.slice(), categories: option.data.slice() };
     }
-    const seen: Record<string, boolean> = {};
+    /**
+     * 合并去重：`Map<key, 下标>` —— 它一趟同时给出「见没见过」和「在合并域里的下标」，
+     * 于是合并那条路也能交出 `categoryLookup`（BandScale 就不必再自建一张同规模的表）。
+     */
+    const seen = new Map<string, number>();
     const categories: any[] = [];
     /**
      * **单一「惰性原始点」来源的快路径**（2026-09-23）。
@@ -1487,35 +1552,47 @@ function buildXDomain(
      * 任何一处不同（哪怕只是 `1` 与 `'1'` 这类字符串相等），就老实退回下面合并。
      */
     if (series.length > 1 && series.every((s) => !!s.raw)) {
-      const first = series[0].raw as SeriesRawPoints;
-      let sameTable = true;
-      for (let k = 1; k < series.length && sameTable; k++) {
-        const other = series[k].raw as SeriesRawPoints;
-        if (other.categories.length !== first.categories.length) {
-          sameTable = false;
-          break;
-        }
-        const a = first.categories;
-        const b = other.categories;
-        for (let i = 0; i < a.length; i++) {
-          if (a[i] !== b[i]) {
-            sameTable = false;
+      /**
+       * 先把**逐项相同**的表归成一组：滚动看盘里 K 线 / 量柱 / 均线常常共享同一批 x，
+       * 而下面那趟合并要对**每一张表**跑一遍 `String()` + 哈希（100 万 × 5 实测 ~500ms/次）。
+       * 判据是**逐项同一性**（`!==`，不做字符串转换）：不同的表才进合并，
+       * 与「全量合并」的结论逐项一致（相同的表本来就贡献不了新类目）。
+       */
+      const distinct: SeriesRawPoints[] = [];
+      for (const s of series) {
+        const store = s.raw as SeriesRawPoints;
+        let known = false;
+        for (const kept of distinct) {
+          if (sameCategories(kept, store)) {
+            known = true;
             break;
           }
         }
+        if (!known) distinct.push(store);
       }
-      if (sameTable) {
-        const owned = first.categories.slice();
-        return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(first, key) };
+      if (distinct.length === 1) {
+        const only = distinct[0];
+        const owned = only.categories.slice();
+        return { domain: owned, categories: owned, categoryLookup: (key: string) => rawCategoryIndex(only, key) };
       }
+      for (const store of distinct) {
+        for (const value of store.categories) {
+          const key = String(value);
+          if (!seen.has(key)) {
+            seen.set(key, categories.length);
+            categories.push(value);
+          }
+        }
+      }
+      return { domain: categories, categories, categoryLookup: (key: string) => { const at = seen.get(key); return at === undefined ? -1 : at; } };
     }
     for (const s of series) {
       // 惰性原始点：类目表增量维护在存储里（滚动窗口下别每帧重扫）
       if (s.raw) {
         for (const value of s.raw.categories) {
           const key = String(value);
-          if (!seen[key]) {
-            seen[key] = true;
+          if (!seen.has(key)) {
+            seen.set(key, categories.length);
             categories.push(value);
           }
         }
@@ -1524,13 +1601,20 @@ function buildXDomain(
       for (let i = 0, n = s.pointCount; i < n; i++) {
         const xValue = s.xValueAt(i);
         const key = String(xValue);
-        if (!seen[key]) {
-          seen[key] = true;
+        if (!seen.has(key)) {
+          seen.set(key, categories.length);
           categories.push(xValue);
         }
       }
     }
-    return { domain: categories, categories };
+    return {
+      domain: categories,
+      categories,
+      categoryLookup: (key: string) => {
+        const at = seen.get(key);
+        return at === undefined ? -1 : at;
+      },
+    };
   }
 
   const values: number[] = [];
