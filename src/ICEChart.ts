@@ -1075,10 +1075,14 @@ export class ICEChart {
   /** 数据坐标 → 像素（图表坐标系），并算出该图元的盒子。 */
   private markBox(spec: ChartMarkSpec, size: { width: number; height: number }) {
     const kind: string = spec.type || 'point';
-    const plot = this.layout.plot;
-    const xScale: any = this.norm.xAxis.scale;
+    // 面板矩阵：图元画在 `spec.panel`（默认 0）那块面板里，按它的矩形与比例尺换算
+    const panelIndex = this.markPanelIndex(spec);
+    const plot = this.layout.panels[panelIndex] || this.layout.plot;
+    const scales = this.panelScales[panelIndex] || this.panelScales[0];
+    const xScale: any = scales ? scales.x : this.norm.xAxis.scale;
     const yAxis: any = this.markAxis(spec);
-    const yScale: any = yAxis && yAxis.scale;
+    const yIndex = yAxis ? Math.max(0, this.norm.yAxes.indexOf(yAxis)) : 0;
+    const yScale: any = (scales && scales.ys[yIndex]) || (yAxis && yAxis.scale);
     const dx = Number(spec.dx) || 0;
     const dy = Number(spec.dy) || 0;
     const px = (value: any) => plot.x + Number(xScale.map(value)) + dx;
@@ -1110,10 +1114,13 @@ export class ICEChart {
   private markDataAt(mark: { id: string; spec: ChartMarkSpec; component: any }, at?: { left: number; top: number }): ChartMarkData {
     const spec = mark.spec;
     const kind: string = spec.type || 'point';
-    const plot = this.layout.plot;
-    const xScale: any = this.norm.xAxis.scale;
+    const panelIndex = this.markPanelIndex(spec);
+    const plot = this.layout.panels[panelIndex] || this.layout.plot;
+    const scales = this.panelScales[panelIndex] || this.panelScales[0];
+    const xScale: any = scales ? scales.x : this.norm.xAxis.scale;
     const yAxis: any = this.markAxis(spec);
-    const yScale: any = yAxis && yAxis.scale;
+    const yIndex = yAxis ? Math.max(0, this.norm.yAxes.indexOf(yAxis)) : 0;
+    const yScale: any = (scales && scales.ys[yIndex]) || (yAxis && yAxis.scale);
     const state = mark.component.state || {};
     const w = state.width || 0;
     const h = state.height || 0;
@@ -1821,6 +1828,14 @@ export class ICEChart {
   /** 系列所属面板的比例尺（域共享、range 按面板）。 */
   private panelScalesOf(series: InternalSeries): { x: Scale; ys: Scale[] } {
     return this.panelScales[this.panelIndexOf(series)] || this.panelScales[0];
+  }
+
+  /** 数据坐标图元所属的面板下标（`spec.panel`，默认 0；越界夹回）。 */
+  private markPanelIndex(spec: ChartMarkSpec): number {
+    if (!this.norm.matrix) return 0;
+    const raw = Math.floor(Number(spec.panel));
+    const max = this.layout.panels.length - 1;
+    return isFinite(raw) ? Math.max(0, Math.min(max, raw)) : 0;
   }
 
   /**

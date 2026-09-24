@@ -972,6 +972,11 @@ export interface ChartMarkSpec {
   y1?: any;
   /** 多 y 轴时指定用哪个系列的轴（默认主轴）。 */
   seriesId?: string;
+  /**
+   * 面板矩阵：图元画在哪块面板里（行优先，默认 0）。
+   * 横线 / 区间按**那块面板**的矩形取长度，纵坐标也用它自己的比例尺。
+   */
+  panel?: number;
   /** 像素微调（point 用；线 / 带也会叠加）。 */
   dx?: number;
   dy?: number;
