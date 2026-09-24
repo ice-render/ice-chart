@@ -117,4 +117,31 @@ describe('x 轴标签抽稀', () => {
       expect(plot.width).toBe(c.layout.plot.width);
     }
   });
+
+  /**
+   * 面板矩阵要靠这个：同一套刻度表，画到不同的面板矩形上。
+   * 不设 `plot` 时必须完全走旧路径（读 `layout.plot`），否则现有单面板图全会错位。
+   */
+  it('给 Axis 指定 per-instance plot 后，刻度落点跟着平移', async () => {
+    const c = await mount(categoryOption(20));
+    const axis: any = (c as any).axisX;
+    const before = (axis.lastTicks || []).filter((t: any) => t.drawn).map((t: any) => t.pos);
+    expect(before.length).toBeGreaterThan(1);
+
+    const plot = c.layout.plot;
+    axis.plot = { x: plot.x + 100, y: plot.y - 50, width: plot.width - 40, height: plot.height };
+    // Chart 在面板化之后就是这么调的：先给 plot，再同步刻度表
+    axis.syncTicks();
+    await c.render();
+
+    const after = (axis.lastTicks || []).filter((t: any) => t.drawn).map((t: any) => t.pos);
+    expect(after[0] - before[0]).toBeCloseTo(100, 3);
+
+    // 清掉覆盖后回到旧路径（面板化不许改变默认行为）
+    axis.plot = null;
+    axis.syncTicks();
+    await c.render();
+    const restored = (axis.lastTicks || []).filter((t: any) => t.drawn).map((t: any) => t.pos);
+    expect(restored[0]).toBeCloseTo(before[0], 3);
+  });
 });

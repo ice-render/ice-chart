@@ -18,6 +18,16 @@
     （小提琴按轮廓多边形内部，蜂群按像素最近邻）。密度与避让是纯函数
     （`src/layout/density.ts`：`computeKdeProfile` / `computeBeeswarmOffsets` / `silvermanBandwidth`），
     可单测。示例页 `examples/distribution.html`。
+- **面板矩阵（小倍数）：`option.matrix` + `series[].panel`**。一张画布放 N 个同构面板，
+  **共享同一份数据域**（刻度一致、可横向比较）：
+  - `matrix: { rows, columns, gap }`：数字 = 等分，数组 = 权重 —— `columns: [4, 1]` 就是
+    「主图 + 右侧窄条」，也是边际分布的几何底座；
+  - 轴只画外圈（每行一份 y 轴、每列一份 x 轴），网格每个面板一份；x 轴标签按**一列的宽度**抽稀，
+    窄于 128px 的列不画 x 轴（它和主图共享同一条 x 轴）；
+  - 交互按**指针所在面板**解析：轴触发提示框只列那块的系列、准星只画在那块里、
+    缩放 / 平移的锚点用那块的比例尺；框选 x 夹到所有面板的并集（刷一段 x，六块一起看）；
+  - `addMark` 支持 `panel`；不给 `matrix` 时**逐像素不变**（回归基线）。
+  - 示例页 `examples/matrix.html`；v1 不支持面板独立 y 域 / 面板级独立缩放 / 数据驱动 `facet`（归 DSL）。
 
 ## [0.30.12] - 2026-09-24
 

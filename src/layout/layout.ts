@@ -9,6 +9,7 @@ import type {
 } from '../internal';
 import { createScale, formatTick } from '../scale';
 import { measureTextWidth } from '../util/text';
+import { computePanelRects } from './panels';
 
 const TICK_LENGTH = 4;
 const LABEL_GAP = 6;
@@ -115,12 +116,28 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   // 抽稀对**隐藏的 x 轴**同样要做：垂直网格线读的就是这张表（`labels[i] === ''` = 不画）。
   // 轴藏起来了只是不画标签，网格该在哪还是在哪 —— 多 pane 的 x 轴都藏了，网格却要能对齐。
   if (norm.kind === 'cartesian') {
+    /**
+     * 面板矩阵：每个面板只有「一列那么宽」，抽稀要按**一列的宽度**算 ——
+     * 按并集宽度算的话，六个面板会各自把十几个标签画满，
+     * 相邻面板的标签带直接挤在一起（实测 2×3 的 12 类目就是这副样子）。
+     *
+     * 取**最宽的一列**：等分网格下与「每列宽度」相同；权重列（主图 + 窄条）下保住主图的标签密度，
+     * 真正放不下标签的窄列由 Chart 直接不画轴（见 `syncPanelComponents` 的窄列判定）。
+     */
+    const columns = norm.matrix ? norm.matrix.columns : null;
+    let thinningWidth = plot.width;
+    if (norm.matrix && columns) {
+      const usable = plot.width - norm.matrix.gap * (columns.length - 1);
+      const total = columns.reduce((a, b) => a + b, 0);
+      thinningWidth = Math.max(...columns.map((weight) => (usable * weight) / total));
+    }
     thinXAxisLabels(
       xAxisLayout,
       {
-        axisLength: plot.width,
-        leftRoom: plot.x,
-        rightRoom: Math.max(0, canvas.width - plot.x - plot.width),
+        axisLength: thinningWidth,
+        // 面板内首末标签两侧没有余量（面板边界就是裁剪边界）；单面板时沿用旧的余量口径
+        leftRoom: norm.matrix ? 0 : plot.x,
+        rightRoom: norm.matrix ? 0 : Math.max(0, canvas.width - plot.x - plot.width),
       },
       ctx,
       norm.theme.fontSize,
@@ -178,6 +195,27 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     title.y = margin.top;
   }
 
+  /**
+   * 面板矩阵：把绘图区切成 N 块，`plot` 收缩成**面板的并集**。
+   *
+   * 没有 `matrix` 时 `panels = [plot]`，与从前逐像素一致 —— 这是回归基线，
+   * 不是「顺手统一一下」。面板只在直角坐标场景生效（饼图 / 桑基那些没有「多块绘图区」的语义）。
+   */
+  const panels: Rect[] =
+    norm.matrix && norm.kind === 'cartesian' ? computePanelRects(plot, norm.matrix) : [plot];
+  const panelUnion: Rect = { x: plot.x, y: plot.y, width: plot.width, height: plot.height };
+  if (panels.length > 1) {
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const panel of panels) {
+      right = Math.max(right, panel.x + panel.width);
+      bottom = Math.max(bottom, panel.y + panel.height);
+    }
+    panelUnion.width = right - panelUnion.x;
+    panelUnion.height = bottom - panelUnion.y;
+  }
+  plot = panelUnion;
+
   const slider: Rect | null =
     showSlider && sliderY !== null
       ? { x: plot.x, y: Math.round(sliderY), width: plot.width, height: Math.round(sliderHeight) }
@@ -185,6 +223,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
 
   return {
     canvas,
+    panels,
     plot,
     titleRect: title ? { x: title.x, y: title.y, width: 0, height: titleHeight } : null,
     legendRect: legend ? legendBoundingRect(legend) : null,

@@ -51,6 +51,7 @@ const pages = [
   'funnel-gauge',
   'boxplot-waterfall',
   'distribution',
+  'matrix',
   'treemap',
   'graph',
   'mini-matlab',

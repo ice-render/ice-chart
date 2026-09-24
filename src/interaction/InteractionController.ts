@@ -40,7 +40,17 @@ export interface InteractionHost extends HitHost {
 type DragState =
   | null
   | { mode: 'brush'; startX: number; startY: number; moved: boolean }
-  | { mode: 'pan'; startX: number; startY: number; domainX: [any, any] | null; domainY: [any, any] | null; moved: boolean }
+  | {
+      mode: 'pan';
+      startX: number;
+      startY: number;
+      domainX: [any, any] | null;
+      domainY: [any, any] | null;
+      /** 起手时指针所在面板的像素尺寸（面板矩阵下按它把位移换算成数据位移）。 */
+      panelWidth: number;
+      panelHeight: number;
+      moved: boolean;
+    }
   | {
       mode: 'slider';
       part: SliderPart;
@@ -269,7 +279,7 @@ export class InteractionController {
       return;
     }
     const item = this.resolver.nearestByXValue(current.column.xValue);
-    const column = item ? this.resolver.pickColumn(item.pixel[0]) : null;
+    const column = item ? this.resolver.pickColumn(item.pixel[0], item.pixel[1]) : null;
     // 非直角坐标场景（雷达 / 饼图）也可能出现 axis 悬停 —— 它们的「列」不是一条竖线，
     // 但同一列（同一个指标 / 同一个切片下标）的语义仍然成立，照旧重新解析即可。
     // 以前这里对非直角坐标直接清空，于是**每次数据更新都会把悬停踢掉**
@@ -331,7 +341,7 @@ export class InteractionController {
     // axis 触发器优先：即使指针正好落在某条折线上，也展示整列的多个系列值
     //（与主流 axis tooltip 语义一致）。item 触发器才只认命中的那一个数据点。
     if (inside && trigger === 'axis') {
-      const column = this.resolver.pickColumn(target.chart[0]);
+      const column = this.resolver.pickColumn(target.chart[0], target.chart[1]);
       if (column) {
         this.setHover({ kind: 'axis', column });
         return;
@@ -404,6 +414,9 @@ export class InteractionController {
         crosshair.hide();
       } else {
         const axisMode = (this.host.norm.option.crosshair && this.host.norm.option.crosshair.axis) || 'x';
+        // 面板矩阵：准星只画在**指针所在那块面板**里（横穿所有面板的线指代不清）
+        const panel = this.resolver.panelAt(anchor.pixel[0], anchor.pixel[1]);
+        crosshair.plot = panel >= 0 ? this.resolver.panelRect(panel) : null;
         crosshair.show(
           axisMode === 'y' ? null : anchor.pixel[0],
           axisMode === 'x' ? null : anchor.pixel[1],
@@ -420,6 +433,9 @@ export class InteractionController {
         const content = this.buildTooltipContent(state);
         const anchorPixel: [number, number] =
           state.kind === 'axis' ? [state.column.pixelX, anchor.pixel[1]] : [anchor.pixel[0], anchor.pixel[1]];
+        // 面板矩阵：避让边界取**指针所在的那块面板**（否则第一行面板的提示框会压住自己的准星标签）
+        const panel = this.resolver.panelAt(anchorPixel[0], anchorPixel[1]);
+        tooltip.plot = panel >= 0 ? this.resolver.panelRect(panel) : null;
         tooltip.show(content, anchorPixel);
       }
     }
@@ -926,12 +942,15 @@ export class InteractionController {
     }
     if (panEnabled) {
       this.setHover(null);
+      const panelRect = this.resolver.panelRect(this.resolver.panelAt(target.chart[0], target.chart[1]));
       this.drag = {
         mode: 'pan',
         startX: screenX,
         startY: screenY,
         domainX: this.currentXWindow(),
         domainY: [this.host.norm.yAxis.domain[0], this.host.norm.yAxis.domain[1]],
+        panelWidth: panelRect.width,
+        panelHeight: panelRect.height,
         moved: false,
       };
       return true;
@@ -1009,10 +1028,17 @@ export class InteractionController {
     const [worldX, worldY] = this.host.ice.screenToWorld(screenX, screenY);
 
     if (drag.mode === 'brush') {
+      /**
+       * 框选的范围口径（面板矩阵）：
+       * - **x 夹到所有面板的并集** —— 小倍数的直觉是「刷一段 x，所有面板一起看」；
+       * - **y 夹到起手时指针所在的那块面板** —— 纵向各面板的语义不同（数据/量纲都可能不一样），
+       *   跨面板拉一条 y 区间没有意义。
+       */
+      const brushY = this.resolver.panelRect(this.resolver.panelAt(startWorldX, startWorldY));
       const x0 = clamp(startWorldX, plot.x, plot.x + plot.width);
-      const y0 = clamp(startWorldY, plot.y, plot.y + plot.height);
+      const y0 = clamp(startWorldY, brushY.y, brushY.y + brushY.height);
       const x1 = clamp(worldX, plot.x, plot.x + plot.width);
-      const y1 = clamp(worldY, plot.y, plot.y + plot.height);
+      const y1 = clamp(worldY, brushY.y, brushY.y + brushY.height);
       if (this.host.brush) {
         this.host.brush.setRect({ x: Math.min(x0, x1), y: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) });
       }
@@ -1062,20 +1088,26 @@ export class InteractionController {
     const panOption: any = this.host.norm.option.interaction && this.host.norm.option.interaction.pan;
     const axes = (panOption && panOption.axes) || 'xy';
     if ((axes === 'x' || axes === 'xy') && drag.domainX) {
-      const next = this.shiftDomain('x', drag.domainX, dx);
+      const next = this.shiftDomain('x', drag.domainX, dx, drag.panelWidth);
       if (next) this.host.setDomain('x', next, 'pan');
     }
     if ((axes === 'y' || axes === 'xy') && drag.domainY) {
-      const next = this.shiftDomain('y', drag.domainY, dy);
+      const next = this.shiftDomain('y', drag.domainY, dy, drag.panelHeight);
       if (next) this.host.setDomain('y', next, 'pan');
     }
   }
 
-  private shiftDomain(axis: 'x' | 'y', domain: [any, any], deltaPixels: number): [any, any] | null {
+  private shiftDomain(
+    axis: 'x' | 'y',
+    domain: [any, any],
+    deltaPixels: number,
+    panelSize?: number
+  ): [any, any] | null {
     const internal = this.host.norm[axis === 'x' ? 'xAxis' : 'yAxis'];
     const scale = internal.scale;
     if (!scale) return null;
-    const size = axis === 'x' ? this.host.layout.plot.width : this.host.layout.plot.height;
+    const plot = this.host.layout.plot;
+    const size = panelSize && isFinite(panelSize) ? panelSize : axis === 'x' ? plot.width : plot.height;
     if (scale.isBand()) {
       // 全集的来源是 `fullDomain`（**全部**类目），不是 `internal.domain` ——
       // 后者是**当前窗口内**的类目串，拿它当全集算出来的位移恒为 0（窗口在窗口里挪不动）。
@@ -1267,13 +1299,14 @@ export class InteractionController {
       return true;
     }
     const axes = zoomOption.axes || 'x';
-    const plot = this.host.layout.plot;
+    // 面板矩阵：锚点按**指针所在那块面板**换算（比例尺是每面板一套，矩形也不同）
+    const plot = this.resolver.panelRect(this.resolver.panelAt(target.chart[0], target.chart[1]));
     if (axes === 'x' || axes === 'xy') {
-      const next = this.zoomDomain('x', target.chart[0] - plot.x, factor);
+      const next = this.zoomDomain('x', target.chart[0] - plot.x, factor, plot.width);
       if (next) this.host.setDomain('x', next, 'zoom');
     }
     if (axes === 'y' || axes === 'xy') {
-      const next = this.zoomDomain('y', target.chart[1] - plot.y, factor);
+      const next = this.zoomDomain('y', target.chart[1] - plot.y, factor, plot.height);
       if (next) this.host.setDomain('y', next, 'zoom');
     }
     return true;
@@ -1288,7 +1321,12 @@ export class InteractionController {
    *   漂移（早先按「数据域的 5%~100%」算：缩到底能到 0.24px/根，一根都占不到一个像素）。
    * - **连续轴**（价格轴这类）仍按「占完整数据域的比例」（`minSpan` / `maxSpan`）。
    */
-  private zoomDomain(axis: 'x' | 'y', anchorPixel: number, factor: number): [any, any] | null {
+  private zoomDomain(
+    axis: 'x' | 'y',
+    anchorPixel: number,
+    factor: number,
+    panelSize?: number
+  ): [any, any] | null {
     const internal = this.host.norm[axis === 'x' ? 'xAxis' : 'yAxis'];
     const scale = internal.scale;
     if (!scale) return null;
@@ -1297,7 +1335,7 @@ export class InteractionController {
     const maxSpan = Number(zoomOption && zoomOption.maxSpan) || 1;
     const full = this.host.fullDomain(axis);
     const plot = this.host.layout.plot;
-    const size = axis === 'x' ? plot.width : plot.height;
+    const size = panelSize && isFinite(panelSize) && panelSize > 0 ? panelSize : axis === 'x' ? plot.width : plot.height;
 
     if (scale.isBand()) {
       const all = full;
@@ -1309,7 +1347,7 @@ export class InteractionController {
       const currentCount = Math.max(2, to - from + 1);
       const anchorRatio = clamp(anchorPixel / Math.max(1, size), 0, 1);
       // 缩放比例限制：一屏最多放到 minBarSpacing 那么密、最少留 maxBarSpacing 那么粗
-      const nextCount = Math.min(n, clampBarCount(Math.round(currentCount / factor), plot.width, zoomOption));
+      const nextCount = Math.min(n, clampBarCount(Math.round(currentCount / factor), size, zoomOption));
       const anchorIndex = from + anchorRatio * (currentCount - 1);
       let nextFrom = Math.round(anchorIndex - anchorRatio * (nextCount - 1));
       nextFrom = clamp(nextFrom, 0, Math.max(0, n - nextCount));

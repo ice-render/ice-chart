@@ -155,6 +155,14 @@ export class ICEChart {
   public axisX: Axis;
   /** y 轴组件，与 norm.yAxes 一一对应（axisYList[0] 是主 y 轴）。 */
   public axisYList: Axis[] = [];
+  /** 每个面板一份网格（`grids[0]` 就是 `this.grid`；单面板时长度为 1）。 */
+  public grids: GridLines[] = [];
+  /** 每列一份 x 轴（面板矩阵的外圈轴；`panelAxisX[0]` 就是 `this.axisX`）。 */
+  public panelAxisX: Axis[] = [];
+  /** 每行一份 y 轴（面板矩阵的外圈轴；`panelAxisY[0]` 就是 `this.axisYList[0]`）。 */
+  public panelAxisY: Axis[] = [];
+  /** 每个面板的比例尺：域共享、range 按各自面板矩形。`panelScales[0]` 即 `norm.*.scale`。 */
+  public panelScales: Array<{ x: Scale; ys: Scale[] }> = [];
   public legend: Legend | null = null;
   public titleComponent: Title | null = null;
   public tooltip: Tooltip | null = null;
@@ -293,6 +301,11 @@ export class ICEChart {
     this.axisYList = [
       new Axis({ orientation: 'y', width: canvas.width, height: canvas.height, zIndex: Z.axis, axisIndex: 0, position: 'left' }),
     ];
+    // 面板矩阵的组件池：单面板时各含一个（就是上面那三个），多面板时按需扩容 / 回收。
+    // 让 `grids[0]` 恒等于 `this.grid`（同理轴线），这样「没有 matrix」的那条路一行都不用改。
+    this.grids = [this.grid];
+    this.panelAxisX = [this.axisX];
+    this.panelAxisY = [this.axisYList[0]];
     this.legend = new Legend({ width: canvas.width, height: canvas.height, zIndex: Z.legend });
     this.titleComponent = new Title({ width: canvas.width, height: canvas.height, zIndex: Z.title });
     this.crosshair = new Crosshair({ width: canvas.width, height: canvas.height, zIndex: Z.crosshair });
@@ -1062,10 +1075,14 @@ export class ICEChart {
   /** 数据坐标 → 像素（图表坐标系），并算出该图元的盒子。 */
   private markBox(spec: ChartMarkSpec, size: { width: number; height: number }) {
     const kind: string = spec.type || 'point';
-    const plot = this.layout.plot;
-    const xScale: any = this.norm.xAxis.scale;
+    // 面板矩阵：图元画在 `spec.panel`（默认 0）那块面板里，按它的矩形与比例尺换算
+    const panelIndex = this.markPanelIndex(spec);
+    const plot = this.layout.panels[panelIndex] || this.layout.plot;
+    const scales = this.panelScales[panelIndex] || this.panelScales[0];
+    const xScale: any = scales ? scales.x : this.norm.xAxis.scale;
     const yAxis: any = this.markAxis(spec);
-    const yScale: any = yAxis && yAxis.scale;
+    const yIndex = yAxis ? Math.max(0, this.norm.yAxes.indexOf(yAxis)) : 0;
+    const yScale: any = (scales && scales.ys[yIndex]) || (yAxis && yAxis.scale);
     const dx = Number(spec.dx) || 0;
     const dy = Number(spec.dy) || 0;
     const px = (value: any) => plot.x + Number(xScale.map(value)) + dx;
@@ -1097,10 +1114,13 @@ export class ICEChart {
   private markDataAt(mark: { id: string; spec: ChartMarkSpec; component: any }, at?: { left: number; top: number }): ChartMarkData {
     const spec = mark.spec;
     const kind: string = spec.type || 'point';
-    const plot = this.layout.plot;
-    const xScale: any = this.norm.xAxis.scale;
+    const panelIndex = this.markPanelIndex(spec);
+    const plot = this.layout.panels[panelIndex] || this.layout.plot;
+    const scales = this.panelScales[panelIndex] || this.panelScales[0];
+    const xScale: any = scales ? scales.x : this.norm.xAxis.scale;
     const yAxis: any = this.markAxis(spec);
-    const yScale: any = yAxis && yAxis.scale;
+    const yIndex = yAxis ? Math.max(0, this.norm.yAxes.indexOf(yAxis)) : 0;
+    const yScale: any = (scales && scales.ys[yIndex]) || (yAxis && yAxis.scale);
     const state = mark.component.state || {};
     const w = state.width || 0;
     const h = state.height || 0;
@@ -1786,19 +1806,216 @@ export class ICEChart {
     if (this.a11yMirror.attached) this.a11yMirror.refresh();
   }
 
-  private buildScales(norm: NormalizedOption): void {
-    const { plot } = this.layout;
-    norm.xAxis.scale = createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, plot.width)], {
-      logBase: norm.xAxis.option.logBase,
-      // 类目表是增量维护的那种轴会带查表口：有它 BandScale 就不必每帧重建索引表
-      categoryLookup: norm.xAxis.categoryLookup,
-      // 域被视窗裁成一段时，查表口按整张表编号 —— 偏移量把「全表下标」换算成窗口内下标
-      categoryOffset: norm.xAxis.categoryOffset,
-    });
-    for (const axis of norm.yAxes) {
-      axis.scale = createScale(axis.type, axis.domain, [Math.max(1, plot.height), 0], {
-        logBase: axis.option.logBase,
+  /** 系列所属面板下标（没有 matrix、或下标越界时都退回 0）。 */
+  private panelIndexOf(series: InternalSeries): number {
+    if (!this.norm.matrix) return 0;
+    const raw = Math.floor(Number(series.panel));
+    const max = this.layout.panels.length - 1;
+    return isFinite(raw) ? Math.max(0, Math.min(max, raw)) : 0;
+  }
+
+  /** 系列所属面板的矩形（图表坐标系）。非直角坐标 / 单面板时就是整块绘图区。 */
+  private panelRectOf(series: InternalSeries): Rect {
+    return this.layout.panels[this.panelIndexOf(series)] || this.layout.plot;
+  }
+
+  /** 系列所属面板的组件盒（`createSeriesComponent` 的入参形状）。 */
+  private panelBoxOf(series: InternalSeries): { left: number; top: number; width: number; height: number } {
+    const rect = this.panelRectOf(series);
+    return { left: rect.x, top: rect.y, width: rect.width, height: rect.height };
+  }
+
+  /** 系列所属面板的比例尺（域共享、range 按面板）。 */
+  private panelScalesOf(series: InternalSeries): { x: Scale; ys: Scale[] } {
+    return this.panelScales[this.panelIndexOf(series)] || this.panelScales[0];
+  }
+
+  /** 数据坐标图元所属的面板下标（`spec.panel`，默认 0；越界夹回）。 */
+  private markPanelIndex(spec: ChartMarkSpec): number {
+    if (!this.norm.matrix) return 0;
+    const raw = Math.floor(Number(spec.panel));
+    const max = this.layout.panels.length - 1;
+    return isFinite(raw) ? Math.max(0, Math.min(max, raw)) : 0;
+  }
+
+  /**
+   * 同步一份网格线到给定矩形 / 比例尺。
+   *
+   * 单面板时就是从前那段代码逐字搬过来；多面板时每个面板各来一遍。
+   *
+   * 抽稀后的竖线位置是**同一批**（域共享），所以 `xTicks` 直接从布局那张表取，各面板不必重算。
+   */
+  private syncGrid(grid: GridLines, rect: Rect, xScale: Scale | null, yScales: Scale[]): void {
+    const norm = this.norm;
+    const layout = this.layout;
+    grid.xScale = xScale;
+    grid.yScale = yScales[0] || null;
+    // 垂直网格线跟 x 轴标签是**同一批位置**：抽稀表里 `labels[i] === ''` 的就是不画的那几颗。
+    // 轴藏起来（`show: false`）的 pane 也有这张表（见 `buildAxisLayout`），网格因此能对齐。
+    const xLayout = layout.xAxisLayout;
+    /**
+     * 竖线落点 = 抽稀之后仍要画的那几颗。给了 `visible`（稠密轴）就按它取 —— 原来这里是
+     * 对整条 10 万项的表做一次 filter，每帧白扫一趟；没给（刻度本来就少）照旧过滤。
+     */
+    grid.xTicks = xLayout.visible
+      ? xLayout.visible.filter((index) => !xLayout.labels || xLayout.labels[index] !== '').map((index) => xLayout.ticks[index])
+      : xLayout.ticks.filter((_tick, index) => !xLayout.labels || xLayout.labels[index] !== '');
+    // 默认只有主轴画水平网格线；其它轴需要显式 showGrid: true
+    grid.horizontal = norm.yAxes
+      .map((axis, index) => ({ axis, axisLayout: layout.yAxes[index], index }))
+      .filter((item) => (item.axis.option.showGrid === undefined ? item.index === 0 : item.axis.option.showGrid !== false))
+      .map((item) => ({ scale: yScales[item.index] || item.axis.scale, ticks: item.axisLayout.ticks, index: item.index }));
+    grid.plot = rect;
+    grid.grid = norm.option.grid || {};
+    grid.theme = norm.theme;
+    grid.markDirty();
+  }
+
+  /**
+   * 面板矩阵的组件池：每个面板一份网格、每行一份 y 轴、每列一份 x 轴。
+   *
+   * 三条纪律：
+   * 1. **`matrix` 缺席时全部退回单实例**（`grids[0]` 就是 `this.grid`、`panelAxisX[0]` 就是
+   *    `this.axisX`），旧路径一行都不用改，也不会多建组件；
+   * 2. 多出来的组件**按需创建、用完回收**（`setOption` 从矩阵切回单图时不留孤儿）；
+   * 3. 外圈轴的刻度表**只算一次**：域共享 → 每行/每列的刻度与标签完全相同，
+   *    这里只是把同一条轴画到不同的矩形上（`Axis.plot`）。
+   */
+  private syncPanelComponents(): void {
+    const norm = this.norm;
+    const layout = this.layout;
+    const canvas = layout.canvas;
+    const panels = layout.panels;
+    const matrix = norm.matrix;
+    const isPolar = norm.kind !== 'cartesian';
+    const multi = !!matrix && !isPolar && panels.length > 1;
+    const rows = multi && matrix ? matrix.rows.length : 1;
+    const columns = multi && matrix ? matrix.columns.length : 1;
+
+    // ---- 每个面板一份网格 ----
+    while (this.grids.length < panels.length) {
+      const grid = new GridLines({ width: canvas.width, height: canvas.height, zIndex: Z.grid });
+      this.root.addChild(grid);
+      this.grids.push(grid);
+    }
+    while (this.grids.length > panels.length) {
+      const extra = this.grids.pop();
+      if (extra) this.root.removeChild(extra);
+    }
+
+    // ---- 每行一份 y 轴（矩阵下只画每行的主 y 轴；多 y 轴 × 矩阵不在 v1 范围） ----
+    while (this.panelAxisY.length < rows) {
+      const axis = new Axis({
+        orientation: 'y',
+        width: canvas.width,
+        height: canvas.height,
+        zIndex: Z.axis,
+        axisIndex: 0,
+        position: 'left',
       });
+      this.root.addChild(axis);
+      this.panelAxisY.push(axis);
+    }
+    while (this.panelAxisY.length > rows) {
+      const extra = this.panelAxisY.pop();
+      if (extra && extra !== this.axisYList[0]) this.root.removeChild(extra);
+    }
+    for (let r = 0; r < this.panelAxisY.length; r++) {
+      const component = this.panelAxisY[r];
+      const panelIndex = Math.min(panels.length - 1, r * columns);
+      const scales = this.panelScales[panelIndex] || this.panelScales[0];
+      const primary = norm.yAxes[0] || norm.yAxis;
+      // ⚠️ 单面板 / 非直角场景必须回到「轴照常显示」的旧口径：这里写 `display: multi`
+      // 会把普通折线图的 y / x 轴一起藏掉（自查抓到的回归，单面板路径一行都不能漏）。
+      component.setState({ width: canvas.width, height: canvas.height, display: multi || !isPolar });
+      component.layout = layout;
+      component.theme = norm.theme;
+      component.plot = multi ? panels[panelIndex] : null;
+      component.axis = multi ? { ...primary, scale: scales.ys[0] } : primary;
+      component.axisIndex = 0;
+      component.position = (primary && primary.position) || 'left';
+      component.syncTicks();
+      component.markDirty();
+    }
+    if (multi) {
+      // 主 y 轴之外的数据轴在矩阵下不画（否则会叠在第一行上，指代不清）
+      for (let i = 1; i < this.axisYList.length; i++) this.axisYList[i].setState({ display: false });
+    }
+
+    // ---- 每列一份 x 轴（画在该列最底行那块面板的下方） ----
+    while (this.panelAxisX.length < columns) {
+      const axis = new Axis({ orientation: 'x', width: canvas.width, height: canvas.height, zIndex: Z.axis });
+      this.root.addChild(axis);
+      this.panelAxisX.push(axis);
+    }
+    while (this.panelAxisX.length > columns) {
+      const extra = this.panelAxisX.pop();
+      if (extra && extra !== this.axisX) this.root.removeChild(extra);
+    }
+    for (let c = 0; c < this.panelAxisX.length; c++) {
+      const component = this.panelAxisX[c];
+      const panelIndex = Math.min(panels.length - 1, (rows - 1) * columns + c);
+      const scales = this.panelScales[panelIndex] || this.panelScales[0];
+      /**
+       * 太窄的列不画 x 轴：它和主图共享同一条 x 轴，重复一遍标签只会和隔壁挤在一起
+       * （主图 + 窄条那类权重布局正是这样）。
+       * 128px = 两条「舒适间隔」（64px，抽稀那条门槛）—— 放不下两个标签就没有画的必要。
+       */
+      const columnPanel = panels[panelIndex];
+      const tooNarrow = multi && !!columnPanel && columnPanel.width < 128;
+      component.setState({ width: canvas.width, height: canvas.height, display: multi ? !tooNarrow : !isPolar });
+      component.layout = layout;
+      component.theme = norm.theme;
+      component.plot = multi ? panels[panelIndex] : null;
+      component.axis = multi ? { ...norm.xAxis, scale: scales.x } : norm.xAxis;
+      component.syncTicks();
+      component.markDirty();
+    }
+
+    // 网格线的补间跟各自面板那两条轴走（同一条时间线）
+    for (let i = 0; i < panels.length; i++) {
+      const grid = this.grids[i];
+      if (!grid) continue;
+      const row = Math.floor(i / Math.max(1, columns));
+      grid.axisX = this.panelAxisX[i % columns] || this.axisX;
+      grid.axisYList = [this.panelAxisY[row] || this.axisYList[0]];
+      if (i > 0) {
+        const scales = this.panelScales[i];
+        if (scales) {
+          grid.setState({ width: canvas.width, height: canvas.height, display: multi });
+          this.syncGrid(grid, panels[i], scales.x, scales.ys);
+        }
+      }
+      grid.syncTicks();
+    }
+  }
+
+  private buildScales(norm: NormalizedOption): void {
+    /**
+     * 每个面板一套比例尺：**域是同一份**（小倍数比较的基准），range 按各自面板矩形 ——
+     * 面板宽高不同（权重列 / 行），同一个 scale 对象没法既画左边那块又画右边那块。
+     *
+     * `norm.xAxis.scale` / `norm.yAxes[].scale` 仍指向**面板 0**：内部既有调用点与
+     * `tests/chart/*` 都按这个语义读（单面板时也就是唯一那套）。
+     */
+    this.panelScales = this.layout.panels.map((panel) => ({
+      x: createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, panel.width)], {
+        logBase: norm.xAxis.option.logBase,
+        // 类目表是增量维护的那种轴会带查表口：有它 BandScale 就不必每帧重建索引表
+        categoryLookup: norm.xAxis.categoryLookup,
+        // 域被视窗裁成一段时，查表口按整张表编号 —— 偏移量把「全表下标」换算成窗口内下标
+        categoryOffset: norm.xAxis.categoryOffset,
+      }),
+      ys: norm.yAxes.map((axis) =>
+        createScale(axis.type, axis.domain, [Math.max(1, panel.height), 0], {
+          logBase: axis.option.logBase,
+        })
+      ),
+    }));
+    const primary = this.panelScales[0];
+    norm.xAxis.scale = primary.x;
+    for (let i = 0; i < norm.yAxes.length; i++) {
+      norm.yAxes[i].scale = primary.ys[i];
     }
   }
 
@@ -1828,27 +2045,8 @@ export class ICEChart {
 
     this.grid.setState({ width: canvas.width, height: canvas.height });
     this.grid.setState({ display: !isPolar });
-    this.grid.xScale = norm.xAxis.scale;
-    this.grid.yScale = norm.yAxis.scale;
-    // 垂直网格线跟 x 轴标签是**同一批位置**：抽稀表里 `labels[i] === ''` 的就是不画的那几颗。
-    // 轴藏起来（`show: false`）的 pane 也有这张表（见 `buildAxisLayout`），网格因此能对齐。
-    const xLayout = layout.xAxisLayout;
-    /**
-     * 竖线落点 = 抽稀之后仍要画的那几颗。给了 `visible`（稠密轴）就按它取 —— 原来这里是
-     * 对整条 10 万项的表做一次 filter，每帧白扫一趟；没给（刻度本来就少）照旧过滤。
-     */
-    this.grid.xTicks = xLayout.visible
-      ? xLayout.visible.filter((index) => !xLayout.labels || xLayout.labels[index] !== '').map((index) => xLayout.ticks[index])
-      : xLayout.ticks.filter((_tick, index) => !xLayout.labels || xLayout.labels[index] !== '');
-    // 默认只有主轴画水平网格线；其它轴需要显式 showGrid: true
-    this.grid.horizontal = norm.yAxes
-      .map((axis, index) => ({ axis, axisLayout: layout.yAxes[index], index }))
-      .filter((item) => (item.axis.option.showGrid === undefined ? item.index === 0 : item.axis.option.showGrid !== false))
-      .map((item) => ({ scale: item.axis.scale as Scale, ticks: item.axisLayout.ticks, index: item.index }));
-    this.grid.plot = plot;
-    this.grid.grid = norm.option.grid || {};
-    this.grid.theme = theme;
-    this.grid.markDirty();
+    // 面板 0 的矩形：单面板时与 `plot` 逐值相同（`panels[0]` 就是并集那一个矩形）
+    this.syncGrid(this.grid, layout.panels[0] || plot, norm.xAxis.scale, this.panelScales[0] ? this.panelScales[0].ys : []);
 
     this.radarGrid.setState({ width: canvas.width, height: canvas.height, display: norm.kind === 'radar' });
     this.radarGrid.theme = theme;
@@ -1909,16 +2107,19 @@ export class ICEChart {
     this.grid.axisX = this.axisX;
     this.grid.axisYList = this.axisYList;
     this.grid.syncTicks();
+    this.syncPanelComponents();
 
     // 标注：定位与越界判定在 resolveAnnotation()（纯函数），这里只把坐标系喂给它。
     // 非直角场景没有 x/y 坐标系，组件会给出结构化诊断而不是静默（见 annotationDiagnostics()）。
     this.annotation.setState({ width: canvas.width, height: canvas.height, display: true });
-    this.annotation.plot = plot;
+    // 面板矩阵 v1：标注画在**面板 0**（按轴定位的语义与面板无关，归属哪一页留待真需求）
+    const annotationPlot = layout.panels[0] || plot;
+    this.annotation.plot = annotationPlot;
     this.annotation.xAxis = norm.xAxis;
     this.annotation.yAxes = norm.yAxes;
     this.annotation.sync(norm.option.annotation, {
       kind: norm.kind,
-      plot,
+      plot: annotationPlot,
       xAxis: norm.xAxis,
       yAxes: norm.yAxes,
       theme,
@@ -2082,8 +2283,8 @@ export class ICEChart {
   }
 
   private syncSeries(animate: boolean | 'enter' | 'update'): void {
+    // 面板矩阵：先把「系列 → 面板」的查表口准备好（没有 matrix 时 panelIndex 恒为 0）
     const norm = this.norm;
-    const plot = this.layout.plot;
     const signature = norm.series.map((s) => `${s.id}:${s.type}`).join('|');
     const slots = computeBarSlots(norm.series);
 
@@ -2092,13 +2293,7 @@ export class ICEChart {
         this.root.removeChild(component);
       }
       this.seriesComponents = norm.series.map((series, index) =>
-        createSeriesComponent(series, {
-          left: plot.x,
-          top: plot.y,
-          width: plot.width,
-          height: plot.height,
-          zIndex: Z.series + index,
-        })
+        createSeriesComponent(series, { ...this.panelBoxOf(series), zIndex: Z.series + index })
       );
       this.root.addChildren(this.seriesComponents);
       this.seriesSignature = signature;
@@ -2108,26 +2303,33 @@ export class ICEChart {
       const component = this.seriesComponents[i];
       const series = norm.series[i];
       const visible = !series.hidden;
-      const axis = norm.yAxes[series.axisIndex] || norm.yAxis;
       const polarLayout = this.layout.polar;
+      /**
+       * 面板矩阵：这一系列属于哪块画布。
+       *
+       * 非直角坐标的场景（饼 / 雷达 / 桑基 / 矩形树图 / 关系图）不吃 matrix
+       * （`layout.panels` 在那边恒为 `[plot]`），所以它们照旧拿到整块绘图区。
+       */
+      const panelRect = this.panelRectOf(series);
+      const panelScales = this.panelScalesOf(series);
       const coord =
         series.type === 'pie'
-          ? { polar: polarLayout, plot, canvas: this.layout.canvas }
+          ? { polar: polarLayout, plot: panelRect, canvas: this.layout.canvas }
           : series.type === 'radar'
-            ? { polar: polarLayout, plot, canvas: this.layout.canvas, domains: norm.radarDomains }
+            ? { polar: polarLayout, plot: panelRect, canvas: this.layout.canvas, domains: norm.radarDomains }
             : series.type === 'funnel'
-              ? { plot, canvas: this.layout.canvas, options: norm.funnel || {} }
+              ? { plot: panelRect, canvas: this.layout.canvas, options: norm.funnel || {} }
               : series.type === 'gauge'
-                ? { polar: polarLayout, plot, canvas: this.layout.canvas, options: norm.gauge || {} }
+                ? { polar: polarLayout, plot: panelRect, canvas: this.layout.canvas, options: norm.gauge || {} }
                 : series.type === 'liquid'
-                  ? { polar: polarLayout, plot, canvas: this.layout.canvas, options: norm.liquid || {} }
+                  ? { polar: polarLayout, plot: panelRect, canvas: this.layout.canvas, options: norm.liquid || {} }
                 : series.type === 'treemap'
                   ? {
-                      plot,
+                      plot: panelRect,
                       canvas: this.layout.canvas,
                       layout: layoutTreemap(
                         (Array.isArray(series.option.data) ? series.option.data : []) as any,
-                        plot,
+                        panelRect,
                         norm.treemap || {},
                         norm.theme.colorPalette
                       ),
@@ -2135,37 +2337,43 @@ export class ICEChart {
                     }
                   : series.type === 'graph' && norm.graph
                     ? {
-                        plot,
+                        plot: panelRect,
                         canvas: this.layout.canvas,
-                        layout: forceLayout(norm.graph.nodes || [], norm.graph.links || [], plot, norm.graph, norm.theme.colorPalette),
+                        layout: forceLayout(
+                          norm.graph.nodes || [],
+                          norm.graph.links || [],
+                          panelRect,
+                          norm.graph,
+                          norm.theme.colorPalette
+                        ),
                         options: norm.graph,
                       }
             : series.type === 'sankey' && norm.sankey
               ? {
-                  plot,
+                  plot: panelRect,
                   canvas: this.layout.canvas,
                   layout: layoutSankey(
                     norm.sankey.nodes || [],
                     norm.sankey.links || [],
-                    plot,
+                    panelRect,
                     norm.sankey,
                     norm.theme.colorPalette
                   ),
                   options: norm.sankey,
                 }
             : {
-              plot,
+              plot: panelRect,
               canvas: this.layout.canvas,
-              xScale: norm.xAxis.scale as Scale,
-              yScale: axis.scale as Scale,
+              xScale: panelScales.x,
+              yScale: panelScales.ys[series.axisIndex] || panelScales.ys[0],
               yAxisIndex: series.axisIndex,
               theme: norm.theme,
             };
       component.setState({
-        left: plot.x,
-        top: plot.y,
-        width: plot.width,
-        height: plot.height,
+        left: panelRect.x,
+        top: panelRect.y,
+        width: panelRect.width,
+        height: panelRect.height,
         display: visible,
         zIndex: Z.series + i,
         interactive: visible,

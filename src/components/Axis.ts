@@ -35,6 +35,11 @@ export class Axis extends ChartComponent {
   /** y 轴下标（对应 norm.yAxes）；x 轴恒为 0。 */
   public axisIndex = 0;
   public position: 'left' | 'right' = 'left';
+  /**
+   * 这条轴负责的绘图区矩形；`null` = 用图表整体的 `layout.plot`（默认路径，逐像素不变）。
+   * 面板矩阵里给每条外圈轴指定它该负责的那一块面板。
+   */
+  public plot: Rect | null = null;
   public axis: InternalAxis | null = null;
   public layout: ChartLayout | null = null;
   public theme: ChartTheme | null = null;
@@ -58,9 +63,19 @@ export class Axis extends ChartComponent {
 
   /** y 轴轴线的 x 坐标（含同侧多层偏移）。 */
   private edgeX(axisLayout: AxisLayout): number {
-    const plot = (this.layout as ChartLayout).plot;
+    const plot = this.plotRect();
     const offset = axisLayout.offset || 0;
     return this.position === 'left' ? plot.x - offset : plot.x + plot.width + offset;
+  }
+
+  /**
+   * 这条轴要画的绘图区矩形。
+   *
+   * 默认就是图表的绘图区（与从前逐字一致）；面板矩阵里由 Chart 给每条外圈轴指定
+   * **它该负责的那一块面板** —— 同一个组件画到不同矩形上，不再为每个面板复制一份轴逻辑。
+   */
+  private plotRect(): Rect {
+    return this.plot || (this.layout as ChartLayout).plot;
   }
 
   private axisLayoutOf(layout: ChartLayout): AxisLayout {
@@ -74,7 +89,7 @@ export class Axis extends ChartComponent {
     if (!axis || !layout || !axis.scale) return null;
     const option: any = axis.option || {};
     const scale = axis.scale;
-    const plot = layout.plot;
+    const plot = this.plotRect();
     const axisLayout = this.axisLayoutOf(layout);
     const ticks = axisLayout.ticks;
     const layoutLabels = axisLayout.labels || [];
@@ -233,7 +248,7 @@ export class Axis extends ChartComponent {
     if (option.show === false) return;
     const scale = this.axis.scale;
     if (!scale) return;
-    const plot = this.layout.plot;
+    const plot = this.plotRect();
     const axisLayout =
       this.orientation === 'x' ? this.layout.xAxisLayout : this.layout.yAxes[this.axisIndex] || this.layout.yAxisLayout;
     const ctx = this.ctx;

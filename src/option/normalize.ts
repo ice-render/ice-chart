@@ -19,6 +19,7 @@ import type { SeriesChunks } from '../util/chunks';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, niceDomain, round } from '../util/math';
 import { computeKdeProfile } from '../layout/density';
+import { resolveMatrix } from '../layout/panels';
 import { toTimestamp } from '../scale/TimeScale';
 import { compileExpression } from '../expr/expr';
 import { diagnoseExpression } from '../expr/diagnostics';
@@ -349,6 +350,21 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     const raw = Number(s.option.yAxisIndex);
     s.axisIndex = isFinite(raw) ? Math.max(0, Math.min(yAxisOptions.length - 1, Math.floor(raw))) : 0;
   }
+  /**
+   * 面板矩阵：`series[].panel` 在这里夹到合法范围。
+   *
+   * 越界 / 负数 / 非数字一律夹回（0 或最后一个面板）：坏配置画歪比整张图空白好，
+   * 与标注那套「坏数据不让图表崩」同一条纪律。
+   */
+  const matrix = resolveMatrix(option.matrix);
+  for (const s of series) {
+    if (!matrix) {
+      s.panel = 0;
+      continue;
+    }
+    const rawPanel = Number(s.option.panel);
+    s.panel = isFinite(rawPanel) ? Math.max(0, Math.min(matrix.panelCount - 1, Math.floor(rawPanel))) : 0;
+  }
 
   /**
    * 排布方向：类目轴在 y 上就是横向柱状图（排行榜场景）。
@@ -506,6 +522,7 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     },
     kind,
     orientation: horizontal ? 'horizontal' : 'vertical',
+    matrix,
     radar,
     sankey,
     funnel,
@@ -632,6 +649,7 @@ function buildSeries(
         hasExplicitX: true,
         hidden: false,
         axisIndex: 0,
+        panel: 0,
       };
       /**
        * 存储有**两种生命周期**，先定形态再决定要不要摘掉 `data`：
@@ -760,6 +778,7 @@ function buildSeries(
       hasExplicitX,
       hidden: false,
       axisIndex: 0,
+      panel: 0,
     };
     applyCurveDomain(internal, option, context);
     out.push(internal);

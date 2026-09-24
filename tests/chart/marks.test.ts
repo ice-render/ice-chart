@@ -196,4 +196,30 @@ describe('数据坐标图元（mark）', () => {
     expect(comp.hoverIndex).toBe(0);
     expect(c.getMarks()[0].component.state.text).toBe('异常');
   });
+
+  /**
+   * 面板矩阵：图元可以指定画在哪块面板里（不指定 = 面板 0）。
+   * 跨面板的 xLine 会把线画到别的面板上，所以横线 / 区间必须按面板矩形取长度。
+   */
+  it('mark 可以指定 panel：横线与区间的长度按那块面板计算', async () => {
+    const c = mount({
+      matrix: { rows: 2, columns: 2, gap: 8 },
+      xAxis: { type: 'category', data: ['1月', '2月', '3月'] },
+      yAxis: { min: 0, max: 200 },
+      series: [
+        { id: 'a', type: 'line', data: [120, 142, 168], panel: 3 },
+        { id: 'b', type: 'line', data: [100, 110, 120], panel: 0 },
+      ],
+    } as ChartOption);
+    const panel = c.layout.panels[3];
+    const hLine = new ICERect({ width: 1, height: 2, fill: true, style: { fillStyle: '#198754' } });
+    c.addMark({ type: 'yLine', y: 160, panel: 3, component: hLine });
+    await c.render();
+    const box = boxOf(hLine);
+    expect(box.left).toBeCloseTo(panel.x, 0);
+    expect(box.width).toBeCloseTo(panel.width, 0);
+    // 纵坐标按那块面板自己的比例尺（同一份域、不同 height）
+    const yScale: any = c.panelScales[3].ys[0];
+    expect(box.top + box.height / 2).toBeCloseTo(panel.y + yScale.map(160), 0);
+  });
 });

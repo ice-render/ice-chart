@@ -18,6 +18,7 @@ import type { Scale } from './scale';
 import type { SeriesRing } from './util/ring';
 import type { SeriesChunks } from './util/chunks';
 import type { ChartLabels } from './types';
+import type { ResolvedMatrix } from './layout/panels';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
 export interface DataPoint {
@@ -275,6 +276,11 @@ export interface InternalSeries {
   hidden: boolean;
   /** 绑定的 y 轴下标。 */
   axisIndex: number;
+  /**
+   * 所属面板下标（行优先）。没有 `option.matrix` 时恒为 0 ——
+   * 归一化阶段已夹到合法范围，后续按面板取几何的地方可以直接下下标。
+   */
+  panel: number;
   /**
    * 归一化后的瀑布图配置（系列级优先，其次顶层 `option.waterfall`）。
    *
@@ -801,6 +807,8 @@ export interface InternalAxis {
 }
 
 export interface NormalizedOption {
+  /** 面板矩阵（小倍数）：null = 单绘图区（现有行为）。 */
+  matrix: ResolvedMatrix | null;
   /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图 / 桑基图。 */
   kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'liquid' | 'treemap' | 'graph';
   /**
@@ -890,6 +898,9 @@ export interface AxisLayout {
 
 export interface ChartLayout {
   canvas: Rect;
+  /** 面板矩阵的各面板矩形（行优先）。没有 `option.matrix` 时就是 `[plot]`。 */
+  panels: Rect[];
+  /** 绘图区；有面板矩阵时是**面板的并集**（无 matrix 时与 `panels[0]` 逐像素相同）。 */
   plot: Rect;
   titleRect: Rect | null;
   legendRect: Rect | null;
@@ -954,6 +965,8 @@ export interface ActiveColumn {
   xValue: any;
   /** 图表坐标系内的 x 像素。 */
   pixelX: number;
+  /** 这一列属于哪个面板（没有面板矩阵时恒为 0）。 */
+  panel: number;
   items: ActiveItem[];
 }
 
