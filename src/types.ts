@@ -93,6 +93,8 @@ export type BuiltinSeriesType =
   | 'funnel'
   | 'gauge'
   | 'boxplot'
+  | 'violin'
+  | 'beeswarm'
   | 'waterfall'
   | 'treemap'
   | 'graph'
@@ -174,6 +176,19 @@ export interface WaterfallOption {
   totalColor?: string;
   /** 是否画相邻柱子之间的连接虚线，默认 true。 */
   connector?: boolean;
+}
+
+/** 小提琴图配置。 */
+export interface ViolinOption {
+  /**
+   * 密度带宽：`'auto'`（默认）走 Silverman 经验法则 `0.9 · min(σ, IQR/1.34) · n^(-1/5)`；
+   * 传数值则完全按它算（太小会变成一堆尖刺，太大会把双峰抹成单峰）。
+   */
+  bandwidth?: number | 'auto';
+  /** 密度评估网格的点数，默认 64。 */
+  samples?: number;
+  /** 画哪半边：`'both'`（默认，镜像）/ `'left'` / `'right'`（半小提琴，常与箱线并排）。 */
+  side?: 'both' | 'left' | 'right';
 }
 
 /** 漏斗图配置。 */
@@ -459,6 +474,16 @@ export interface SeriesOption {
   heatmap?: { minColor?: string; maxColor?: string };
   /** 瀑布图配色与连接线（也可写在 option.waterfall 上，两者等价，series 优先）。 */
   waterfall?: WaterfallOption;
+  /**
+   * 小提琴图（`type: 'violin'`）：数据项是**一组原始观测值**（`number[]`），
+   * 密度轮廓由 Silverman 带宽的高斯核密度算出。
+   */
+  violin?: ViolinOption;
+  /**
+   * 蜂群图（`type: 'beeswarm'`）：点云横向铺开的宽度占一个类目的比例，默认 0.8。
+   * 超过「半个类目步长」会被夹住 —— 再宽就会压到隔壁分组，视觉上分不清归属。
+   */
+  spread?: number;
   /** 饼图标签。 */
   label?: { show?: boolean; position?: 'outside' | 'inside'; formatter?: (params: PieLabelParams) => string };
   /**

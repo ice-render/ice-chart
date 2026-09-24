@@ -340,6 +340,8 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   gauge: '仪表盘',
   liquid: '水位球',
   boxplot: '箱线图',
+  violin: '密度轮廓',
+  beeswarm: '观测点',
   waterfall: '瀑布柱',
   treemap: '矩形树图单元',
   graph: '关系图节点',

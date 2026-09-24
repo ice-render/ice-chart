@@ -15,6 +15,8 @@ export type { FunnelSeriesCoord } from './FunnelSeries';
 export { GaugeSeries } from './GaugeSeries';
 export type { GaugeSeriesCoord } from './GaugeSeries';
 export { BoxplotSeries } from './BoxplotSeries';
+export { ViolinSeries } from './ViolinSeries';
+export { BeeswarmSeries } from './BeeswarmSeries';
 export { WaterfallSeries } from './WaterfallSeries';
 export { TreemapSeries } from './TreemapSeries';
 export type { TreemapSeriesCoord } from './TreemapSeries';

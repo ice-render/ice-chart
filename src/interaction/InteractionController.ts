@@ -569,6 +569,52 @@ export class InteractionController {
         };
       }
     }
+    // 小提琴图：组名 + 观测数与五数概括（读的是归一化算好的密度轮廓，不重算）
+    if (anchorItem && anchorItem.series.type === 'violin') {
+      const point: any = anchorItem.point;
+      const profile = point.violin;
+      if (profile) {
+        let peak = 0;
+        for (const density of profile.density) if (density > peak) peak = density;
+        const summaryLabels = ['最小值', '下四分位', '中位数', '上四分位', '最大值'];
+        return {
+          title: point.name || this.host.formatAxisValue('x', point.xValue),
+          rows: [
+            {
+              name: '观测数',
+              value: String(profile.values.length),
+              color: anchorItem.series.color,
+            },
+            ...profile.summary.map((value: number, i: number) => ({
+              name: summaryLabels[i],
+              value: this.host.formatAxisValue('y', value),
+              color: anchorItem.series.color,
+            })),
+            {
+              name: '峰值密度',
+              value: peak > 0 ? String(Number(peak.toPrecision(3))) : '—',
+              color: this.host.norm.theme.subTextColor,
+            },
+          ],
+        };
+      }
+    }
+    // 蜂群图：一个观测一个点，提示框给「哪一组 + 多少」
+    if (anchorItem && anchorItem.series.type === 'beeswarm') {
+      const point: any = anchorItem.point;
+      if (point.y !== null) {
+        return {
+          title: this.host.formatAxisValue('x', point.xValue),
+          rows: [
+            {
+              name: anchorItem.series.name || this.host.norm.labels.value || '数值',
+              value: this.host.formatAxisValue('y', point.y),
+              color: anchorItem.series.color,
+            },
+          ],
+        };
+      }
+    }
     // 瀑布图：变化量 + 累计
     if (anchorItem && anchorItem.series.type === 'waterfall') {
       const point = anchorItem.point;
