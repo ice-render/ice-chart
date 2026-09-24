@@ -10,6 +10,8 @@ import { SankeySeries } from './SankeySeries';
 import { FunnelSeries } from './FunnelSeries';
 import { GaugeSeries } from './GaugeSeries';
 import { BoxplotSeries } from './BoxplotSeries';
+import { ViolinSeries } from './ViolinSeries';
+import { BeeswarmSeries } from './BeeswarmSeries';
 import { WaterfallSeries } from './WaterfallSeries';
 import { TreemapSeries } from './TreemapSeries';
 import { GraphSeries } from './GraphSeries';
@@ -45,6 +47,8 @@ const BUILTIN: Record<string, SeriesFactory> = {
   funnel: (series, props) => new FunnelSeries(series, props),
   gauge: (series, props) => new GaugeSeries(series, props),
   boxplot: (series, props) => new BoxplotSeries(series, props),
+  violin: (series, props) => new ViolinSeries(series, props),
+  beeswarm: (series, props) => new BeeswarmSeries(series, props),
   waterfall: (series, props) => new WaterfallSeries(series, props),
   treemap: (series, props) => new TreemapSeries(series, props),
   graph: (series, props) => new GraphSeries(series, props),

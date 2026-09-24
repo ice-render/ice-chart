@@ -25,6 +25,7 @@ const pages = [
   'radar',
   'funnel-gauge',
   'boxplot-waterfall',
+  'distribution',
   'treemap',
   'graph',
   'mini-matlab',

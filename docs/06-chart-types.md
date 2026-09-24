@@ -19,7 +19,7 @@
 
 | 场景 `kind` | 类型 | 特点 |
 |---|---|---|
-| `cartesian` | `line` / `area` / `bar` / `scatter` / `bubble` / `heatmap` / `boxplot` / `waterfall` / `function` / `parametric` | 有 x / y 两个坐标轴；支持堆叠、抽样、`virtual` |
+| `cartesian` | `line` / `area` / `bar` / `scatter` / `bubble` / `heatmap` / `boxplot` / `violin` / `beeswarm` / `waterfall` / `function` / `parametric` | 有 x / y 两个坐标轴；支持堆叠、抽样、`virtual` |
 | `polar` | `pie` / `rose` | 无坐标轴；扇区按角度排布 |
 | `radar` | `radar` | 有自己的网格（`RadarGrid`），按指标排布 |
 | `sankey` | `sankey` | 节点 + 连线，两趟布局（`layout/sankey.ts`） |
@@ -48,7 +48,26 @@
 | `scatter` / `bubble` | `symbolSize` 支持逐点解析；密度抽稀按 stride 跳点，**命中仍读全量** |
 | `heatmap` | 数据项是 `[x类目, y类目, 值]`；y 轴按行类目聚合；虚拟形态是矩阵 |
 | `boxplot` | 五数概括 `[min, Q1, 中位, Q3, max]`；给原始观测值会自动算分位数（长度恰好为 5 才当成五数概括） |
+| `violin` / `beeswarm` | 分布组图：前者按 KDE 画密度轮廓，后者把每个观测点避让铺开；与 `boxplot` 同轴叠放就是雨云图 |
 | `waterfall` | 每根柱子从 `base` 长到 `top`，两端都要进 y 数据域 |
+
+### 2.1 分布组图（`violin` / `beeswarm`）
+
+三个类型共用一条类目轴，叠起来就是「雨云图」：`violin` 画密度轮廓、`beeswarm` 画每个观测、
+`boxplot` 画五数概括。四条要点：
+
+1. **密度在数据空间算，避让在像素空间算**。核密度只跟观测值有关（纯函数
+   `computeKdeProfile`，在归一化里算好挂到数据点 `violin` 字段）；蜂群避让算的是
+   「两个半径 r 的圆会不会压在一起」，必须知道比例尺，所以放在组件的 `rebuildPixels()`
+   —— 归一化阶段没有比例尺，硬塞进去就只能自己造一套坐标。两者都各自有纯函数单测。
+2. **命中与渲染必须共用同一份几何**（铁律 1 / 2）：小提琴的命中是**轮廓多边形的内部**
+   （偶奇规则），蜂群是**像素最近邻**。任何「渲染时按 A 画、命中时按 B 判」的写法都会分叉。
+3. **轮廓要整个落在 y 数据域里**：密度网格向样本极值外各延伸 3 个带宽，所以进域取的是
+   **网格端点**而不是观测极值 —— 用观测极值会让两端的尖角被绘图区边缘切平。
+4. **蜂群的宽度必须封顶**：单侧最大偏移取 `min(band × spread / 2, step/2 − r)`，
+   再宽就会压到隔壁分组；槽位排不下时退化成确定性抖动（不引随机源，
+   同一份数据每次画出来一样）。点比像素列多时按散点那条密度规则落步长降墨，
+   **命中与提示框仍读全量**（与 AGENTS.md「密度」那节同一口径）。
 
 ## 3. 圆形与方形类
 

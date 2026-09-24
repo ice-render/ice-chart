@@ -115,7 +115,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / heatmap / sankey / funnel / gauge / boxplot / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
+| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / heatmap / sankey / funnel / gauge / boxplot / **violin（含半宽）/ beeswarm** / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter、**数据域留白 `padding`（默认 5%）** |
@@ -189,6 +189,8 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `pie` | `data: [{ name, value }]` | `innerRadius` 出环形，`roseType` 出玫瑰图；扇区可点图例隐藏 |
 | `radar` | `radar.indicators` + `data: [数值...]` | 一个系列一个多边形，顶点命中 |
 | `boxplot` | `data: [[min, Q1, median, Q3, max]]` 或一组原始观测值 | 恰好 5 个数按五数概括解释，其它长度自动算分位数；命中覆盖整条须 |
+| `violin` | `data: [[观测值...], ...]`（或 `{ name, values }`），带宽走 `violin.bandwidth` | 核密度轮廓（Silverman 带宽的高斯核），`violin.side` 出半小提琴；命中是**轮廓内部**；提示框给观测数与五数概括 |
+| `beeswarm` | `data: [['类目', 值], ...]`（与散点同形），宽度走 `spread` | 同类目里挤在一起的点横向避让一个直径（超容量退化成确定性抖动）；逐点命中；**与 `violin` / `boxplot` 同轴叠放就是雨云图** |
 | `heatmap` | `data: [[x类目, y类目, 数值]]` | y 轴自动变类目轴，颜色线性插值 |
 | `waterfall` | `data: [{ name, value }]`，合计项标 `total: true` | 增/减/合计三色 + 连接虚线 |
 | `funnel` | `data: [{ name, value }]` | 阶段梯形、`minSize` 保护最小阶段、图例按阶段显隐 |
@@ -564,6 +566,7 @@ npm run examples:serve      # http://localhost:5177
 
 示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、多 y 轴叠加、饼图 / 环形图 / 玫瑰图、雷达图、
 热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
+分布组图（小提琴 / 蜂群 / 箱线叠成的雨云图）、
 大数据量（5 万点降采样 / **100 万点列存虚拟化：散点 + 折线**）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
 （运营 / 设备 / 能源 / 物流 / 函数实验）。
 

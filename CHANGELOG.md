@@ -4,6 +4,21 @@
 
 > 下一个版本发布前，改动在这里累积。
 
+### 新特性
+
+- **分布组图：小提琴图 `violin` + 蜂群图 `beeswarm`**（可与已有的 `boxplot` 叠成雨云图）。
+  - `violin`：数据项是**一组原始观测值**（`number[]`，也收 `{ name, values }`），
+    轮廓来自高斯核密度估计 —— 带宽默认走 Silverman 经验法则
+    `0.9 · min(σ, IQR/1.34) · n^(-1/5)`，可用 `violin.bandwidth` / `violin.samples` /
+    `violin.side`（`both` / `left` / `right`）调；提示框给**观测数 + 五数概括 + 峰值密度**。
+  - `beeswarm`：逐点 `[x, y]`（与散点同形），同一类目里挤在一起的点横向避让一个直径；
+    宽度由 `spread`（占一个类目的比例，默认 0.8）封顶，超容量时退化成**确定性**抖动
+    （同一份数据每次画出来一样）；点比像素列多时按散点那条密度规则落墨，命中与提示框仍走全量。
+  - 两者都是**直角坐标场景**，与柱形 / 箱线共用类目轴；命中判定与渲染共用同一份几何
+    （小提琴按轮廓多边形内部，蜂群按像素最近邻）。密度与避让是纯函数
+    （`src/layout/density.ts`：`computeKdeProfile` / `computeBeeswarmOffsets` / `silvermanBandwidth`），
+    可单测。示例页 `examples/distribution.html`。
+
 ## [0.30.12] - 2026-09-24
 
 > 接 0.30.11：平移 / 缩放不再重建点集（10 万点 **3.4 → 1.0ms/tick**）；

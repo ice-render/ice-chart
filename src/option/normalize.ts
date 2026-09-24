@@ -18,6 +18,7 @@ import { chunkAccessors, createChunks } from '../util/chunks';
 import type { SeriesChunks } from '../util/chunks';
 import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, niceDomain, round } from '../util/math';
+import { computeKdeProfile } from '../layout/density';
 import { toTimestamp } from '../scale/TimeScale';
 import { compileExpression } from '../expr/expr';
 import { diagnoseExpression } from '../expr/diagnostics';
@@ -943,6 +944,43 @@ function buildPoints(
     }
     return { points, hasExplicitX };
   }
+  // 小提琴图：数据项是**一组原始观测值**（数组），或 { name, values } 具名分组。
+  // 密度轮廓在这里算好（纯函数），组件只做「数据空间 → 像素」的映射。
+  if (option.type === 'violin') {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i];
+      const named = item && typeof item === 'object' && !Array.isArray(item) ? (item as any) : null;
+      const source: any[] = Array.isArray(item) ? item : named && Array.isArray(named.values) ? named.values : [];
+      const values: number[] = [];
+      for (const entry of source) {
+        const value = toNumber(entry);
+        if (value !== null) values.push(value);
+      }
+      const name = named && named.name !== undefined ? String(named.name) : undefined;
+      const summary = computeBoxplotSummary(values);
+      const config = option.violin || {};
+      const profile = computeKdeProfile(values, { bandwidth: config.bandwidth, samples: config.samples });
+      hasExplicitX = true;
+      points.push({
+        index: i,
+        xValue: name === undefined ? i : name,
+        // 空组没有「值」可锚定（提示框、键盘导航都读 y）
+        y: values.length ? summary[2] : null,
+        raw: item,
+        base: 0,
+        top: values.length ? summary[2] : 0,
+        name,
+        violin: {
+          values,
+          bandwidth: profile.bandwidth,
+          grid: profile.grid,
+          density: profile.density,
+          summary,
+        },
+      });
+    }
+    return { points, hasExplicitX };
+  }
   // 瀑布图：base/top 由累计值推导（见 applyWaterfall）
   if (option.type === 'waterfall') {
     for (let i = 0; i < raw.length; i++) {
@@ -1416,7 +1454,16 @@ function buildVirtualGrid(option: SeriesOption, seriesIndex: number): SeriesGrid
 function resolveXAxisType(option: AxisOption, series: InternalSeries[]): 'linear' | 'category' | 'time' | 'log' {
   if (option.type) return option.type;
   if (
-    series.some((s) => s.type === 'bar' || s.type === 'heatmap' || s.type === 'boxplot' || s.type === 'waterfall')
+    series.some(
+      (s) =>
+        s.type === 'bar' ||
+        s.type === 'heatmap' ||
+        s.type === 'boxplot' ||
+        s.type === 'waterfall' ||
+        // 分布组图：观测值按**组**排布，x 天然是类目（数值 x 也是「第几组」的意思）
+        s.type === 'violin' ||
+        s.type === 'beeswarm'
+    )
   )
     return 'category';
   const values: any[] = [];
@@ -2142,6 +2189,11 @@ function buildYDomain(series: InternalSeries[], axisIndex: number, option: AxisO
       // 箱线图的须（min/max）也要进数据域
       if (p.boxplot) {
         values.push(p.boxplot[0], p.boxplot[4]);
+      }
+      // 小提琴图按**密度网格的端点**进域（不是观测极值）：轮廓比观测范围宽出 3 个带宽，
+      // 用观测极值会让两端的尖角被绘图区边缘切平
+      if (p.violin && p.violin.grid.length) {
+        values.push(p.violin.grid[0], p.violin.grid[p.violin.grid.length - 1]);
       }
       if (s.option.stack) {
         values.push(p.base);

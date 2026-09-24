@@ -41,6 +41,27 @@ export interface DataPoint {
   size?: number;
   /** 箱线图的 [min, Q1, median, Q3, max]。 */
   boxplot?: [number, number, number, number, number];
+  /** 小提琴图的密度轮廓（归一化阶段算好，组件只做像素映射）。 */
+  violin?: ViolinProfile;
+}
+
+/**
+ * 小提琴图的密度轮廓。
+ *
+ * `grid` / `density` 都在**数据空间**里（y 是观测值，密度单位 1/y）；
+ * 组件负责把它映射成像素轮廓，所以归一化里不需要比例尺 —— 这也是它能单测的原因。
+ */
+export interface ViolinProfile {
+  /** 原始观测值（提示框报观测数、与蜂群叠画都读它）。 */
+  values: number[];
+  /** 实际使用的带宽。 */
+  bandwidth: number;
+  /** 评估网格（升序）。 */
+  grid: number[];
+  /** 与 `grid` 一一对应的密度值。 */
+  density: number[];
+  /** [min, Q1, median, Q3, max]，与箱线图同一口径（提示框复用）。 */
+  summary: [number, number, number, number, number];
 }
 
 /** 极坐标布局：圆心与半径（图表坐标系）。 */

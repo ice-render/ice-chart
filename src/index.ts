@@ -127,6 +127,8 @@ export type { FunnelSeriesCoord } from './components/series/FunnelSeries';
 export { GaugeSeries } from './components/series/GaugeSeries';
 export type { GaugeSeriesCoord } from './components/series/GaugeSeries';
 export { BoxplotSeries } from './components/series/BoxplotSeries';
+export { ViolinSeries } from './components/series/ViolinSeries';
+export { BeeswarmSeries } from './components/series/BeeswarmSeries';
 export { WaterfallSeries } from './components/series/WaterfallSeries';
 export { TreemapSeries } from './components/series/TreemapSeries';
 export type { TreemapSeriesCoord } from './components/series/TreemapSeries';

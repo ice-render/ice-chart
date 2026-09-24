@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 分布组图（小提琴 / 蜂群 / 箱线）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>分布组图：小提琴 / 蜂群 / 箱线</h1>
+    <p class="lead">
+      左图是「雨云图」：<code>violin</code> 画核密度轮廓（Silverman 带宽的高斯核，
+      纯函数 <code>computeKdeProfile</code>），<code>beeswarm</code> 把每个观测点按碰撞避让铺开
+      （同高度依次向两侧错开一个直径，超容量时退化成确定性抖动），
+      <code>boxplot</code> 复用已有的五数概括。三者同一条类目轴、同一份比例尺，悬停各自命中。
+      右图演示轮廓参数：<code>violin.bandwidth</code> 控制平滑程度、<code>violin.side</code> 出半小提琴。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="raincloud" width="620" height="440"></canvas></div>
+      <div class="card"><canvas id="shape" width="620" height="440"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      /** 用同一个种子生成观测值，保证每次刷新看到的形状一致（例子里不引入随机源）。 */
+      const sample = (seed, base, spread, n) => {
+        const out = [];
+        let s = seed;
+        for (let i = 0; i < n; i++) {
+          s = (s * 1103515245 + 12345) % 2147483648;
+          const r1 = s / 2147483648;
+          s = (s * 1103515245 + 12345) % 2147483648;
+          const r2 = s / 2147483648;
+          // Box-Muller：要的是「像真实观测」的红噪声，不是均匀分布
+          const z = Math.sqrt(-2 * Math.log(r1 || 1e-9)) * Math.cos(2 * Math.PI * r2);
+          out.push(Math.round((base + z * spread) * 10) / 10);
+        }
+        return out;
+      };
+
+      const groups = ['支付网关', '订单中心', '搜索服务', '推荐引擎'];
+      const observations = [sample(7, 240, 52, 60), sample(23, 180, 34, 60), sample(41, 300, 96, 60), sample(59, 150, 22, 60)];
+      const summaryOf = (values) => {
+        const sorted = values.slice().sort((a, b) => a - b);
+        const at = (p) => sorted[Math.min(sorted.length - 1, Math.round((sorted.length - 1) * p))];
+        return [sorted[0], at(0.25), at(0.5), at(0.75), sorted[sorted.length - 1]];
+      };
+
+      // ---- 雨云图：小提琴（密度）+ 蜂群（每个观测）+ 箱线（五数概括）
+      const raincloud = ICEChart.createChart('raincloud', {
+        title: { text: '各渠道接口响应时长分布' },
+        theme: 'light',
+        legend: { show: true, position: 'bottom' },
+        xAxis: { type: 'category', data: groups },
+        yAxis: { name: '毫秒' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: true, duration: 560, easing: 'easeOutCubic' },
+        series: [
+          { id: 'density', type: 'violin', name: '密度轮廓', barWidth: 0.86, data: observations },
+          {
+            id: 'box',
+            type: 'boxplot',
+            name: '五数概括',
+            barWidth: 0.14,
+            data: observations.map(summaryOf),
+          },
+          {
+            id: 'points',
+            type: 'beeswarm',
+            name: '观测点',
+            symbolSize: 5,
+            spread: 0.8,
+            data: observations.flatMap((values, gi) => values.map((value) => [groups[gi], value])),
+          },
+        ],
+      });
+
+      // ---- 轮廓参数：双峰（带宽过小会碎成尖刺）+ 半小提琴
+      // 带宽与 side 都是**系列级**参数，所以三个演示各占一个类目槽（其余槽给空组）。
+      const bimodal = [30, 31, 32, 33, 70, 71, 72, 73, 30.5, 71.5, 31.5, 72.5];
+      const shape = ICEChart.createChart('shape', {
+        title: { text: '带宽与半宽形态' },
+        theme: 'light',
+        legend: { show: true, position: 'bottom' },
+        xAxis: { type: 'category', data: ['双峰（自动带宽）', '双峰（带宽 ×0.3）', '半小提琴'] },
+        // 三个演示的数值都在 28~80，给个明确的量程免得 niceDomain 取到 -50~150 那种空轴
+        yAxis: { name: '数值', min: 0, max: 90 },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [
+          {
+            id: 'bimodal',
+            type: 'violin',
+            name: '自动带宽',
+            barWidth: 0.7,
+            data: [bimodal, [], []],
+          },
+          {
+            id: 'narrow',
+            type: 'violin',
+            name: '带宽 ×0.3',
+            barWidth: 0.7,
+            violin: { bandwidth: 0.35, samples: 96 },
+            data: [[], bimodal, []],
+          },
+          {
+            id: 'half',
+            type: 'violin',
+            name: '左半宽',
+            barWidth: 0.7,
+            violin: { side: 'left' },
+            data: [[], [], [48, 49, 50, 51, 52, 53, 54, 55]],
+          },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      raincloud.on('item:hover', (p) => write(`雨云 hover  ${p.seriesName} / ${p.xValue} → ${p.value}`));
+      shape.on('item:hover', (p) => write(`轮廓 hover  ${p.seriesName} / ${p.xValue}`));
+
+      window.__charts = { raincloud, shape };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>
