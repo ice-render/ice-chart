@@ -1519,12 +1519,35 @@ function sameCategories(a: SeriesRawPoints, b: SeriesRawPoints): boolean {
   return true;
 }
 
+/**
+ * 把声明了 `xFrom` 的系列从类目合并里摘出去（见 `SeriesOption.xFrom`）。
+ *
+ * 一条声明只在「被引用的系列确实在、且两者点数相同」时生效 —— 应用抄错了只会退回合并
+ * （慢一点），不会给出一张错的轴。派生系列（均线 / MACD / 成交量）在百万点规模下
+ * 正是靠这条把「每帧 N 张 1M 表的合并」整个省掉。
+ */
+function withoutAliasedX(series: InternalSeries[]): InternalSeries[] {
+  const hasAlias = series.some((s) => {
+    const from = (s.option as any) && (s.option as any).xFrom;
+    return typeof from === 'string' && from.length > 0;
+  });
+  if (!hasAlias) return series;
+  return series.filter((s) => {
+    const from = (s.option as any) && (s.option as any).xFrom;
+    if (typeof from !== 'string' || !from) return true;
+    const source = series.find((item) => item.id === from);
+    if (!source) return true;
+    return source.pointCount !== s.pointCount;
+  });
+}
+
 function buildXDomain(
   type: string,
   series: InternalSeries[],
   option: AxisOption,
   cache?: CategoryDomainCache
 ): { domain: any[]; categories: any[]; categoryLookup?: (key: string) => number } {
+  if (type === 'category') series = withoutAliasedX(series);
   /** 类目域的指纹：任一存储变了（长度 / 新增计数 / 类目表大小 / 首末键）就不再命中。 */
   const cacheKey = (): string => {
     let key = type;

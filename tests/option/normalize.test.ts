@@ -293,6 +293,51 @@ describe('虚拟（列存）系列（scatter）', () => {
     });
   });
 
+  /**
+   * `xFrom`：派生系列声明「我的 x 与主系列逐项相同」，类目轴就不必把这张表再合并一遍。
+   *
+   * 百万点规模下合并是每帧最大的一笔（1M × N 次 `String()` + 哈希）。声明只在
+   * 「被引用系列在、且点数相同」时生效 —— 抄错了只会退回合并，不会给出错的轴。
+   */
+  describe('xFrom（派生系列不参与类目合并）', () => {
+    const rows = [
+      { x: 'a', y: 1 },
+      { x: 'b', y: 2 },
+    ];
+
+    it('声明生效时轴域就等于被引用系列的那张表', () => {
+      const norm = normalizeOption({
+        xAxis: { type: 'category' },
+        series: [
+          { id: 'k', type: 'line', virtual: true, data: rows },
+          { id: 'ma', type: 'line', virtual: true, xFrom: 'k', data: rows.map((r) => ({ x: r.x, y: r.y * 2 })) },
+        ],
+      } as any);
+      expect(norm.xAxis.domain).toEqual(['a', 'b']);
+      expect(norm.series[1].pointCount).toBe(2);
+    });
+
+    it('点数对不上时忽略声明，退回合并（慢一点，但轴是对的）', () => {
+      const longer = rows.concat([{ x: 'c', y: 3 }]);
+      const norm = normalizeOption({
+        xAxis: { type: 'category' },
+        series: [
+          { id: 'k', type: 'line', virtual: true, data: rows },
+          { id: 'ma', type: 'line', virtual: true, xFrom: 'k', data: longer },
+        ],
+      } as any);
+      expect(norm.xAxis.domain).toEqual(['a', 'b', 'c']);
+    });
+
+    it('被引用的系列不存在时也忽略', () => {
+      const norm = normalizeOption({
+        xAxis: { type: 'category' },
+        series: [{ id: 'ma', type: 'line', virtual: true, xFrom: 'nope', data: rows }],
+      } as any);
+      expect(norm.xAxis.domain).toEqual(['a', 'b']);
+    });
+  });
+
   it('热力图：元组输入落成稠密矩阵（类目顺序即行列顺序）', () => {
     const norm = normalizeOption({
       xAxis: { type: 'category' },
