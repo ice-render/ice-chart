@@ -490,6 +490,10 @@ chart.destroy();
 
 ## 架构
 
+> 要改这个库的代码，请先读 **[`docs/`](./docs/README.md)** —— 那里是技术与架构文档的索引：
+> 架构与分层、更新流水线、渲染与组件契约、交互与命中、数据形态与大数据、图表类型与场景坐标、
+> 主题与无障碍、测试与发版。仓库纪律（铁律）在 [`AGENTS.md`](./AGENTS.md)。
+
 ### 序列化：持久化的单位是 option 快照，不是组件树
 
 - `chart.toJSON()` 产出 `{ version, option, view, hidden, hiddenSlices }`：
