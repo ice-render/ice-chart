@@ -52,6 +52,7 @@ const pages = [
   'boxplot-waterfall',
   'distribution',
   'matrix',
+  'hexbin',
   'treemap',
   'graph',
   'mini-matlab',

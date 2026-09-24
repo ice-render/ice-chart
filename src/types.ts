@@ -89,6 +89,7 @@ export type BuiltinSeriesType =
   | 'pie'
   | 'radar'
   | 'heatmap'
+  | 'hexbin'
   | 'sankey'
   | 'funnel'
   | 'gauge'
@@ -191,6 +192,18 @@ export interface WaterfallOption {
   totalColor?: string;
   /** 是否画相邻柱子之间的连接虚线，默认 true。 */
   connector?: boolean;
+}
+
+/** 六边形分箱配置。 */
+export interface HexbinOption {
+  /** 六边形外接圆半径（设备像素），默认 14；缩放时会按它重新分格。 */
+  radius?: number;
+  /** 聚合口径：`count`（默认，数点）/ `sum` / `mean` / `max`（后三者取数据项的第三个值，缺失按 1 算）。 */
+  aggregate?: 'count' | 'sum' | 'mean' | 'max';
+  /** 稀（低值）一端的颜色，默认浅蓝。 */
+  minColor?: string;
+  /** 密（高值）一端的颜色，默认深蓝。 */
+  maxColor?: string;
 }
 
 /** 小提琴图配置。 */
@@ -493,6 +506,13 @@ export interface SeriesOption {
   roseType?: 'radius' | 'area' | false;
   /** 热力图配色（默认从浅到深）。 */
   heatmap?: { minColor?: string; maxColor?: string };
+  /**
+   * 六边形分箱（`type: 'hexbin'`）：把点云聚成蜂窝格。
+   *
+   * 数据形态与散点一致（`[[x, y]]` 或 `[[x, y, value]]`，第三个数当权重）。
+   * 分箱在**像素空间**做（缩放会重新分格），半径是像素口径。
+   */
+  hexbin?: HexbinOption;
   /** 瀑布图配色与连接线（也可写在 option.waterfall 上，两者等价，series 优先）。 */
   waterfall?: WaterfallOption;
   /**

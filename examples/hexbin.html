@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 六边形分箱（hexbin）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>六边形分箱（hexbin）</h1>
+    <p class="lead">
+      点太密的时候，散点会糊成一片、看不出「哪里是一团」。<code>hexbin</code> 把点云聚到蜂窝格上：
+      格子的深浅 = 该格的计数（或 <code>hexbin.aggregate</code> 指定的求和 / 均值 / 最大值）。
+      分箱在**像素空间**做（所以缩放会重新分格），半径由 <code>hexbin.radius</code> 控制；
+      **命中是 O(1)**（像素 → 轴向坐标一步闭式解），十万点也照样瞬间响应。
+      左图与右图是同一份点云：左边细格看细节，右边粗格看大团，配色也可配。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="fine" width="620" height="460"></canvas></div>
+      <div class="card"><canvas id="coarse" width="620" height="460"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      /** 三团点 + 一条斜带：确定性伪随机，刷新看到的形状一致。 */
+      const cloud = () => {
+        const points = [];
+        let seed = 20260924;
+        const noise = () => {
+          seed = (seed * 1103515245 + 12345) % 2147483648;
+          return seed / 2147483648 - 0.5;
+        };
+        const blob = (cx, cy, spread, n) => {
+          for (let i = 0; i < n; i++) points.push([cx + noise() * spread, cy + noise() * spread * 0.8]);
+        };
+        blob(30, 35, 14, 900);
+        blob(70, 68, 18, 700);
+        blob(48, 18, 10, 350);
+        for (let i = 0; i < 300; i++) points.push([35 + i * 0.1 + noise() * 3, 50 + i * 0.08 + noise() * 3]);
+        return points;
+      };
+      const data = cloud();
+
+      const fine = ICEChart.createChart('fine', {
+        title: { text: '细格（radius 12）：看细节' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { name: 'x' },
+        yAxis: { name: 'y' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [{ id: 'density', type: 'hexbin', name: '密度', hexbin: { radius: 12 }, data }],
+      });
+
+      const coarse = ICEChart.createChart('coarse', {
+        title: { text: '粗格（radius 24）+ 自定义配色' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { name: 'x' },
+        yAxis: { name: 'y' },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [
+          {
+            id: 'density',
+            type: 'hexbin',
+            name: '密度',
+            hexbin: { radius: 24, minColor: '#fef3c7', maxColor: '#b45309' },
+            data,
+          },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      fine.on('item:hover', (p) => write(`细格 hover  ${p.value}`));
+      coarse.on('item:hover', (p) => write(`粗格 hover  ${p.value}`));
+
+      window.__charts = { fine, coarse };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

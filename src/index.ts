@@ -120,6 +120,7 @@ export type { PolarSeriesCoord } from './components/series/PieSeries';
 export { RadarSeries } from './components/series/RadarSeries';
 export type { RadarSeriesCoord } from './components/series/RadarSeries';
 export { HeatmapSeries, mixColors } from './components/series/HeatmapSeries';
+export { HexbinSeries } from './components/series/HexbinSeries';
 export { SankeySeries } from './components/series/SankeySeries';
 export type { SankeySeriesCoord } from './components/series/SankeySeries';
 export { FunnelSeries } from './components/series/FunnelSeries';

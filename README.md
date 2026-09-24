@@ -115,7 +115,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / heatmap / sankey / funnel / gauge / boxplot / **violin（含半宽）/ beeswarm** / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
+| 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / heatmap / **hexbin（蜂窝分箱）** / sankey / funnel / gauge / boxplot / **violin（含半宽）/ beeswarm** / waterfall / treemap / graph / function / parametric | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图） / 雷达 / 桑基图 | 按系列类型自动切换场景 |
 | 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter、**数据域留白 `padding`（默认 5%）** |
@@ -569,6 +569,7 @@ npm run examples:serve      # http://localhost:5177
 热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
 分布组图（小提琴 / 蜂群 / 箱线叠成的雨云图）、
 面板矩阵（小倍数：2×3 共享比例尺 + 主图/窄条权重）、
+六边形分箱（点云聚成蜂窝格，细格/粗格对照）、
 大数据量（5 万点降采样 / **100 万点列存虚拟化：散点 + 折线**）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
 （运营 / 设备 / 能源 / 物流 / 函数实验）。
 
