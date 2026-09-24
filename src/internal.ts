@@ -586,10 +586,20 @@ export function appendRawItems(store: SeriesRawPoints, items: any[], capacity: n
     const count = store.categoryCounts.get(key) ?? 0;
     if (count <= 1) {
       store.categoryCounts.delete(key);
-      const at = store.categories.findIndex((value) => String(value) === key);
       const base = store.categories.length ? store.categorySeq.get(String(store.categories[0])) : undefined;
       const removed = store.categorySeq.get(key);
       store.categorySeq.delete(key);
+      /**
+       * 下标优先**用序号推**（`序号 − 首项序号`，无空洞时就是它），推不出来 / 对不上才退回线性找。
+       *
+       * 为什么要改：`findIndex` 会对**整张表**逐项 `String()` 比较 —— 100 万类目的滚动窗口
+       * 每追加一根都要扫一遍（实测 70ms/3 秒，占那时段的一小半）。序号推算是一次减法。
+       * 空洞（中间类目被淘汰留下的）会让推出来的位置对不上，那时照旧线性找 + 就地压紧。
+       */
+      let at = removed !== undefined && base !== undefined ? removed - base : -1;
+      if (at < 0 || at >= store.categories.length || String(store.categories[at]) !== key) {
+        at = store.categories.findIndex((value) => String(value) === key);
+      }
       if (at >= 0) {
         store.categories.splice(at, 1);
         // 摘掉的**不是首项**时会留下「序号空洞」（序号是单调分配的，被摘的那一号没人补），
