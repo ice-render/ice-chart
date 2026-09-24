@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 面板矩阵（小倍数）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>面板矩阵（小倍数）</h1>
+    <p class="lead">
+      左图 2×3 六个面板共享同一份比例尺（<code>matrix: { rows: 2, columns: 3 }</code> +
+      <code>series[].panel</code>），轴只画外圈：每行一份 y 轴、每列一份 x 轴。
+      悬停、框选、缩放都按**指针所在面板**解析 —— 在第 6 块面板上悬停，提示框只列那块的系列。
+      右图演示权重列 <code>columns: [4, 1]</code>（主图 + 右侧窄条），也是「主图 + 边际图」的几何底座。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="small" width="960" height="560"></canvas></div>
+      <div class="card"><canvas id="weighted" width="620" height="440"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+      const channels = ['直营网店', '经销渠道', '企业采购', '直播带货', '海外市场', '线下门店'];
+
+      /** 确定性伪随机：例子里不引随机源，刷新看到的形状一致。 */
+      const walk = (seed, base, amp, n) => {
+        const out = [];
+        let s = seed;
+        for (let i = 0; i < n; i++) {
+          s = (s * 1103515245 + 12345) % 2147483648;
+          const noise = s / 2147483648 - 0.5;
+          out.push(Math.round(base + amp * (Math.sin((i / n) * Math.PI * 2 + seed % 7) + noise)));
+        }
+        return out;
+      };
+
+      const series = channels.map((name, i) => ({
+        id: `ch-${i}`,
+        type: 'line',
+        name,
+        panel: i,
+        smooth: true,
+        lineWidth: 2,
+        data: walk(11 + i * 7, 120 + i * 25, 40 + i * 6, months.length),
+      }));
+
+      const small = ICEChart.createChart('small', {
+        title: { text: '六个渠道的月度销量（共享比例尺）' },
+        theme: 'light',
+        legend: { show: false },
+        xAxis: { type: 'category', data: months },
+        yAxis: { name: '万元' },
+        matrix: { rows: 2, columns: 3, gap: 12 },
+        tooltip: { trigger: 'axis' },
+        animation: { enabled: false },
+        series,
+      });
+
+      const weighted = ICEChart.createChart('weighted', {
+        title: { text: '主图 + 窄条（columns: [4, 1]）' },
+        theme: 'light',
+        legend: { show: true, position: 'bottom' },
+        xAxis: { type: 'category', data: months },
+        yAxis: { name: '万元' },
+        matrix: { rows: 1, columns: [4, 1], gap: 10 },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [
+          { id: 'trend', type: 'line', name: '总销量', panel: 0, smooth: true, data: walk(101, 420, 90, months.length) },
+          { id: 'bars', type: 'bar', name: '总量柱', panel: 1, barWidth: 0.55, data: walk(101, 420, 90, months.length) },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      small.on('item:hover', (p) => write(`小倍数 hover  ${p.seriesName} / ${p.xValue} → ${p.value}`));
+      weighted.on('item:hover', (p) => write(`窄条 hover  ${p.seriesName} / ${p.xValue} → ${p.value}`));
+      small.on('brush:end', (r) => r && write(`小倍数 框选 x: ${r.x0} ~ ${r.x1}`));
+
+      window.__charts = { small, weighted };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

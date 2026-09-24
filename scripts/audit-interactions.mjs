@@ -50,6 +50,7 @@ const pages = [
   'radar',
   'funnel-gauge',
   'boxplot-waterfall',
+  'matrix',
   'treemap',
   'graph',
   'mini-matlab',

@@ -433,6 +433,9 @@ export class InteractionController {
         const content = this.buildTooltipContent(state);
         const anchorPixel: [number, number] =
           state.kind === 'axis' ? [state.column.pixelX, anchor.pixel[1]] : [anchor.pixel[0], anchor.pixel[1]];
+        // 面板矩阵：避让边界取**指针所在的那块面板**（否则第一行面板的提示框会压住自己的准星标签）
+        const panel = this.resolver.panelAt(anchorPixel[0], anchorPixel[1]);
+        tooltip.plot = panel >= 0 ? this.resolver.panelRect(panel) : null;
         tooltip.show(content, anchorPixel);
       }
     }

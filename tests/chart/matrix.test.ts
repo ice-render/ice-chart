@@ -176,4 +176,46 @@ describe('面板矩阵（引擎集成）', () => {
     // x 允许越过这块面板（并集语义）
     expect(brush.rect.x + brush.rect.width).toBeGreaterThan(panel.x + panel.width);
   });
+
+  it('每列都有自己的 x 轴，且都画出抽稀后的刻度标签', async () => {
+    const c = await mount(matrixOption());
+    const axes: any[] = (c as any).panelAxisX;
+    expect(axes).toHaveLength(3);
+    for (const axis of axes) {
+      expect(axis.plot).toBeTruthy();
+      const drawn = (axis.lastTicks || []).filter((tick: any) => tick.drawn);
+      expect(drawn.length).toBeGreaterThan(0);
+    }
+    // 抽稀按最窄列算：12 个类目 / 每列约 190px → 每列最多 3 个标签
+    const kept = (axes[0].lastTicks || []).filter((tick: any) => tick.drawn);
+    expect(kept.length).toBeLessThanOrEqual(4);
+    // 每列的刻点都落在**自己那一列**的面板里（不能画到隔壁面板上）
+    for (let column = 0; column < 3; column++) {
+      const panel = c.layout.panels[3 + column];
+      for (const tick of (axes[column].lastTicks || []).filter((t: any) => t.drawn)) {
+        expect(tick.pos).toBeGreaterThanOrEqual(panel.x - 0.5);
+        expect(tick.pos).toBeLessThanOrEqual(panel.x + panel.width + 0.5);
+      }
+    }
+  });
+
+  it('窄条不画 x 轴（它和主图共享一条 x 轴，重复标签只会挤成一团）', async () => {
+    const c = await mount({
+      legend: { show: false },
+      xAxis: { type: 'category', data: ['一', '二', '三', '四', '五', '六', '七', '八'] },
+      // 9:1 —— 窄条只有 ~87px，放不下两个标签（阈值 128px）
+      matrix: { rows: 1, columns: [9, 1], gap: 10 },
+      animation: { enabled: false },
+      series: [
+        { id: 'main', type: 'line', name: '趋势', panel: 0, data: [1, 3, 2, 5, 4, 6, 5, 7] },
+        { id: 'side', type: 'bar', name: '窄条', panel: 1, data: [1, 3, 2, 5, 4, 6, 5, 7] },
+      ],
+    });
+    const axes: any[] = (c as any).panelAxisX;
+    expect(axes).toHaveLength(2);
+    expect(axes[1].state.display).toBe(false);
+    // 主图（宽列）保留足够多的标签
+    const drawn = (axes[0].lastTicks || []).filter((tick: any) => tick.drawn);
+    expect(drawn.length).toBeGreaterThanOrEqual(3);
+  });
 });

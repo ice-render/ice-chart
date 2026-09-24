@@ -1,7 +1,7 @@
 import { ChartComponent } from './ChartComponent';
 import { roundRect } from './Legend';
 import type { ChartTheme, TooltipOption } from '../types';
-import type { ChartLayout } from '../internal';
+import type { ChartLayout, Rect } from '../internal';
 import { measureTextWidth } from '../util/text';
 import { shouldAnimate } from '../animation/motion';
 
@@ -24,6 +24,11 @@ export class Tooltip extends ChartComponent {
   public theme: ChartTheme | null = null;
   public option: TooltipOption = {};
   public layout: ChartLayout | null = null;
+  /**
+   * 提示框的避让边界；`null` = 整块绘图区（默认路径）。
+   * 面板矩阵里由 InteractionController 设成指针所在的那块面板。
+   */
+  public plot: Rect | null = null;
   public content: TooltipContent | null = null;
   public anchor: [number, number] = [0, 0];
   /** 是否让提示框跟随指针（axis 触发器常关掉，让它固定在数据列上方）。 */
@@ -132,7 +137,12 @@ export class Tooltip extends ChartComponent {
     const offset: [number, number] = option.offset || [14, 14];
 
     const bounds = this.layout.canvas;
-    const plot = this.layout.plot;
+    /**
+     * 避让的边界：默认是整块绘图区；面板矩阵里由 InteractionController 设成
+     * **指针所在的那块面板** —— 否则第一行面板里的提示框会以「整张图的下沿」为准，
+     * 一路压住那块面板自己的十字准星数值标签（审计抓到的 `tooltip-over-axis-label`）。
+     */
+    const plot = this.plot || this.layout.plot;
     let x = this.anchor[0] + offset[0];
     let y = this.anchor[1] + offset[1];
     if (x + width > bounds.width) x = this.anchor[0] - offset[0] - width;

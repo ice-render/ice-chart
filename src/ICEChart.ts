@@ -1953,7 +1953,14 @@ export class ICEChart {
       const component = this.panelAxisX[c];
       const panelIndex = Math.min(panels.length - 1, (rows - 1) * columns + c);
       const scales = this.panelScales[panelIndex] || this.panelScales[0];
-      component.setState({ width: canvas.width, height: canvas.height, display: multi });
+      /**
+       * 太窄的列不画 x 轴：它和主图共享同一条 x 轴，重复一遍标签只会和隔壁挤在一起
+       * （主图 + 窄条那类权重布局正是这样）。
+       * 128px = 两条「舒适间隔」（64px，抽稀那条门槛）—— 放不下两个标签就没有画的必要。
+       */
+      const columnPanel = panels[panelIndex];
+      const tooNarrow = multi && !!columnPanel && columnPanel.width < 128;
+      component.setState({ width: canvas.width, height: canvas.height, display: multi && !tooNarrow });
       component.layout = layout;
       component.theme = norm.theme;
       component.plot = multi ? panels[panelIndex] : null;

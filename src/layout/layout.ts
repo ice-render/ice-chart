@@ -116,12 +116,28 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   // 抽稀对**隐藏的 x 轴**同样要做：垂直网格线读的就是这张表（`labels[i] === ''` = 不画）。
   // 轴藏起来了只是不画标签，网格该在哪还是在哪 —— 多 pane 的 x 轴都藏了，网格却要能对齐。
   if (norm.kind === 'cartesian') {
+    /**
+     * 面板矩阵：每个面板只有「一列那么宽」，抽稀要按**一列的宽度**算 ——
+     * 按并集宽度算的话，六个面板会各自把十几个标签画满，
+     * 相邻面板的标签带直接挤在一起（实测 2×3 的 12 类目就是这副样子）。
+     *
+     * 取**最宽的一列**：等分网格下与「每列宽度」相同；权重列（主图 + 窄条）下保住主图的标签密度，
+     * 真正放不下标签的窄列由 Chart 直接不画轴（见 `syncPanelComponents` 的窄列判定）。
+     */
+    const columns = norm.matrix ? norm.matrix.columns : null;
+    let thinningWidth = plot.width;
+    if (norm.matrix && columns) {
+      const usable = plot.width - norm.matrix.gap * (columns.length - 1);
+      const total = columns.reduce((a, b) => a + b, 0);
+      thinningWidth = Math.max(...columns.map((weight) => (usable * weight) / total));
+    }
     thinXAxisLabels(
       xAxisLayout,
       {
-        axisLength: plot.width,
-        leftRoom: plot.x,
-        rightRoom: Math.max(0, canvas.width - plot.x - plot.width),
+        axisLength: thinningWidth,
+        // 面板内首末标签两侧没有余量（面板边界就是裁剪边界）；单面板时沿用旧的余量口径
+        leftRoom: norm.matrix ? 0 : plot.x,
+        rightRoom: norm.matrix ? 0 : Math.max(0, canvas.width - plot.x - plot.width),
       },
       ctx,
       norm.theme.fontSize,
