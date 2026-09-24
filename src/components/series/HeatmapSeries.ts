@@ -57,8 +57,7 @@ export class HeatmapSeries extends SeriesBase {
 
   /** 配色（普通与列存两条绘制路径共用，别各写一份）。 */
   private heatColors(): { from: string; to: string } {
-    const option = this.series.option.heatmap || {};
-    return { from: option.minColor || '#EFF6FF', to: option.maxColor || this.series.color };
+    return heatColorRange(this.series.option.heatmap, this.series.color);
   }
 
   private cellRectAt(index: number): Rect | null {
@@ -368,6 +367,20 @@ export class HeatmapSeries extends SeriesBase {
 }
 
 /** 两个十六进制颜色之间做线性插值。 */
+/**
+ * 「浅 → 深」的默认色阶：深端用系列色（来自主题色板），浅端是同一个浅蓝。
+ *
+ * 热力图与六边形分箱共用（两处各自写一份默认色就会各自维护一个写死色值，
+ * 取色棘轮会同时盯着两个地方）；要换默认观感就换这一处。
+ */
+export function heatColorRange(
+  option: { minColor?: string; maxColor?: string } | undefined,
+  seriesColor: string
+): { from: string; to: string } {
+  const config = option || {};
+  return { from: config.minColor || '#EFF6FF', to: config.maxColor || seriesColor };
+}
+
 export function mixColors(from: string, to: string, ratio: number): string {
   const a = parseHex(from);
   const b = parseHex(to);

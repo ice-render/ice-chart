@@ -585,6 +585,27 @@ export class InteractionController {
         };
       }
     }
+    /**
+     * 六边形分箱：交互单位是**格子**（不是某个原始点）—— 提示框给格子的聚合值与点数。
+     *
+     * 格子是像素空间的产物（缩放会重新分格），不在 `series.points` 里，所以这里
+     * 从组件拿（`binAt(hitIndex)`）；命中的 `point.index` 就是格子下标。
+     */
+    if (anchorItem && anchorItem.series.type === 'hexbin') {
+      const component: any = this.resolver.seriesComponentOf(anchorItem.series);
+      const bin = component && typeof component.binAt === 'function' ? component.binAt(anchorItem.point.index) : null;
+      if (bin) {
+        const option: any = anchorItem.series.option.hexbin || {};
+        const label = option.aggregate === 'sum' ? '合计' : option.aggregate === 'mean' ? '均值' : option.aggregate === 'max' ? '最大' : '点数';
+        return {
+          title: `格 (${bin.q}, ${bin.r})`,
+          rows: [
+            { name: label, value: String(Number(bin.value.toPrecision(4))), color: anchorItem.series.color },
+            { name: '点数', value: String(bin.count), color: this.host.norm.theme.subTextColor },
+          ],
+        };
+      }
+    }
     // 小提琴图：组名 + 观测数与五数概括（读的是归一化算好的密度轮廓，不重算）
     if (anchorItem && anchorItem.series.type === 'violin') {
       const point: any = anchorItem.point;
