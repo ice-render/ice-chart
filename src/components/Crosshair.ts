@@ -1,6 +1,6 @@
 import { ChartComponent } from './ChartComponent';
 import type { ChartTheme, CrosshairOption } from '../types';
-import type { ChartLayout } from '../internal';
+import type { ChartLayout, Rect } from '../internal';
 import { shouldAnimate } from '../animation/motion';
 
 /**
@@ -22,6 +22,12 @@ export function crosshairGlideDuration(distance: number, maxDuration: number, sp
 /** 十字准星：跟随活动数据列的辅助线 + 坐标轴数值标签。 */
 export class Crosshair extends ChartComponent {
   public layout: ChartLayout | null = null;
+  /**
+   * 准星画在哪块绘图区里；`null` = 图表整体的 `layout.plot`（默认路径）。
+   * 面板矩阵里由 InteractionController 设成**指针所在面板** —— 准星只在那块里画，
+   * 否则一条线会横穿所有面板，指代不清。
+   */
+  public plot: Rect | null = null;
   public theme: ChartTheme | null = null;
   public option: CrosshairOption = {};
   public pixelX: number | null = null;
@@ -129,7 +135,7 @@ export class Crosshair extends ChartComponent {
     this.lastChipRects = [];
     if (!this.layout || !this.theme || this.option.show === false || this.option.type === 'none') return;
     if (this.pixelX === null && this.pixelY === null) return;
-    const { plot } = this.layout;
+    const plot = this.plot || this.layout.plot;
     const ctx = this.ctx;
     const unit = this.unit();
     const axis = this.option.axis || 'x';

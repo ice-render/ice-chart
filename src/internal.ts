@@ -944,6 +944,8 @@ export interface ActiveColumn {
   xValue: any;
   /** 图表坐标系内的 x 像素。 */
   pixelX: number;
+  /** 这一列属于哪个面板（没有面板矩阵时恒为 0）。 */
+  panel: number;
   items: ActiveItem[];
 }
 

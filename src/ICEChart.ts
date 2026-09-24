@@ -2260,7 +2260,6 @@ export class ICEChart {
   private syncSeries(animate: boolean | 'enter' | 'update'): void {
     // 面板矩阵：先把「系列 → 面板」的查表口准备好（没有 matrix 时 panelIndex 恒为 0）
     const norm = this.norm;
-    const plot = this.layout.plot;
     const signature = norm.series.map((s) => `${s.id}:${s.type}`).join('|');
     const slots = computeBarSlots(norm.series);
 
@@ -2279,7 +2278,6 @@ export class ICEChart {
       const component = this.seriesComponents[i];
       const series = norm.series[i];
       const visible = !series.hidden;
-      const axis = norm.yAxes[series.axisIndex] || norm.yAxis;
       const polarLayout = this.layout.polar;
       /**
        * 面板矩阵：这一系列属于哪块画布。

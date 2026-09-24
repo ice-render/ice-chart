@@ -102,4 +102,78 @@ describe('面板矩阵（引擎集成）', () => {
     expect(((c as any).grids as any[]).length).toBe(1);
     expect((c.seriesComponents[0] as any).state.left).toBe(c.layout.plot.x);
   });
+
+  it('轴触发提示框只列指针所在面板的系列', async () => {
+    const c = await mount({ ...matrixOption(), tooltip: { trigger: 'axis' } });
+    const panel = c.layout.panels[5];
+    const series: any = c.seriesComponents[5];
+    const pixel = series.pixelAt(1)!;
+    c.controller.handlePointerMove(panel.x + pixel[0], panel.y + pixel[1]);
+
+    const hover: any = c.controller.hover;
+    expect(hover.kind).toBe('axis');
+    expect(hover.column.panel).toBe(5);
+    const content = c.tooltip!.content!;
+    expect(content.rows).toHaveLength(1);
+    expect(content.rows[0].name).toBe('面板 6');
+  });
+
+  it('每个面板内都能各自悬停到自己那一列', async () => {
+    const c = await mount({ ...matrixOption(), tooltip: { trigger: 'axis' } });
+    for (const index of [0, 2, 3, 5]) {
+      const panel = c.layout.panels[index];
+      const component: any = c.seriesComponents[index];
+      const pixel = component.pixelAt(2)!;
+      c.controller.handlePointerMove(panel.x + pixel[0], panel.y + pixel[1]);
+      const hover: any = c.controller.hover;
+      expect(hover && hover.kind).toBe('axis');
+      expect(hover.column.panel).toBe(index);
+    }
+  });
+
+  it('十字准星限制在指针所在面板内', async () => {
+    const c = await mount({ ...matrixOption(), tooltip: { trigger: 'axis' } });
+    const panel = c.layout.panels[4];
+    const component: any = c.seriesComponents[4];
+    const pixel = component.pixelAt(1)!;
+    c.controller.handlePointerMove(panel.x + pixel[0], panel.y + pixel[1]);
+    const crosshair: any = c.crosshair;
+    expect(crosshair.plot).toBeTruthy();
+    expect(crosshair.plot.x).toBeCloseTo(panel.x, 6);
+    expect(crosshair.plot.width).toBeCloseTo(panel.width, 6);
+  });
+
+  it('在某个面板里缩放：锚点用那块面板的比例尺，域仍然是全体共享的一份', async () => {
+    const c = await mount(matrixOption());
+    const panel = c.layout.panels[5];
+    const x = panel.x + panel.width * 0.25;
+    const y = panel.y + panel.height / 2;
+    const before = c.norm.xAxis.domain.slice();
+    c.controller.handleWheel(x, y, -120);
+    await c.render();
+    expect(c.norm.xAxis.domain).not.toEqual(before);
+    // 域共享：每个面板的比例尺都拿到新域
+    for (const scales of c.panelScales) {
+      expect(scales.x.domain).toEqual(c.norm.xAxis.domain);
+    }
+  });
+
+  it('框选：x 夹到所有面板的并集，y 只夹在起手那块面板里', async () => {
+    const c = await mount({
+      ...matrixOption(),
+      interaction: { brush: { enabled: true, axes: 'xy', mode: 'select' } },
+    });
+    // 选**顶行**的面板：并集的下沿在它下方很远，y 夹取对不对一眼可辨
+    const panel = c.layout.panels[1];
+    const startY = panel.y + 10;
+    c.controller.handlePointerDown(panel.x + 10, startY);
+    // 横向拖到画布另一头、纵向拖到画布底部之外
+    c.controller.handlePointerMove(panel.x + panel.width + 200, startY + 500);
+    const brush: any = c.brushComponent;
+    expect(brush.rect).not.toBeNull();
+    // y 不许越过起手那块面板的下沿（没有面板化时这里会一路画到并集底部）
+    expect(brush.rect.y + brush.rect.height).toBeLessThanOrEqual(panel.y + panel.height + 0.5);
+    // x 允许越过这块面板（并集语义）
+    expect(brush.rect.x + brush.rect.width).toBeGreaterThan(panel.x + panel.width);
+  });
 });

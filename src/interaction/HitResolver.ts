@@ -1,6 +1,7 @@
-import type { ActiveColumn, ActiveItem, ChartLayout, InternalSeries, NormalizedOption } from '../internal';
+import type { ActiveColumn, ActiveItem, ChartLayout, InternalSeries, NormalizedOption, Rect } from '../internal';
 import type { DataPointParams } from '../types';
 import type { SeriesBase } from '../components/series/SeriesBase';
+import { panelIndexAt } from '../layout/panels';
 
 export interface HitHost {
   ice: any;
@@ -59,8 +60,22 @@ export class HitResolver {
   }
 
   public isInsidePlot(chartX: number, chartY: number): boolean {
-    const { plot } = this.host.layout;
-    return chartX >= plot.x && chartX <= plot.x + plot.width && chartY >= plot.y && chartY <= plot.y + plot.height;
+    return this.panelAt(chartX, chartY) >= 0;
+  }
+
+  /**
+   * 指针落在第几个面板里（-1 = 不在任何面板内）。
+   *
+   * 面板矩阵下这是交互的总入口：悬停、框选、缩放、键盘都要先问「在哪块面板」。
+   * 没有 `matrix` 时 `layout.panels` 只有一个矩形，等价于从前的 `isInsidePlot`。
+   */
+  public panelAt(chartX: number, chartY: number): number {
+    return panelIndexAt(this.host.layout.panels, chartX, chartY);
+  }
+
+  /** 第几个面板的矩形（越界退回绘图区）。 */
+  public panelRect(index: number): Rect {
+    return this.host.layout.panels[index] || this.host.layout.plot;
   }
 
   public seriesComponentOf(series: InternalSeries): SeriesBase | null {
@@ -92,8 +107,9 @@ export class HitResolver {
     const pixel = component.pixelAt(dataIndex);
     const point = series.pointAt(dataIndex);
     if (!pixel || !point) return null;
-    const { plot } = this.host.layout;
-    return { series, point, pixel: [plot.x + pixel[0], plot.y + pixel[1]], screen: [0, 0] };
+    // 组件的像素是**面板本地坐标**，换算到图表坐标要加它所在那块面板的左上角
+    const rect = this.panelRect(this.seriesPanelOf(series));
+    return { series, point, pixel: [rect.x + pixel[0], rect.y + pixel[1]], screen: [0, 0] };
   }
 
   public toParams(item: ActiveItem): DataPointParams {
@@ -114,10 +130,20 @@ export class HitResolver {
   }
 
   /** 图表坐标系 x 像素 → 数据列（每个系列各取 x 最近的点）。 */
-  public pickColumn(chartX: number): ActiveColumn | null {
-    const { plot } = this.host.layout;
-    const localX = chartX - plot.x;
-    const visible = this.host.norm.series.filter((s) => !s.hidden);
+  /**
+   * 「同一列」的活动项：轴触发提示框 / 十字准星都按它取数。
+   *
+   * 面板矩阵下**只收指针所在面板的系列**：否则在第 6 块面板上悬停，提示框会把另外五块的
+   * 数据一起列出来（它们 x 值相同但根本不是同一张图）。
+   */
+  public pickColumn(chartX: number, chartY: number): ActiveColumn | null {
+    const panel = this.panelAt(chartX, chartY);
+    const rect = this.panelRect(panel);
+    const localX = chartX - rect.x;
+    const matrix = this.host.norm.matrix;
+    const visible = this.host.norm.series.filter(
+      (s) => !s.hidden && (!matrix || this.seriesPanelOf(s) === panel)
+    );
     if (!visible.length) return null;
     const items: ActiveItem[] = [];
     let anchorX: any = null;
@@ -132,7 +158,15 @@ export class HitResolver {
       if (anchorX === null) anchorX = series.pointAt(index).xValue;
     }
     if (!items.length) return null;
-    return { dataIndex: items[0].point.index, xValue: anchorX, pixelX: items[0].pixel[0], items };
+    return { dataIndex: items[0].point.index, xValue: anchorX, pixelX: items[0].pixel[0], panel, items };
+  }
+
+  /** 系列所属面板（越界退回 0）。 */
+  public seriesPanelOf(series: InternalSeries): number {
+    if (!this.host.norm.matrix) return 0;
+    const raw = Math.floor(Number(series.panel));
+    const max = this.host.layout.panels.length - 1;
+    return isFinite(raw) ? Math.max(0, Math.min(max, raw)) : 0;
   }
 
   public nearestIndexByX(component: SeriesBase, localX: number): number {
