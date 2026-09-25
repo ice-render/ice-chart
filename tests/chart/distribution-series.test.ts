@@ -96,6 +96,42 @@ describe('小提琴图 / 蜂群图（引擎集成）', () => {
     expect(outside).toBe(-1);
   });
 
+  /**
+   * 回归（2026-09-25）：**锚点必须落在自己的轮廓里**。
+   *
+   * 锚点 y 一直取中位数，而双峰分布的中位数正落在密度≈0 的谷底 —— 那里轮廓宽度收成 0，
+   * 于是锚点落在自己的多边形之外：悬停不上（命中返回 -1），提示框/高亮也跟着锚到形状外。
+   * 这正是 AGENTS 说的「看得见的点」与「点得到的点」分叉；`rebuildPixels` 的注释本来写的就是
+   * 「轮廓的**最宽处**中心」，是代码走偏了。
+   *
+   * 这个夹具是**紧双峰**（两簇相距 38、带宽给到 2）：谷底的密度小到可以忽略，
+   * 所以修复前必然落空 —— 用默认带宽（Silverman 会把两簇糊在一起）复现不出来。
+   */
+  it('双峰分布的锚点仍在自己的轮廓里（中位数落在谷底时也不落空）', async () => {
+    const c = await mount({
+      xAxis: { type: 'category', data: ['双峰'] },
+      yAxis: { min: 0, max: 100 },
+      animation: { enabled: false },
+      series: [
+        {
+          id: 'v',
+          type: 'violin',
+          name: '双峰',
+          violin: { bandwidth: 2 },
+          data: [[30, 30.5, 31, 70, 70.5, 71]],
+        },
+      ],
+    } as ChartOption);
+    const violin: any = c.seriesComponents[0];
+    const anchor = violin.pixelAt(0);
+    expect(Number.isFinite(anchor[0]) && Number.isFinite(anchor[1])).toBe(true);
+    // 组件自己的锚点必须在自己的命中区里
+    expect(violin.hitTestIndex(anchor[0], anchor[1])).toBe(0);
+    // 而且真的能悬停到（走引擎命中 → 数据下标）
+    const target = c.controller.resolveTarget(c.layout.plot.x + anchor[0], c.layout.plot.y + anchor[1]);
+    expect(target.index).toBe(0);
+  });
+
   it('提示框给观测数与五数概括', async () => {
     const c = await mount(VIOLIN);
     const violin: any = c.seriesComponents[0];
