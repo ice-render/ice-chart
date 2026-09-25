@@ -48,6 +48,9 @@ p.lead {
   box-shadow: 0 0.125rem 0.25rem rgba(33, 37, 41, 0.075);
   padding: 0.75rem;
   margin-bottom: 1.25rem;
+  /* 同 `.row .card`：单卡片页的结构宽度也不许小于画布（graph / animation 的画布比正文宽，
+     卡片更窄时画布会溢出卡片被窗口切掉）。放不下就让页面横向滚动，不裁图、不缩画布。 */
+  min-width: fit-content;
 }
 
 .row {
@@ -57,8 +60,20 @@ p.lead {
 }
 
 .row .card {
-  flex: 1 1 420px;
-  min-width: 380px;
+  flex: 1 1 auto;
+  /**
+   * **卡片不许被压到比画布还窄**：画布是固定内建尺寸（示例页刻意不做 CSS 缩放 —— 缩放会让
+   * 命中检测整体偏移），卡片一旦更窄，画布就会溢出卡片、被窗口右缘切掉（1280 视口下
+   * 620px 的画布溢出 47px，右图直接切一半）。`fit-content` 让卡片不小于内容宽度，
+   * 于是放不下时**换行成一列**，而不是裁图。
+   */
+  min-width: fit-content;
+}
+
+.row .card > canvas {
+  /* 换行成一列时画布在卡片里居中（画布是 display:block，横向 auto 才有意义） */
+  margin-left: auto;
+  margin-right: auto;
 }
 
 canvas {
