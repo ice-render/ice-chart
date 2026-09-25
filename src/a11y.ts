@@ -336,6 +336,8 @@ export const SERIES_ROLE_HINT: Record<SeriesType, string> = {
   radar: '雷达多边形',
   heatmap: '热力图单元',
   hexbin: '密度蜂窝格',
+  calendar: '日历格',
+  alluvial: '流向带',
   sankey: '桑基连线',
   funnel: '漏斗阶段',
   gauge: '仪表盘',

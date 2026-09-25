@@ -12,6 +12,8 @@ import {
 } from '../internal';
 import type { SeriesRawPoints } from '../internal';
 import type { DataPoint, InternalAxis, InternalSeries, NormalizedOption, SeriesColumns, SeriesGrid } from '../internal';
+import type { CalendarOption } from '../types';
+import type { AlluvialOption } from '../types';
 import type { SeriesRing } from '../util/ring';
 import { ringAccessors } from '../util/ring';
 import { chunkAccessors, createChunks } from '../util/chunks';
@@ -20,6 +22,7 @@ import { resolveChartTheme } from '../theme/chartTheme';
 import { extent, isFiniteNumber, niceDomain, round } from '../util/math';
 import { computeKdeProfile } from '../layout/density';
 import { resolveMatrix } from '../layout/panels';
+import { buildCalendarGrid, normalizeCalendarDate } from '../layout/calendar';
 import { toTimestamp } from '../scale/TimeScale';
 import { compileExpression } from '../expr/expr';
 import { diagnoseExpression } from '../expr/diagnostics';
@@ -291,7 +294,16 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
 
   const radar = option.radar || null;
   const graphOption = option.graph || null;
-  const series = buildSeries(option.series, theme, merged.legend?.selected || {}, radar, option.sankey || null, graphOption, context);
+  const series = buildSeries(
+    option.series,
+    theme,
+    merged.legend?.selected || {},
+    radar,
+    option.sankey || null,
+    graphOption,
+    context,
+    option.alluvial || null
+  );
   // 瀑布图配置「顶层与系列级等价，series 优先」（types 的承诺）。以前只读了系列级，
   // 写在顶层的 `option.waterfall.*` 静默失效 —— 测试之前靠色板兜底值恰好相同而没暴露。
   for (const s of series) {
@@ -308,7 +320,18 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     s.hidden = !!hiddenIds[s.id] || s.option.show === false;
   }
 
-  const kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'liquid' | 'treemap' | 'graph' = series.some((s) => s.type === 'pie')
+  const kind:
+    | 'cartesian'
+    | 'polar'
+    | 'radar'
+    | 'sankey'
+    | 'funnel'
+    | 'gauge'
+    | 'liquid'
+    | 'treemap'
+    | 'graph'
+    | 'calendar'
+    | 'alluvial' = series.some((s) => s.type === 'pie')
     ? 'polar'
     : series.some((s) => s.type === 'radar')
       ? 'radar'
@@ -324,7 +347,11 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
               ? 'treemap'
               : series.some((s) => s.type === 'graph')
                 ? 'graph'
-                : 'cartesian';
+                : series.some((s) => s.type === 'calendar')
+                  ? 'calendar'
+                  : series.some((s) => s.type === 'alluvial')
+                    ? 'alluvial'
+                    : 'cartesian';
   const sankey = kind === 'sankey' ? option.sankey || null : null;
   const funnel = kind === 'funnel' ? option.funnel || {} : null;
   const gauge = kind === 'gauge' ? option.gauge || {} : null;
@@ -364,6 +391,47 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     }
     const rawPanel = Number(s.option.panel);
     s.panel = isFinite(rawPanel) ? Math.max(0, Math.min(matrix.panelCount - 1, Math.floor(rawPanel))) : 0;
+  }
+  /**
+   * 日历热力：把「日期 → 第几周 / 星期几」的排布在归一化里算好（纯函数），
+   * 组件只负责画格子 —— 同一份数据在不同时区、不同刷新下都必须落在同一格。
+   */
+  // 日历配置：系列级优先（`series[].calendar`），缺省回落到顶层 —— 与瀑布图同一套解析规则
+  const calendarOwn: CalendarOption | undefined = series[0] && (series[0].option as any).calendar;
+  const calendarOption: CalendarOption = calendarOwn !== undefined ? calendarOwn : option.calendar || {};
+  const alluvial: AlluvialOption | null =
+    kind === 'alluvial' ? (series[0] && (series[0].option as any).alluvial) || option.alluvial || null : null;
+  if (alluvial) {
+    for (const item of series) item.alluvialOption = alluvial;
+  }
+  const calendar =
+    kind === 'calendar'
+      ? {
+          option: calendarOption,
+          grid: buildCalendarGrid(
+            series.flatMap((item) =>
+              Array.from({ length: item.pointCount }, (_, index) => ({
+                date: item.xValueAt(index),
+                value: item.yValueAt(index),
+              }))
+            ),
+            { weekStart: calendarOption.weekStart === 0 ? 0 : 1 }
+          ),
+        }
+      : null;
+  if (calendar) {
+    const byDate = new Map(calendar.grid.cells.map((cell) => [cell.date, cell]));
+    for (const item of series) {
+      item.calendarGrid = calendar.grid;
+      item.calendarOption = calendarOption;
+      for (let index = 0; index < item.pointCount; index++) {
+        // 原写法可能是 '2026-1-5' 或 Date：先规范化再查表（O(1)，与格子的键一致）
+        const normalized = normalizeCalendarDate(item.xValueAt(index));
+        const cell = normalized === null ? undefined : byDate.get(normalized);
+        const point = item.points[index];
+        if (point && cell) point.calendar = { week: cell.week, weekday: cell.weekday, date: cell.date };
+      }
+    }
   }
 
   /**
@@ -523,6 +591,8 @@ export function normalizeOption(option: ChartOption, context: NormalizeContext =
     kind,
     orientation: horizontal ? 'horizontal' : 'vertical',
     matrix,
+    calendar,
+    alluvial,
     radar,
     sankey,
     funnel,
@@ -612,7 +682,8 @@ function buildSeries(
   radar?: RadarOption | null,
   sankey?: SankeyOption | null,
   graph?: GraphOption | null,
-  context?: NormalizeContext
+  context?: NormalizeContext,
+  alluvialOption?: AlluvialOption | null
 ): InternalSeries[] {
   const out: InternalSeries[] = [];
   const usedNames: Record<string, number> = {};
@@ -752,7 +823,7 @@ function buildSeries(
         : null;
     const built = reusable
       ? { points: reusable.points, hasExplicitX: reusable.hasExplicitX }
-      : buildPoints(option, radar, sankey, graph, context);
+      : buildPoints(option, radar, sankey, graph, context, alluvialOption);
     const { points, hasExplicitX } = built;
     if (pointCache && sourceRows && !reusable) pointCache.set(id, { rows: sourceRows, rule: parseRule, points, hasExplicitX });
     if (option.type === 'pie') {
@@ -791,7 +862,8 @@ function buildPoints(
   radar?: RadarOption | null,
   sankey?: SankeyOption | null,
   graph?: GraphOption | null,
-  context?: NormalizeContext
+  context?: NormalizeContext,
+  alluvialOption?: AlluvialOption | null
 ): { points: DataPoint[]; hasExplicitX: boolean } {
   const raw = Array.isArray(option.data) ? option.data : [];
   if (!Array.isArray(option.data) && option.data && typeof option.data === 'object') {
@@ -842,6 +914,77 @@ function buildPoints(
         top: value === null ? 1 : value,
         name,
       });
+    }
+    return { points, hasExplicitX: true };
+  }
+  /**
+   * 多轴分类流：输入是 `alluvial: { axes, rows }` 一张表 —— 配置里自带数据（与桑基同一形态）。
+   *
+   * 点集同样是「节点 + 流量」：索引 0..N-1 是各轴上的类目节点（y = 该节点总量），
+   * 之后是相邻轴之间的流量（y = 流量值）。布局（堆叠 / 排序 / 带子几何）在组件里现算 ——
+   * 它要绘图区尺寸，纯函数在 `layout/alluvial.ts`，那边可单测。
+   */
+  if (option.type === 'alluvial' && alluvialOption) {
+    const axes = Array.isArray(alluvialOption.axes) ? alluvialOption.axes : [];
+    const rows = Array.isArray(alluvialOption.rows) ? alluvialOption.rows : [];
+    const valueField = alluvialOption.valueField || 'value';
+    const totals = new Map<string, number>();
+    for (const row of rows) {
+      const value = toNumber((row as any)[valueField]);
+      const weight = value === null ? 1 : Math.abs(value);
+      for (const axis of axes) {
+        const raw = (row as any)[axis];
+        if (raw === undefined || raw === null || raw === '') continue;
+        const key = `${axis}\u0000${String(raw)}`;
+        totals.set(key, (totals.get(key) || 0) + weight);
+      }
+    }
+    let nodeIndex = 0;
+    const nodeLookup = new Map<string, number>();
+    for (const axis of axes) {
+      for (const [key, total] of totals) {
+        if (!key.startsWith(`${axis}\u0000`)) continue;
+        const name = key.slice(axis.length + 1);
+        nodeLookup.set(key, nodeIndex);
+        points.push({
+          index: nodeIndex,
+          xValue: name,
+          y: total,
+          raw: { __alluvialNode: true, axis, name, total },
+          base: 0,
+          top: total,
+          name,
+        });
+        nodeIndex += 1;
+      }
+    }
+    const pairTotals = new Map<string, { from: string; to: string; axis: number; value: number }>();
+    for (let a = 0; a < axes.length - 1; a++) {
+      for (const row of rows) {
+        const from = (row as any)[axes[a]];
+        const to = (row as any)[axes[a + 1]];
+        if (from === undefined || from === null || from === '' || to === undefined || to === null || to === '') continue;
+        const value = toNumber((row as any)[valueField]);
+        const weight = value === null ? 1 : Math.abs(value);
+        const key = `${a}\u0000${String(from)}\u0000${String(to)}`;
+        const existing = pairTotals.get(key);
+        if (existing) existing.value += weight;
+        else pairTotals.set(key, { from: String(from), to: String(to), axis: a, value: weight });
+      }
+    }
+    let flowIndex = nodeIndex;
+    for (const flow of pairTotals.values()) {
+      const name = `${flow.from} → ${flow.to}`;
+      points.push({
+        index: flowIndex,
+        xValue: name,
+        y: flow.value,
+        raw: { __alluvialFlow: true, axis: flow.axis, from: flow.from, to: flow.to, value: flow.value },
+        base: 0,
+        top: flow.value,
+        name,
+      });
+      flowIndex += 1;
     }
     return { points, hasExplicitX: true };
   }
@@ -959,6 +1102,25 @@ function buildPoints(
         base: 0,
         top: summary[2],
         boxplot: summary,
+      });
+    }
+    return { points, hasExplicitX };
+  }
+  // 日历热力：数据项是 { date, value } 或 [date, value]；日期在这里就规范成 YYYY-MM-DD
+  if (option.type === 'calendar') {
+    for (let i = 0; i < raw.length; i++) {
+      const item: any = raw[i];
+      const date = Array.isArray(item) ? item[0] : item && typeof item === 'object' ? (item.date ?? item.x) : item;
+      const value = Array.isArray(item) ? item[1] : item && typeof item === 'object' ? (item.value ?? item.y) : null;
+      hasExplicitX = true;
+      points.push({
+        index: i,
+        xValue: date,
+        y: toNumber(value),
+        raw: item,
+        base: 0,
+        top: 0,
+        name: date === null || date === undefined ? '' : String(date),
       });
     }
     return { points, hasExplicitX };

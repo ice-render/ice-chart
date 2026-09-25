@@ -90,6 +90,8 @@ export type BuiltinSeriesType =
   | 'radar'
   | 'heatmap'
   | 'hexbin'
+  | 'calendar'
+  | 'alluvial'
   | 'sankey'
   | 'funnel'
   | 'gauge'
@@ -192,6 +194,40 @@ export interface WaterfallOption {
   totalColor?: string;
   /** 是否画相邻柱子之间的连接虚线，默认 true。 */
   connector?: boolean;
+}
+
+/** 多轴分类流配置。 */
+export interface AlluvialOption {
+  /** 每个轴的列名（按顺序）—— 至少两个轴才有「流」。 */
+  axes: string[];
+  /** 记录表：每行在每个轴列上取一个类目。 */
+  rows: Array<Record<string, any>>;
+  /** 取值字段名，默认 `value`（缺省时每条记录算 1）。 */
+  valueField?: string;
+  /** 轴心之间的总跨度占绘图区宽度的比例，默认 0.62。 */
+  spread?: number;
+  /** 节点条宽度（像素），默认 12。 */
+  nodeWidth?: number;
+  /** 节点之间的垂直间隙（像素），默认 6。 */
+  gap?: number;
+  /** 节点排序：按流量降序（默认）或按名字。 */
+  sort?: 'total' | 'name';
+  /** 连线的不透明度，默认 0.35。 */
+  ribbonOpacity?: number;
+}
+
+/** 日历热力配置。 */
+export interface CalendarOption {
+  /** 一周从哪天开始：0 = 周日，1 = 周一（默认）。 */
+  weekStart?: 0 | 1;
+  /** 是否画左侧的星期标签（默认 true，周一/三/五）。 */
+  weekdayLabels?: boolean;
+  /** 是否画顶部的月份标签（默认 true）。 */
+  monthLabels?: boolean;
+  /** 稀（低值）一端的颜色，默认与热力图同一套浅蓝。 */
+  minColor?: string;
+  /** 密（高值）一端的颜色，默认系列色。 */
+  maxColor?: string;
 }
 
 /** 六边形分箱配置。 */
@@ -513,6 +549,19 @@ export interface SeriesOption {
    * 分箱在**像素空间**做（缩放会重新分格），半径是像素口径。
    */
   hexbin?: HexbinOption;
+  /**
+   * 日历热力（`type: 'calendar'`）：一行一天的热力格。
+   *
+   * 数据项是 `{ date: '2026-01-05', value: 12 }`（或 `['2026-01-05', 12]`）——
+   * 日期按 **UTC 的 Y/M/D** 解释（跨时区看到的图必须一样）。
+   */
+  calendar?: CalendarOption;
+  /**
+   * 多轴分类流（`type: 'alluvial'`）：N 个类目轴 + 相邻轴之间的流量带。
+   *
+   * 输入是一张表 + 轴列名（与桑基的 nodes/links 不同 —— 桑基是图，alluvial 是表的分面）。
+   */
+  alluvial?: AlluvialOption;
   /** 瀑布图配色与连接线（也可写在 option.waterfall 上，两者等价，series 优先）。 */
   waterfall?: WaterfallOption;
   /**
@@ -917,6 +966,10 @@ export interface ChartOption {
    * 不给就是单绘图区（现有行为，逐像素不变）。
    */
   matrix?: MatrixOption;
+  /** 日历热力的全局配置（`series[].calendar` 优先）。 */
+  calendar?: CalendarOption;
+  /** 多轴分类流（与桑基同形态：配置里自带数据）。 */
+  alluvial?: AlluvialOption;
   /** 标注图层：目标线 / 阈值线、异常点、目标区间（见 `AnnotationOption`）。 */
   annotation?: AnnotationOption;
   /**

@@ -9,6 +9,8 @@ export { RadarSeries } from './RadarSeries';
 export type { RadarSeriesCoord } from './RadarSeries';
 export { HeatmapSeries, mixColors, heatColorRange } from './HeatmapSeries';
 export { HexbinSeries } from './HexbinSeries';
+export { CalendarSeries } from './CalendarSeries';
+export { AlluvialSeries } from './AlluvialSeries';
 export { SankeySeries } from './SankeySeries';
 export type { SankeySeriesCoord } from './SankeySeries';
 export { FunnelSeries } from './FunnelSeries';
