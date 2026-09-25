@@ -12,6 +12,8 @@
       再做纵向松弛避免连线交叉；连线厚度按流量分配。布局是一个纯函数
       （<code>layoutSankey</code>），渲染与命中判定消费同一份结果 ——
       命中节点显示节点总量，命中连线显示「来源 → 去向」的流量。
+      <strong>拖动任意节点可以在它所在的列里上下重排</strong>（松手后重排，顺序写回
+      <code>option.sankey.nodeOrder</code>，导出快照也会带上）。
     </p>
     <div class="card"><canvas id="chart" width="960" height="480"></canvas></div>
     <div class="card" id="snapshot-panel"></div>
@@ -66,6 +68,7 @@
       };
       chart.on('item:hover', (p) => write(`hover  ${p.xValue} = ${p.value}`));
       chart.on('item:click', (p) => write(`click  ${p.xValue} = ${p.value}`));
+      chart.on('sankey:reorder', (p) => write(`reorder  第 ${p.column} 列  ${p.order.join(' / ')}`));
       window.__chart = chart;
       mountSnapshotPanel();
     </script>

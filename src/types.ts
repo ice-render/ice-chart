@@ -346,6 +346,16 @@ export interface SankeyOption {
   nodePadding?: number;
   /** 纵向松弛迭代次数，默认 6。 */
   iterations?: number;
+  /**
+   * 列内顺序（节点名或下标）。
+   *
+   * 拖拽重排后由图表把**被拖过的那一列**写回这里，也可以在 option 里手写：
+   * 列到的节点按表内位置排在前面，没列到的排在其后并保持原有相对顺序；
+   * 整张表缺席时顺序由布局松弛决定（既有行为）。
+   */
+  nodeOrder?: Array<string | number>;
+  /** 是否可以拖动节点在列内重排，默认 true。 */
+  draggable?: boolean;
   label?: { show?: boolean };
   /** 连线填充不透明度，默认 0.42（深色底上可以调高一点，否则连线发闷）。 */
   linkOpacity?: number;
@@ -1228,6 +1238,7 @@ export type ChartEventName =
   | 'legend:toggle'
   | 'mark:drag'
   | 'mark:dragend'
+  | 'sankey:reorder'
   | 'data:change'
   | 'render';
 
@@ -1256,6 +1267,18 @@ export interface ChartEventPayloads {
   'mark:drag': ChartMarkData;
   /** 图元拖动结束（此时锚点已写回数据坐标）。 */
   'mark:dragend': ChartMarkData;
+  /** 桑基节点拖拽重排结束：列内顺序已写回 `option.sankey.nodeOrder`。 */
+  'sankey:reorder': {
+    seriesId?: string;
+    seriesIndex?: number;
+    /** 被拖动的节点下标（与 `series.points` 的节点段一致）。 */
+    nodeIndex: number;
+    nodeName: string;
+    /** 所在列（= 分层深度）。 */
+    column: number;
+    /** 这一列从上到下的新顺序（节点名）。 */
+    order: string[];
+  };
   /** 通过 setData / setOption 更新数据后触发。 */
   'data:change': { seriesId?: string; seriesIndex?: number };
   render: undefined;
