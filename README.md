@@ -198,7 +198,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `gauge` | `gauge: { min, max, axisLineColor }` + `data: [{ name, value }]` | 指针随数值转动，轴线按阈值分段配色 |
 | `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
 | `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
-| `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、**按关系量定大小**（节点写 `value: 1` 才开这个开关）；密集图用 `graph.label.minSize` 只标主要节点（标签放不下会自动翻到节点上方并夹进绘图区，不会被画布裁掉） |
+| `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、**按关系量定大小**（节点写 `value: 1` 才开这个开关）。标签**自己找位置**：先下方、贴底翻上方、与别的标签相撞就挪到左右侧，最后才选撞得最少的一侧 —— 所以密集图也能给每个节点都标名字（`graph.label.minSize` 可按需只标主要节点），标签也不会被画布裁掉 |
 | `function` | `expression: 'sin(x)/x'`（+ `params` / `domain` / `samples` / `adaptive`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合；默认**自适应细分**，`adaptive: false` 才是均匀采样 |
 | `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
 | `parametric`（极坐标） | `polarExpression: 'cos(3*t)'` + `polarGrid: true` | 极坐标 `r(θ)`（玫瑰线 / 心形线 / 螺线），配 `aspect: 'equal'` 出 MATLAB `polarplot` 观感 |
@@ -573,7 +573,7 @@ npm run examples:serve      # http://localhost:5177
 六边形分箱（点云聚成蜂窝格，细格/粗格对照）、
 边际分布（主图 + 轴侧直方图，matrix 权重 + 第二个 y 轴共享 x 域）、
 日历热力（一行一天，UTC 日期语义 + 常数时间命中）、多轴分类流（表的分面：N 轴 + 流量带）、
-**力导向关系图（《红楼梦》人物关系：189 人 / 266 条关系，1560×960 画布，只给主要人物标名字；
+**力导向关系图（《红楼梦》人物关系：189 人 / 266 条关系，1560×960 画布，**189 个名字全都标出来且互不重叠**；
 滚轮缩放画布、拖空白处平移、拖节点单独挪它且不再触发自动布局）**、
 大数据量（5 万点降采样 / **100 万点列存虚拟化：散点 + 折线**）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
 （运营 / 设备 / 能源 / 物流 / 函数实验）。
