@@ -4,6 +4,55 @@
     <meta charset="utf-8" />
     <title>ice-chart · 力导向关系图（《红楼梦》人物关系）</title>
     <link rel="stylesheet" href="./assets/style.css" />
+    <style>
+      /* 配色的图例：规则要看得见（节点按与贾家的关系、连线按关系类型） */
+      .key {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--bs-secondary-color);
+        font-size: 0.75rem;
+      }
+      .key i {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-style: normal;
+      }
+      .key i::before {
+        content: '';
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 50%;
+        background: var(--c);
+      }
+      .key.link i::before {
+        width: 1.1rem;
+        height: 0.2rem;
+        border-radius: 0.1rem;
+      }
+      .toolbar {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-start;
+        margin-bottom: 0.75rem;
+      }
+      .toolbar button {
+        font: inherit;
+        font-size: 0.75rem;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        border: 1px solid var(--bs-border-color);
+        background: #fff;
+        cursor: pointer;
+      }
+      .toolbar button:hover {
+        border-color: var(--bs-primary);
+        color: var(--bs-primary);
+      }
+    </style>
   </head>
   <body>
     <h1>力导向关系图 · 《红楼梦》人物关系</h1>
@@ -26,6 +75,24 @@
     <div class="card">
       <div class="toolbar">
         <button id="reset-view" type="button">复位视图</button>
+        <span class="key">
+          <b>节点（与贾家的关系）</b>
+          <i style="--c: #0d6efd">荣国府</i>
+          <i style="--c: #dc3545">宁国府</i>
+          <i style="--c: #0b7285">林家</i>
+          <i style="--c: #1098ad">薛家</i>
+          <i style="--c: #3bc9db">王家</i>
+          <i style="--c: #8ce0ea">史家</i>
+          <i style="--c: #868e96">亲眷</i>
+          <i style="--c: #adb5bd">方外与外人</i>
+        </span>
+        <span class="key link">
+          <b>连线（关系类型，粗细 = 亲疏）</b>
+          <i style="--c: #b35c1e">血脉</i>
+          <i style="--c: #c2255c">姻缘与情感</i>
+          <i style="--c: #5f7d95">主仆与师承</i>
+          <i style="--c: #9aa5b1">交游与其它</i>
+        </span>
       </div>
       <canvas id="graph" width="1560" height="960"></canvas>
     </div>
@@ -237,23 +304,70 @@
         ['卫若兰', '史湘云', '婚约', 3], ['卫若兰', '贾宝玉', '结交', 1],
       ];
 
+      /**
+       * 配色规则（**三个编码各管一件事**，不是挑几个好看的色）：
+       *
+       * 1. **节点 = 与贾家的关系**，分三层：
+       *    - 主家两府：荣国府蓝 / 宁国府红 —— 冷暖对立、饱和最高（故事的中心）；
+       *    - 姻亲四家：**同一色相（青）按往来密切程度排明度**：林（黛玉）最深 → 薛（宝钗）
+       *      → 王（凤姐 / 王夫人娘家）→ 史（湘云）最浅；
+       *    - 亲眷 / 方外与外人：中性灰两档，越靠家族网络外越浅。
+       * 2. **连线 = 关系类型**（连线该表达的语义）：血脉（暖棕）/ 姻缘与情感（玫红）/
+       *    主仆与师承（蓝灰）/ 交游与其它（浅灰）。库默认让连线继承源节点颜色，
+       *    那样八个府邸的色会把画面铺成一片杂色 —— 所以这里显式给每条线指定颜色。
+       * 3. **连线粗细 = 亲疏**（1~5）。尺寸只表达「这个人在网里有多重要」（按关系量算）。
+       */
       const categories = [
         { name: '荣国府', color: '#0d6efd' },
         { name: '宁国府', color: '#dc3545' },
-        { name: '薛家', color: '#198754' },
-        { name: '林家', color: '#0dcaf0' },
-        { name: '王家', color: '#fd7e14' },
-        { name: '史家', color: '#6f42c1' },
-        { name: '亲眷', color: '#6c757d' },
+        { name: '林家', color: '#0b7285' },
+        { name: '薛家', color: '#1098ad' },
+        { name: '王家', color: '#3bc9db' },
+        { name: '史家', color: '#8ce0ea' },
+        { name: '亲眷', color: '#868e96' },
         { name: '方外与外人', color: '#adb5bd' },
       ];
+
+      /** 关系类型 → 配色（连线用）。55 种关系名归到四类，剩下的一律算「交游」。 */
+      const RELATION_GROUPS = [
+        {
+          name: '血脉',
+          color: '#b35c1e',
+          kinds: ['母子', '母女', '父子', '父女', '祖孙', '外祖孙', '曾祖孙', '姑侄', '姐妹', '兄妹', '兄弟', '姐弟', '叔侄', '堂姐妹', '堂兄弟', '表兄妹', '舅甥', '族亲', '养子', '远亲'],
+        },
+        {
+          name: '姻缘与情感',
+          color: '#c2255c',
+          kinds: ['夫妻', '妾', '婚', '婚约', '恋', '私通', '纠缠', '调笑', '孙媳', '姻亲'],
+        },
+        {
+          name: '主仆与师承',
+          color: '#5f7d95',
+          kinds: ['主仆', '乳母', '清客', '西席', '师生', '师徒', '旧主'],
+        },
+        {
+          name: '交游与其它',
+          color: '#9aa5b1',
+          kinds: ['知交', '同窗', '相识', '神交', '结交', '世交', '旧识', '来往', '同僚', '同伴', '口角', '点化', '诊治', '提携', '请托', '引荐', '卖职', '求差'],
+        },
+      ];
+      const linkColorOf = (kind) => {
+        const group = RELATION_GROUPS.find((item) => item.kinds.includes(kind));
+        return group ? group.color : '#9aa5b1';
+      };
       /**
        * `value: 1` 是**开关**：库的口径是「节点直径 = 它所有连线的亲疏之和（面积开方映射进
        * `symbolSizeRange`）」—— 关系网里「这个人有多重要」本来就该由关系量回答，
        * 手写一个「分量」反而会与图形想表达的东西打架（写值只影响开不开，不参与权重计算）。
        */
       const nodes = people.map(([name, category]) => ({ id: name, name, value: 1, category }));
-      const links = relations.map(([source, target, kind, strength]) => ({ source, target, value: strength }));
+      // 连线颜色按**关系类型**给定（库默认会继承源节点颜色，那样会被府邸色铺满）
+      const links = relations.map(([source, target, kind, strength]) => ({
+        source,
+        target,
+        value: strength,
+        color: linkColorOf(kind),
+      }));
       document.getElementById('scale').textContent = `${people.length} 位人物、${relations.length} 条关系`;
 
       /** 名字 → 权重/归属，供提示框与日志用（页面自己的表，不依赖图表内部结构）。 */
@@ -317,11 +431,13 @@
            * 结果就是核心挤成一团、少数离群点又把包围盒撑大（等比铺满时核心被压得更小）。
            *
            * ⚠️ 这组数是在**189 人的真实数据**上挑的，页面实测：节点包围盒 933×891、
-           * 绘图区 1532×912（铺满 59%）、31 位标名、按名长估的标签盒有 1 对重叠。
-           * （别拿早先那份「扫参数脚本」的输出当数 —— 那把尺子的指标算错过。）
+           * 绘图区 1532×912；`edgeLength` 240 → 360 是实测量出来的：近邻距离中位数
+           * 24.4 → 31.9、节点最小间距 -3.3 → +5.6（240 那组已经有两个节点压在一起）、
+           * 铺满 60% → 73%，而标签仍然是零重叠。
+           * （别拿早先那两份「扫参数脚本」的输出当数 —— 那两把尺子的指标都算错过。）
            */
           repulsion: 110000,
-          edgeLength: 240,
+          edgeLength: 360,
           gravity: 0.005,
           damping: 0.88,
           iterations: 900,
