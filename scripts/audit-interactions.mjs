@@ -236,12 +236,20 @@ function paintOverflowProbe() {
       const legendTop = legendItems.length ? Math.min(...legendItems.map((it) => it.y)) : Infinity;
       const legendBottom = legendItems.length ? Math.max(...legendItems.map((it) => it.y + it.height)) + 3 : 0;
       const axisBandBottom = slider ? slider.y - 3 : H;
+      /**
+       * y 方向的竖直滑块（`dataZoom.sliderY`）也是**交互外壳**，不是数据墨迹 ——
+       * 它就画在绘图区右侧（与「右轴带」重合），蓝底窗口会被误判成「图形画到了坐标轴上」。
+       * 所以右轴带只扫到滑块左沿为止（与下面扣掉 x 滑块那条轨道同一个道理）。
+       */
+      const sliderYRect = c.layout.sliderY;
+      const rightScanX = plot.x + plot.width + 3;
+      const rightScanW = sliderYRect ? Math.max(0, sliderYRect.x - 2 - rightScanX) : W - rightScanX;
       // 图例在绘图区上方：左右轴带从图例下沿开始扫；图例在下方：y 轴带扫到图例上沿为止
       const sideTop = legendItems.length && legendTop < plot.y ? legendBottom : 0;
       const belowEnd = legendItems.length && legendTop > plot.y + plot.height ? Math.min(axisBandBottom, legendTop - 3) : axisBandBottom;
       return {
         left: scan(0, sideTop, plot.x - 3, H - sideTop),
-        right: scan(plot.x + plot.width + 3, sideTop, W - plot.x - plot.width - 3, H - sideTop),
+        right: scan(rightScanX, sideTop, rightScanW, H - sideTop),
         below: scan(0, plot.y + plot.height + 3, W, belowEnd - plot.y - plot.height - 3),
       };
     });
@@ -424,6 +432,69 @@ for (const name of runPages) {
           }
           return issues;
         })
+    );
+  }
+
+  // 11b. 竖直滑块（y 窗口）拖到极限：同样不许把窗口拖成「一个点」或拖空。
+  //      方向约定：上 = 大值，所以「往下拖」= 朝小值走。
+  const sliderY = await page.evaluate(() => {
+    const charts = [];
+    if (window.__chart) charts.push(window.__chart);
+    if (window.__charts) for (const k of Object.keys(window.__charts)) charts.push(window.__charts[k]);
+    const chart = charts.find((c) => c && c.layout && c.layout.sliderY);
+    if (!chart) return null;
+    window.__sliderYChart = chart;
+    const rect = chart.ice.canvasEl.getBoundingClientRect();
+    const s = chart.layout.sliderY;
+    const dpr = chart.ice.dpr || 1;
+    const [f0, f1] = chart.domainYFractions();
+    const toView = (fy) => rect.top + (s.y + s.height * (1 - fy)) / dpr;
+    return {
+      endY: toView(f1),
+      startY: toView(f0),
+      x: rect.left + (s.x + s.width / 2) / dpr,
+      trackEnd: toView(0.02),
+      fractions: [f0, f1],
+    };
+  });
+  if (sliderY) {
+    await step(
+      '11b-sliderY-extreme',
+      async () => {
+        // 抓住窗口上端（大值那一侧）往下拖到接近轨道底部。
+        // ⚠️ `page.mouse.move(x, y)` —— 竖直滑块的 x 是常量、动的是 y，写反了就会静默地什么都没拖到。
+        await page.mouse.move(sliderY.x, sliderY.endY);
+        await page.mouse.down();
+        await page.mouse.move(sliderY.x, sliderY.trackEnd, { steps: 14 });
+        await page.mouse.up();
+        await page.waitForTimeout(300);
+      },
+      async () =>
+        page.evaluate(({ fractions }) => {
+          const chart = window.__sliderYChart;
+          const issues = [];
+          const dom = chart.norm.yAxis.domain.map(Number);
+          const lo = Math.min(dom[0], dom[dom.length - 1]);
+          const hi = Math.max(dom[0], dom[dom.length - 1]);
+          if (!isFinite(lo) || !isFinite(hi) || hi - lo <= 0) {
+            issues.push(`sliderY-window-collapsed(${dom.join('~')})`);
+          }
+          const [start, end] = chart.domainYFractions();
+          if (!(end > start)) issues.push(`sliderY-window-empty(${start}~${end})`);
+          /**
+           * ⚠️ 这里**不**照抄 x 滑块那条「至少盖住 2 个数据点」的判据：y 窗口是**值域**，
+           * 把量程外的系列排除在外正是它的语义（滚轮缩 y 也一样），不是塌缩。
+           * y 该管的是「窗口没退化成一条线」—— 兜底在 `clampAxisDomain`（最小跨度 0.1%）
+           * 与拖动时的 0.02 下限里。
+           */
+          if (end - start < 0.01) issues.push(`sliderY-window-degenerate(${start}~${end})`);
+          // 探针不能只断言「没坏」：鼠标坐标写错时上面的检查全会通过，
+          // 而窗口其实一步都没动（本轮真实踩过一次）。要求窗口**真的变了**。
+          if (Math.abs(start - fractions[0]) < 1e-3 && Math.abs(end - fractions[1]) < 1e-3) {
+            issues.push(`sliderY-drag-had-no-effect(${start}~${end})`);
+          }
+          return issues;
+        }, sliderY)
     );
   }
 

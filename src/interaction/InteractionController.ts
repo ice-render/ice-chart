@@ -26,8 +26,12 @@ export interface InteractionHost extends HitHost {
   toggleSlice(seriesId: string, dataIndex: number, forceSelected?: boolean): void;
   /** dataZoom 滑块（未启用时为 null）。 */
   dataZoomSlider: DataZoomSlider | null;
+  /** y 方向的竖直滑块（没配 `dataZoom.sliderY` 时为 null）。 */
+  dataZoomSliderY: DataZoomSlider | null;
   /** 由滑块的 0~1 比例窗口反推数据域。 */
   setDomainFromFractions(start: number, end: number, source?: string, guard?: boolean): void;
+  /** y 滑块的对应入口（口径见 `ICEChart.setDomainYFromFractions`）。 */
+  setDomainYFromFractions(start: number, end: number, source?: string, axisIndex?: number): void;
   formatAxisValue(axis: 'x' | 'y', value: any): string;
   /** 未经缩放的完整数据域（缩放约束用）。 */
   fullDomain(axis: 'x' | 'y'): any[];
@@ -53,6 +57,8 @@ type DragState =
     }
   | {
       mode: 'slider';
+      /** 拖的是哪条滑块：横向那条（x 窗口）还是竖直那条（y 窗口）。 */
+      axis: 'x' | 'y';
       part: SliderPart;
       startX: number;
       startY: number;
@@ -924,6 +930,58 @@ export class InteractionController {
 
   // ------------------------------------------------------------- 指针
 
+  /**
+   * 按在滑块上：进入拖动（手柄改跨度 / 窗口平移 / 点轨道居中）。
+   *
+   * `axis` 决定把比例窗口喂给谁 —— x 走 `setDomainFromFractions`（带「至少盖住 2 个点」的兜底），
+   * y 走 `setDomainYFromFractions`（兜底在 `clampAxisDomain` 里，见那边的注释）。
+   * 比例一律走 `slider.fractionAt`，由组件按自己的方向解释（纵向是 `1 - y/height`）。
+   */
+  private beginSliderDrag(
+    axis: 'x' | 'y',
+    slider: DataZoomSlider,
+    target: { local: [number, number] },
+    screenX: number,
+    screenY: number,
+    evt?: any
+  ): boolean {
+    const part = slider.hitPart(target.local[0], target.local[1]);
+    if (!part) return false;
+    this.preventDefault(evt);
+    // 拖滑块时指针已经不在绘图区上，收起悬停视觉
+    this.setHover(null);
+    const fraction = slider.fractionAt(target.local[0], target.local[1]);
+    this.drag = {
+      mode: 'slider',
+      axis,
+      part,
+      startX: screenX,
+      startY: screenY,
+      originStart: slider.start,
+      originEnd: slider.end,
+      anchorFraction: fraction,
+      moved: false,
+    };
+    slider.setActive(part);
+    if (part === 'track') {
+      // 点击轨道：把窗口平移到点击处
+      const span = slider.end - slider.start;
+      const start = clamp(fraction - span / 2, 0, 1 - span);
+      this.applySliderWindow(axis, start, start + span, slider.axisIndex);
+      slider.setActive('window');
+      this.drag.part = 'window';
+      this.drag.originStart = start;
+      this.drag.originEnd = start + span;
+    }
+    return true;
+  }
+
+  /** 把滑块的 0~1 窗口喂给对应轴（唯一的出口，拖动与点轨道都走它）；`axisIndex` 只对纵向有意义。 */
+  private applySliderWindow(axis: 'x' | 'y', start: number, end: number, axisIndex = 0): void {
+    if (axis === 'y') this.host.setDomainYFromFractions(start, end, 'slider', axisIndex);
+    else this.host.setDomainFromFractions(start, end, 'slider', true);
+  }
+
   public handlePointerDown(screenX: number, screenY: number, evt?: any): boolean {
     if (!this.isOverCanvas(screenX, screenY)) return false;
     // 有意把 this 注册到模块级「当前键盘焦点」，不是词法作用域的 this 别名：
@@ -932,36 +990,13 @@ export class InteractionController {
     activeController = this;
     const target = this.resolveTarget(screenX, screenY);
     if (target.kind === 'legend') return true;
-    const slider = this.host.dataZoomSlider;
-    if (slider && target.component === slider) {
-      const part = slider.hitPart(target.local[0], target.local[1]);
-      if (part) {
-        this.preventDefault(evt);
-        // 拖滑块时指针已经不在绘图区上，收起悬停视觉
-        this.setHover(null);
-        const fraction = slider.fractionAt(target.local[0]);
-        this.drag = {
-          mode: 'slider',
-          part,
-          startX: screenX,
-          startY: screenY,
-          originStart: slider.start,
-          originEnd: slider.end,
-          anchorFraction: fraction,
-          moved: false,
-        };
-        slider.setActive(part);
-        if (part === 'track') {
-          // 点击轨道：把窗口平移到点击处
-          const span = slider.end - slider.start;
-          const start = clamp(fraction - span / 2, 0, 1 - span);
-          this.host.setDomainFromFractions(start, start + span, 'slider', true);
-          slider.setActive('window');
-          this.drag.part = 'window';
-          this.drag.originStart = start;
-          this.drag.originEnd = start + span;
-        }
-        return true;
+    // 两条滑块走同一段逻辑（横向那条管 x 窗口，竖直那条管 y 窗口）
+    for (const [axis, slider] of [
+      ['x', this.host.dataZoomSlider],
+      ['y', this.host.dataZoomSliderY],
+    ] as Array<['x' | 'y', DataZoomSlider | null]>) {
+      if (slider && target.component === slider) {
+        if (this.beginSliderDrag(axis, slider, target, screenX, screenY, evt)) return true;
       }
     }
     // 关系图：按下节点即可拖动（这是力导向图最常用的交互）
@@ -1064,7 +1099,7 @@ export class InteractionController {
       return;
     }
     if (drag.mode === 'slider') {
-      const slider = this.host.dataZoomSlider;
+      const slider = drag.axis === 'x' ? this.host.dataZoomSlider : this.host.dataZoomSliderY;
       if (slider) slider.setActive(null);
       this.updateHover(screenX, screenY);
       return;
@@ -1115,12 +1150,12 @@ export class InteractionController {
     }
 
     if (drag.mode === 'slider') {
-      const slider = this.host.dataZoomSlider;
+      const slider = drag.axis === 'x' ? this.host.dataZoomSlider : this.host.dataZoomSliderY;
       if (!slider) return;
       drag.moved = true;
       const [worldX, worldY] = this.host.ice.screenToWorld(screenX, screenY);
-      const localX = slider.globalToLocal(worldX, worldY)[0];
-      const fraction = slider.fractionAt(localX);
+      const [localX, localY] = slider.globalToLocal(worldX, worldY);
+      const fraction = slider.fractionAt(localX, localY);
       const span = drag.originEnd - drag.originStart;
       let start = drag.originStart;
       let end = drag.originEnd;
@@ -1133,7 +1168,7 @@ export class InteractionController {
         start = clamp(drag.originStart + shift, 0, 1 - span);
         end = start + span;
       }
-      this.host.setDomainFromFractions(start, end, 'slider', true);
+      this.applySliderWindow(drag.axis, start, end, slider.axisIndex);
       return;
     }
 
