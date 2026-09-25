@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 日历热力</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>日历热力</h1>
+    <p class="lead">
+      一行一天的热力格（周为列、星期为行）。数据是 <code>{ date, value }</code> 的明细表，
+      日期按 <strong>UTC 的 Y/M/D</strong> 解释 —— 跨时区看到的图必须一样。
+      格子的深浅 = 值域内插值；左侧只标周一/三/五，顶部标月份，命中是反解（两道除法），
+      所以「多年 × 每天一条」也是常数时间的悬停。右图换配色与周日起始。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="year" width="820" height="420"></canvas></div>
+      <div class="card"><canvas id="two-years" width="820" height="420"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      /** 生成一段时间里「每天一个值」的明细表（确定性伪随机 + 周末低谷）。 */
+      const daily = (startIso, days) => {
+        const start = Date.parse(`${startIso}T00:00:00Z`);
+        const rows = [];
+        let seed = 20260925;
+        for (let i = 0; i < days; i++) {
+          seed = (seed * 1103515245 + 12345) % 2147483648;
+          const r = seed / 2147483648;
+          const date = new Date(start + i * 86400000);
+          const weekday = date.getUTCDay();
+          const weekend = weekday === 0 || weekday === 6 ? 0.35 : 1;
+          const value = Math.round((2 + r * 14) * weekend);
+          rows.push({ date: date.toISOString().slice(0, 10), value });
+        }
+        return rows;
+      };
+
+      const year = ICEChart.createChart('year', {
+        title: { text: '一年：提交活跃度（周一起始）' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        calendar: { weekStart: 1 },
+        series: [{ id: 'daily', type: 'calendar', name: '提交数', data: daily('2026-01-01', 365) }],
+      });
+
+      const twoYears = ICEChart.createChart('two-years', {
+        title: { text: '跨年 + 自定义配色 / 周日起始' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        calendar: { weekStart: 0, minColor: '#fae8ff', maxColor: '#a21caf' },
+        series: [{ id: 'daily', type: 'calendar', name: '构建次数', data: daily('2025-06-01', 500) }],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      year.on('item:hover', (p) => write(`日历 hover  ${p.name} → ${p.value}`));
+      twoYears.on('item:hover', (p) => write(`跨年 hover  ${p.name} → ${p.value}`));
+
+      window.__charts = { year, twoYears };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

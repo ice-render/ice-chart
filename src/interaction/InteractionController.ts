@@ -585,6 +585,52 @@ export class InteractionController {
         };
       }
     }
+    // 多轴分类流：节点给总量，带子给「从谁到谁 + 流量」
+    if (anchorItem && anchorItem.series.type === 'alluvial') {
+      const point: any = anchorItem.point;
+      const raw: any = point.raw || {};
+      if (raw.__alluvialNode) {
+        return {
+          title: `${raw.axis}：${raw.name}`,
+          rows: [
+            {
+              name: '总量',
+              value: String(Number(Number(raw.total).toPrecision(4))),
+              color: anchorItem.series.color,
+            },
+          ],
+        };
+      }
+      if (raw.__alluvialFlow) {
+        return {
+          title: `${raw.from} → ${raw.to}`,
+          rows: [
+            {
+              name: '流量',
+              value: String(Number(Number(raw.value).toPrecision(4))),
+              color: anchorItem.series.color,
+            },
+          ],
+        };
+      }
+    }
+    // 日历热力：一天一个格子 —— 标题是日期，值就是那天的数值
+    if (anchorItem && anchorItem.series.type === 'calendar') {
+      const point: any = anchorItem.point;
+      const date = point.calendar ? point.calendar.date : point.name;
+      if (date) {
+        return {
+          title: String(date),
+          rows: [
+            {
+              name: anchorItem.series.name || this.host.norm.labels.value || '数值',
+              value: point.y === null ? '-' : String(point.y),
+              color: anchorItem.series.color,
+            },
+          ],
+        };
+      }
+    }
     /**
      * 六边形分箱：交互单位是**格子**（不是某个原始点）—— 提示框给格子的聚合值与点数。
      *

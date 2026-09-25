@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 多轴分类流（alluvial）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>多轴分类流（alluvial / 平行集）</h1>
+    <p class="lead">
+      N 个类目轴 + 相邻轴之间的流量带。与桑基的分工：桑基是<strong>图的拓扑</strong>（谁能流到谁），
+      alluvial 是<strong>表的分面</strong> —— 一行记录在每个轴上取一个类目，流量就是「同时满足这些类目的记录数」。
+      所以输入是一张表 + 轴列名（<code>alluvial: { axes, rows }</code>）。
+      轴的排序用重心法（第一轴按流量、之后的轴按上一轴位置的重心），否则带子会交叉成一团。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="sales" width="820" height="440"></canvas></div>
+      <div class="card"><canvas id="service" width="820" height="440"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      const rows = [];
+      let seed = 20260925;
+      const noise = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648;
+      };
+      for (const channel of ['直营网店', '经销渠道', '直播带货']) {
+        for (const region of ['华东', '华北', '华南']) {
+          for (const category of ['手机', '配件', '服务']) {
+            const value = Math.round(20 + noise() * 80);
+            rows.push({ 渠道: channel, 地区: region, 品类: category, value });
+          }
+        }
+      }
+
+      const sales = ICEChart.createChart('sales', {
+        title: { text: '销售结构：渠道 → 地区 → 品类' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        alluvial: { axes: ['渠道', '地区', '品类'], rows, nodeWidth: 14 },
+        series: [{ id: 'sales', type: 'alluvial', name: '销售额' }],
+      });
+
+      const tickets = [
+        { 入口: 'App', 等级: 'P0', 结果: '已解决', value: 30 },
+        { 入口: 'App', 等级: 'P1', 结果: '已解决', value: 60 },
+        { 入口: 'App', 等级: 'P1', 结果: '升级', value: 20 },
+        { 入口: '网页', 等级: 'P1', 结果: '已解决', value: 40 },
+        { 入口: '网页', 等级: 'P2', 结果: '已解决', value: 80 },
+        { 入口: '网页', 等级: 'P2', 结果: '挂起', value: 25 },
+        { 入口: '电话', 等级: 'P0', 结果: '升级', value: 15 },
+        { 入口: '电话', 等级: 'P2', 结果: '已解决', value: 45 },
+      ];
+      const service = ICEChart.createChart('service', {
+        title: { text: '工单流向：入口 → 等级 → 结果' },
+        theme: 'light',
+        legend: { show: false },
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        alluvial: { axes: ['入口', '等级', '结果'], rows: tickets, nodeWidth: 14, sort: 'total' },
+        series: [{ id: 'tickets', type: 'alluvial', name: '工单数' }],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      sales.on('item:hover', (p) => write(`流向 hover  ${p.name} → ${p.value}`));
+      service.on('item:hover', (p) => write(`工单 hover  ${p.name} → ${p.value}`));
+
+      window.__charts = { sales, service };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

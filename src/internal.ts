@@ -19,6 +19,9 @@ import type { SeriesRing } from './util/ring';
 import type { SeriesChunks } from './util/chunks';
 import type { ChartLabels } from './types';
 import type { ResolvedMatrix } from './layout/panels';
+import type { CalendarGrid } from './layout/calendar';
+import type { CalendarOption } from './types';
+import type { AlluvialOption } from './types';
 
 /** 归一化后的数据点（数据域，不含像素）。 */
 export interface DataPoint {
@@ -44,6 +47,8 @@ export interface DataPoint {
   boxplot?: [number, number, number, number, number];
   /** 小提琴图的密度轮廓（归一化阶段算好，组件只做像素映射）。 */
   violin?: ViolinProfile;
+  /** 日历热力：这一天落在第几周 / 星期几（以及规范化后的日期串）。 */
+  calendar?: { week: number; weekday: number; date: string };
 }
 
 /**
@@ -282,12 +287,21 @@ export interface InternalSeries {
    */
   panel: number;
   /**
+   * 日历热力的排布（`type: 'calendar'` 时非空）：归一化里算好，组件只读 ——
+   * 「日期 → 第几周 / 星期几」是纯函数，放在归一化里才能单测。
+   */
+  calendarGrid?: CalendarGrid | null;
+  /**
    * 归一化后的瀑布图配置（系列级优先，其次顶层 `option.waterfall`）。
    *
    * 顶层与系列级「两者等价」是 types 里的承诺；把解析结果落在内部系列上，
    * 绘制侧就不用再去够顶层 option（那需要给每个系列组件塞一份 chart 反引用）。
    */
   waterfallOption?: WaterfallOption;
+  /** 解析后的日历配置（系列级优先，缺省回落到 `option.calendar`）。 */
+  calendarOption?: CalendarOption;
+  /** 解析后的多轴分类流配置（系列级优先，缺省回落到 `option.alluvial`）。 */
+  alluvialOption?: AlluvialOption;
   /**
    * 数据域采样值（函数绘图用）。
    *
@@ -809,8 +823,23 @@ export interface InternalAxis {
 export interface NormalizedOption {
   /** 面板矩阵（小倍数）：null = 单绘图区（现有行为）。 */
   matrix: ResolvedMatrix | null;
+  /** 日历热力的排布（kind === 'calendar' 时非空）。 */
+  calendar: { grid: CalendarGrid; option: CalendarOption } | null;
   /** 场景类型：直角坐标 / 极坐标（饼图）/ 雷达图 / 桑基图。 */
-  kind: 'cartesian' | 'polar' | 'radar' | 'sankey' | 'funnel' | 'gauge' | 'liquid' | 'treemap' | 'graph';
+  kind:
+    | 'cartesian'
+    | 'polar'
+    | 'radar'
+    | 'sankey'
+    | 'funnel'
+    | 'gauge'
+    | 'liquid'
+    | 'treemap'
+    | 'graph'
+    | 'calendar'
+    | 'alluvial';
+  /** 多轴分类流的配置（kind === 'alluvial' 时非空）。 */
+  alluvial: AlluvialOption | null;
   /**
    * 直角坐标的排布方向。
    * vertical：类目在 x 轴（普通柱状/折线）；horizontal：类目在 y 轴（横向柱状，排行榜场景）。

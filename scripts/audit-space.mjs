@@ -39,6 +39,8 @@ const pages = [
   'matrix',
   'hexbin',
   'joint-plot',
+  'calendar',
+  'alluvial',
   'treemap',
   'graph',
   'mini-matlab',
