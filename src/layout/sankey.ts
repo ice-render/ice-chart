@@ -46,6 +46,10 @@ export interface SankeyLayoutResult {
  * 2. 每层先均匀铺开，再按邻居位置做几轮加权松弛，最后按顺序打包，保证不重叠；
  * 3. 连线厚度 = 流量 × 端点节点「流量→像素」比例（取两端较小值），
  *    并依次堆叠在节点的出入侧，保证同侧连线不重叠。
+ *
+ * **列内顺序可以由调用方钉住**（`options.nodeOrder`，用户在图上拖过节点之后由图表写回）：
+ * 表里列到的节点按表内位置排在前，没列到的排在后面并保持各自的 y 序 —— 于是「只钉一列」
+ * （拖过的那一列）也能表达，其余列照旧跟着松弛结果走。表缺席时逐值等于以前的行为。
  */
 export function layoutSankey(
   nodes: SankeyNodeOption[],
@@ -63,6 +67,25 @@ export function layoutSankey(
   const indexOf = (ref: string | number): number => {
     if (typeof ref === 'number') return ref >= 0 && ref < count ? ref : -1;
     return nodes.findIndex((node) => node.name === ref);
+  };
+  /**
+   * 列内排序：钉住的节点按 `nodeOrder` 里的位置，未钉住的排在其后、彼此按当前 y 稳定排序。
+   * 空表时两级比较键都退化成「y 序」，与从前逐值相同。
+   */
+  const pinnedRank = new Map<number, number>();
+  if (Array.isArray(options.nodeOrder)) {
+    options.nodeOrder.forEach((ref, position) => {
+      const id = indexOf(ref);
+      if (id >= 0 && !pinnedRank.has(id)) pinnedRank.set(id, position);
+    });
+  }
+  const sortColumn = (column: number[]): void => {
+    column.sort((a, b) => {
+      const rankA = pinnedRank.has(a) ? (pinnedRank.get(a) as number) : Number.POSITIVE_INFINITY;
+      const rankB = pinnedRank.has(b) ? (pinnedRank.get(b) as number) : Number.POSITIVE_INFINITY;
+      if (rankA !== rankB) return rankA - rankB;
+      return layout[a].y - layout[b].y;
+    });
   };
 
   const resolved = links
@@ -146,6 +169,7 @@ export function layoutSankey(
   const columns: number[][] = new Array(maxDepth + 1).fill(0).map(() => []);
   for (const node of layout) columns[node.depth].push(node.id);
   for (const column of columns) {
+    sortColumn(column);
     let y = rect.y;
     for (const id of column) {
       layout[id].y = y;
@@ -173,7 +197,7 @@ export function layoutSankey(
       node.y = center - node.height / 2;
     }
     for (const column of columns) {
-      column.sort((a, b) => layout[a].y - layout[b].y);
+      sortColumn(column);
       let y = rect.y;
       for (const id of column) {
         layout[id].y = y;

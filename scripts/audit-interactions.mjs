@@ -498,6 +498,91 @@ for (const name of runPages) {
     );
   }
 
+  // 12. 桑基节点拖拽重排：拖完得**真的换了列内顺序**，顺序要落到 option 上，几何还不许出绘图区。
+  //     判据必须落在「渲染态 + option」两处：只断言「没坏」的话，鼠标坐标写错照样通过
+  //     （竖直滑块那轮就踩过这个坑）。
+  if (name === 'sankey') {
+    const sankeyProbe = await page.evaluate(() => {
+      const chart = window.__chart;
+      const component = chart.seriesComponents[0];
+      const nodes = component.sankey.layout.nodes;
+      const columns = new Map();
+      nodes.forEach((node) => {
+        const column = columns.get(node.depth) || [];
+        column.push(node);
+        columns.set(node.depth, column);
+      });
+      /**
+       * 挑「列内最靠下、且比它上面的邻居矮」的那个节点：节点被夹在绘图区里，
+       * 只有矮节点的中心能越过邻居（高节点拖到底时中心还在邻居下面 —— 那是几何，不是 bug）。
+       */
+      let pick = null;
+      for (const [depth, column] of columns) {
+        const sorted = column.slice().sort((a, b) => a.y - b.y);
+        if (sorted.length < 2) continue;
+        const dragged = sorted[sorted.length - 1];
+        if (dragged.height < sorted[0].height) {
+          pick = { depth, index: dragged.id, name: dragged.name, centerY: dragged.y + dragged.height / 2, pixelY: component.pixelAt(dragged.id)[1] };
+          break;
+        }
+      }
+      if (!pick) return null;
+      const rect = chart.ice.canvasEl.getBoundingClientRect();
+      const dpr = chart.ice.dpr || 1;
+      const plot = chart.layout.plot;
+      return {
+        ...pick,
+        x: rect.left + (plot.x + component.pixelAt(pick.index)[0]) / dpr,
+        y: rect.top + (plot.y + component.pixelAt(pick.index)[1]) / dpr,
+        dropY: rect.top + (plot.y - 40) / dpr,
+      };
+    });
+    if (!sankeyProbe) {
+      report.push({ page: name, step: '12-sankey-drag-reorder', issues: ['sankey-drag-probe-no-target'] });
+    } else {
+      await step(
+        '12-sankey-drag-reorder',
+        async () => {
+          await page.mouse.move(sankeyProbe.x, sankeyProbe.y);
+          await page.mouse.down();
+          await page.mouse.move(sankeyProbe.x, sankeyProbe.dropY, { steps: 10 });
+          await page.mouse.up();
+          await page.waitForTimeout(300);
+        },
+        async () =>
+          page.evaluate((probe) => {
+            const issues = [];
+            const chart = window.__chart;
+            const component = chart.seriesComponents[0];
+            const nodes = component.sankey.layout.nodes;
+            const column = nodes
+              .filter((node) => node.depth === probe.depth)
+              .sort((a, b) => a.y - b.y)
+              .map((node) => node.name);
+            // ① 顺序真的变了（拖到列顶 = 排第一）
+            if (column[0] !== probe.name) issues.push(`sankey-drag-did-not-reorder(${column.join('/')})`);
+            // ② 顺序落在 option 上（快照/重开都靠它）
+            const order = chart.getOption().sankey && chart.getOption().sankey.nodeOrder;
+            if (!Array.isArray(order) || order.indexOf(probe.name) < 0) {
+              issues.push('sankey-order-not-written-to-option');
+            }
+            // ③ 拖动真的画出来了，不是只改了状态：像素位置必须上移
+            const pixel = component.pixelAt(probe.index);
+            if (!pixel || !(pixel[1] < probe.pixelY - 5)) issues.push('sankey-drag-not-rendered');
+            // ④ 重排之后所有节点仍夹在绘图区里
+            const plot = chart.layout.plot;
+            for (const node of nodes) {
+              if (node.y < plot.y - 0.5 || node.y + node.height > plot.y + plot.height + 0.5) {
+                issues.push(`sankey-node-out-of-plot(${node.name})`);
+                break;
+              }
+            }
+            return issues;
+          }, sankeyProbe)
+      );
+    }
+  }
+
   // 序列化 JSON 面板：必须存在、内容是可解析的真实快照、且带版本号
   const panel = await page.evaluate(() => {
     const api = window.__snapshotPanel;

@@ -107,10 +107,34 @@ describe('桑基图（引擎集成）', () => {
     if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
   });
 
-  async function mount(): Promise<ICEChart> {
-    chart = createChart(canvas, OPTION);
+  /**
+   * 每张图都给一份**自己的** option：拖拽重排会把 `nodeOrder` 就地写回传入的 option
+   * （与 `appendData` 同一条口径），共用模块级常量会让用例之间互相污染。
+   */
+  function freshOption(): ChartOption {
+    return JSON.parse(JSON.stringify(OPTION)) as ChartOption;
+  }
+
+  async function mount(option?: ChartOption): Promise<ICEChart> {
+    chart = createChart(canvas, option || freshOption());
     await chart.render();
     return chart;
+  }
+
+  /** 某一列里从上到下的节点名（读的是**渲染用的布局**，不是输入顺序）。 */
+  function columnNames(c: ICEChart, depth: number): string[] {
+    const component: any = c.seriesComponents[0];
+    return (component.sankey.layout.nodes as Array<{ name: string; depth: number; y: number }>)
+      .filter((node) => node.depth === depth)
+      .sort((a, b) => a.y - b.y)
+      .map((node) => node.name);
+  }
+
+  /** 第 index 个节点的中心（画布坐标）——拖拽入参就是画布 CSS 像素。 */
+  function nodeCenter(c: ICEChart, index: number): [number, number] {
+    const component: any = c.seriesComponents[0];
+    const pixel = component.pixelAt(index)!;
+    return [c.layout.plot.x + pixel[0], c.layout.plot.y + pixel[1]];
   }
 
   it('hits a node through the engine hit test', async () => {
@@ -154,5 +178,98 @@ describe('桑基图（引擎集成）', () => {
     expect(c.axisYList[0].state.display).toBe(false);
     expect(c.grid.state.display).toBe(false);
     expect(c.radarGrid.state.display).toBe(false);
+  });
+
+  it('drags a node above its neighbor and writes the new column order back to the option', async () => {
+    const c = await mount();
+    // 拖**矮**的那个（社交）：节点是被夹在绘图区里的，只有中心能越过邻居时才换得过来
+    const [x, y1] = nodeCenter(c, 1);
+    const events: any[] = [];
+    c.on('sankey:reorder', (payload: any) => events.push(payload));
+    expect(columnNames(c, 0)).toEqual(['搜索', '社交']);
+
+    c.controller.handlePointerDown(x, y1);
+    c.controller.handlePointerMove(x, c.layout.plot.y - 200);
+    c.controller.handlePointerUp(x, c.layout.plot.y - 200);
+    await c.render();
+
+    expect(columnNames(c, 0)).toEqual(['社交', '搜索']);
+    expect(c.getOption().sankey!.nodeOrder).toEqual(['社交', '搜索']);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ nodeIndex: 1, nodeName: '社交', column: 0 });
+    expect(events[0].order).toEqual(['社交', '搜索']);
+  });
+
+  it('leaves the order alone when the node is dragged back where it started', async () => {
+    const c = await mount();
+    const [x, y1] = nodeCenter(c, 1);
+    const events: any[] = [];
+    c.on('sankey:reorder', (payload: any) => events.push(payload));
+
+    c.controller.handlePointerDown(x, y1);
+    c.controller.handlePointerMove(x, c.layout.plot.y - 200);
+    c.controller.handlePointerMove(x, y1);
+    c.controller.handlePointerUp(x, y1);
+    await c.render();
+
+    expect(columnNames(c, 0)).toEqual(['搜索', '社交']);
+    // 拖出去又拖回来 = 没动过：不留一次「隐形钉住」，也不发事件
+    expect(c.getOption().sankey!.nodeOrder).toBeUndefined();
+    expect(events).toHaveLength(0);
+  });
+
+  it('keeps the node inside the plot when it is dragged far past the top', async () => {
+    const c = await mount();
+    const [x, y1] = nodeCenter(c, 1);
+
+    c.controller.handlePointerDown(x, y1);
+    c.controller.handlePointerMove(x, c.layout.plot.y - 400);
+    c.controller.handlePointerUp(x, c.layout.plot.y - 400);
+    await c.render();
+
+    const component: any = c.seriesComponents[0];
+    const node = component.sankey.layout.nodes[1];
+    expect(node.y).toBeGreaterThanOrEqual(c.layout.plot.y - 0.5);
+    expect(node.y + node.height).toBeLessThanOrEqual(c.layout.plot.y + c.layout.plot.height + 0.5);
+    expect(columnNames(c, 0)).toEqual(['社交', '搜索']);
+  });
+
+  it('does not reorder when sankey.draggable is false', async () => {
+    const c = await mount({ ...freshOption(), sankey: { ...(freshOption().sankey as any), draggable: false } });
+    const [x, y0] = nodeCenter(c, 0);
+    const [, y1] = nodeCenter(c, 1);
+    const events: any[] = [];
+    c.on('sankey:reorder', (payload: any) => events.push(payload));
+
+    c.controller.handlePointerDown(x, y0);
+    c.controller.handlePointerMove(x, y1 + 30);
+    c.controller.handlePointerUp(x, y1 + 30);
+    await c.render();
+
+    expect(columnNames(c, 0)).toEqual(['搜索', '社交']);
+    expect(c.getOption().sankey!.nodeOrder).toBeUndefined();
+    expect(events).toHaveLength(0);
+  });
+
+  it('keeps the dragged order through a snapshot round-trip', async () => {
+    const c = await mount();
+    const [x, y1] = nodeCenter(c, 1);
+    c.controller.handlePointerDown(x, y1);
+    c.controller.handlePointerMove(x, c.layout.plot.y - 200);
+    c.controller.handlePointerUp(x, c.layout.plot.y - 200);
+    await c.render();
+
+    const canvas2 = document.createElement('canvas');
+    canvas2.width = 700;
+    canvas2.height = 440;
+    const restored = createChart(canvas2, c.toJSON());
+    await restored.render();
+    const component: any = restored.seriesComponents[0];
+    const names = (component.sankey.layout.nodes as Array<{ name: string; depth: number; y: number }>)
+      .filter((node) => node.depth === 0)
+      .sort((a, b) => a.y - b.y)
+      .map((node) => node.name);
+    expect(names).toEqual(['社交', '搜索']);
+    restored.destroy();
   });
 });

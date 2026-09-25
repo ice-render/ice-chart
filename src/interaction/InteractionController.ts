@@ -83,6 +83,18 @@ type DragState =
       startX: number;
       startY: number;
       moved: boolean;
+    }
+  | {
+      mode: 'sankey-node';
+      component: any;
+      nodeIndex: number;
+      /** 按下时「节点中心 − 指针」的纵向偏移（保住手感，别让节点跳到指针中心）。 */
+      grabOffsetY: number;
+      /** 按下时那一列的顺序：松手后一样就什么都不做。 */
+      orderBefore: string[];
+      startX: number;
+      startY: number;
+      moved: boolean;
     };
 
 /**
@@ -1030,6 +1042,36 @@ export class InteractionController {
       };
       return true;
     }
+    // 桑基图：按下节点即可**在自己的列里**拖着重排（列由分层决定，横向没有意义）
+    if (
+      target.kind === 'series' &&
+      target.index >= 0 &&
+      target.component &&
+      target.component.seriesType === 'sankey' &&
+      target.component.sankey &&
+      typeof target.component.moveNode === 'function' &&
+      target.index < (target.component.nodeCount || 0) &&
+      (!target.component.sankey.options || target.component.sankey.options.draggable !== false)
+    ) {
+      this.preventDefault(evt);
+      this.setHover(null);
+      const [worldX, worldY] = this.host.ice.screenToWorld(screenX, screenY);
+      const local = target.component.globalToLocal(worldX, worldY);
+      const node = target.component.sankey.layout.nodes[target.index];
+      const sankeyPlot = target.component.sankey.plot;
+      this.drag = {
+        mode: 'sankey-node',
+        component: target.component,
+        nodeIndex: target.index,
+        // 注意两套坐标：节点几何在**图表坐标**里，指针换算出来的是**组件本地坐标**
+        grabOffsetY: node ? node.y - sankeyPlot.y + node.height / 2 - local[1] : 0,
+        orderBefore: target.component.columnOrderOf(target.index),
+        startX: screenX,
+        startY: screenY,
+        moved: false,
+      };
+      return true;
+    }
     // 数据坐标图元（注释卡片 / 阈值线 / 预测带）：按在它上面时交给组件自己处理拖拽，
     // 图表层不要抢着开始框选 / 平移 —— 否则「拖注释」会变成「拖画布」。
     if (target.component && typeof this.host.isMarkComponent === 'function' && this.host.isMarkComponent(target.component)) {
@@ -1124,6 +1166,23 @@ export class InteractionController {
       this.updateHover(screenX, screenY);
       return;
     }
+    if (drag.mode === 'sankey-node') {
+      // 松手才重排：拖动过程里只让节点跟手，松手时按落点算这一列的新顺序
+      const component = drag.component;
+      if (drag.moved && component && typeof component.commitOrder === 'function') {
+        const info = component.commitOrder(drag.nodeIndex, drag.orderBefore);
+        if (info) {
+          const series = this.resolver.seriesOfComponent(component);
+          this.host.emit('sankey:reorder', {
+            seriesId: series ? series.id : undefined,
+            seriesIndex: series ? series.index : undefined,
+            ...info,
+          });
+        }
+      }
+      this.updateHover(screenX, screenY);
+      return;
+    }
     if (drag.mode === 'pan') {
       this.updateHover(screenX, screenY);
     }
@@ -1190,11 +1249,18 @@ export class InteractionController {
       const local = component.globalToLocal(worldX, worldY);
       component.moveNode(drag.nodeIndex, local[0], local[1]);
       // 拖动时同步更新提示框锚点，手感更连贯
-      const series = this.seriesOfGraphComponent(component);
+      const series = this.resolver.seriesOfComponent(component);
       if (series) {
         const item = this.resolver.buildActiveItem(series, drag.nodeIndex);
         if (item) this.setHover({ kind: 'item', item });
       }
+      return;
+    }
+
+    if (drag.mode === 'sankey-node') {
+      drag.moved = true;
+      const local = drag.component.globalToLocal(worldX, worldY);
+      drag.component.moveNode(drag.nodeIndex, local[1], drag.grabOffsetY);
       return;
     }
 
@@ -1580,14 +1646,6 @@ export class InteractionController {
   }
 
   /** 沿指定方向找到下一个「落在绘图区内」的数据下标；找不到返回 -1。 */
-  /** 关系图组件 → 对应的 InternalSeries。 */
-  private seriesOfGraphComponent(component: any): any {
-    for (const series of this.host.norm.series) {
-      if (this.resolver.seriesComponentOf(series) === component) return series;
-    }
-    return null;
-  }
-
   private stepVisibleIndex(series: any, direction: number): number {
     const total = series.pointCount;
     if (!total) return -1;

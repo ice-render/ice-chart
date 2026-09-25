@@ -32,6 +32,91 @@ export class SankeySeries extends SeriesBase {
     return this.markDirty();
   }
 
+  public get nodeCount(): number {
+    return (this.sankey && this.sankey.layout.nodes.length) || 0;
+  }
+
+  /**
+   * 拖动节点：**只动 y**（列由数据的分层决定，横向没有意义），并夹在绘图区内。
+   *
+   * `grabOffsetY` 是指针按下那一刻「节点中心 − 指针」的偏移。保住它，节点才不会在
+   * 按下的瞬间跳到指针中心 —— 重排是「看着位置放」的操作，跳一下就会让人放错。
+   */
+  public moveNode(index: number, localY: number, grabOffsetY = 0): boolean {
+    const coord = this.sankey;
+    if (!coord) return false;
+    const node = coord.layout.nodes[index];
+    if (!node) return false;
+    const plot = coord.plot;
+    const centerY = localY + plot.y + grabOffsetY;
+    const maxY = Math.max(plot.y, plot.y + plot.height - node.height);
+    node.y = Math.max(plot.y, Math.min(maxY, centerY - node.height / 2));
+    this.sankeyCacheKey = '';
+    this.markDirty();
+    return true;
+  }
+
+  /**
+   * 某一列里从上到下的节点名（按**当前渲染位置**排）。
+   *
+   * 排序键用节点**中心 y**：这是指针能把节点带到哪里的那个位置，也就是用户眼里「它现在在哪」。
+   * 用上沿会比手感迟半截 —— 高节点被夹在绘图区底部时上沿早就越过了邻居，
+   * 而用户看到的中心还在邻居下面。
+   */
+  public columnOrderOf(index: number): string[] {
+    const coord = this.sankey;
+    if (!coord) return [];
+    const node = coord.layout.nodes[index];
+    if (!node) return [];
+    return coord.layout.nodes
+      .filter((item) => item.depth === node.depth)
+      .sort((a, b) => a.y + a.height / 2 - (b.y + b.height / 2))
+      .map((item) => item.name);
+  }
+
+  /**
+   * 松手：把**被拖过的那一列**的当前顺序钉进 `options.nodeOrder`（就地改，与 `appendData`
+   * 「改传入的 option」同一口径），并按新顺序重跑一次布局。
+   *
+   * - 只钉这一列：表里别的条目原样保留（可能来自更早的拖拽），其余列继续跟着松弛自动排；
+   * - 顺序与 `orderBefore`（按下时的列序）一样时**什么都不做** —— 拖出去又拖回来不该
+   *   留下一次「隐形钉住」，也不该发事件（与「拖回起点必须回到原位」同一条纪律）。
+   * - 返回给调用方发事件的信息；没变化返回 null。
+   */
+  public commitOrder(
+    index: number,
+    orderBefore: string[]
+  ): { nodeIndex: number; nodeName: string; column: number; order: string[] } | null {
+    const coord = this.sankey;
+    if (!coord) return null;
+    const dragged = coord.layout.nodes[index];
+    if (!dragged) return null;
+    const order = this.columnOrderOf(index);
+    if (order.length === orderBefore.length && order.every((name, i) => name === orderBefore[i])) return null;
+
+    const nodes = coord.layout.nodes;
+    const inColumn = new Set(order);
+    const kept: string[] = [];
+    for (const ref of Array.isArray(coord.options.nodeOrder) ? coord.options.nodeOrder : []) {
+      // 下标引用在第一次拖拽时归一成名字：名字是 links 用的那套引用，重排后下标会变
+      const name = typeof ref === 'number' ? (nodes[ref] && nodes[ref].name) : ref;
+      if (!name || inColumn.has(name) || kept.indexOf(name) >= 0) continue;
+      if (!nodes.some((node) => node.name === name)) continue;
+      kept.push(name);
+    }
+    coord.options.nodeOrder = kept.concat(order);
+    coord.layout = layoutSankey(
+      coord.options.nodes || [],
+      coord.options.links || [],
+      coord.plot,
+      coord.options,
+      this.chartTheme ? this.chartTheme.colorPalette : undefined
+    );
+    this.sankeyCacheKey = '';
+    this.markDirty();
+    return { nodeIndex: index, nodeName: dragged.name, column: dragged.depth, order };
+  }
+
   protected paintPad(): number {
     return 24;
   }
