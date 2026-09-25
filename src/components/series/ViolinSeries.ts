@@ -94,7 +94,16 @@ export class ViolinSeries extends SeriesBase {
     return this.polygons[index] || null;
   }
 
-  /** 像素缓存 = 轮廓的「最宽处中心」（高亮与提示框锚点）。 */
+  /**
+   * 像素缓存 = 轮廓的「最宽处中心」（高亮与提示框锚点）。
+   *
+   * ⚠️ 这里的 y **必须是峰值密度那一行**，不能拿中位数（`point.y`）当锚：
+   * 双峰分布的中位数正落在两个峰之间的**谷底**，那里的核密度≈0、轮廓宽度收成 0 ——
+   * 锚点就落到了自己的多边形**外面**，表现是「悬停不上 + 提示框/高亮锚在形状外」，
+   * 而图上明明看得见那一组（2026-09-25 实测：`distribution` 页的「双峰（带宽 ×0.3）」
+   * 探针 `hitTestIndex` 返回 -1，同一组的最宽处返回 1）。
+   * 单峰分布里中位数本来就靠近峰、两种取法看不出差别，所以这个坑只在双峰上暴露。
+   */
   protected rebuildPixels(): void {
     const coord = this.coord;
     const n = this.series.pointCount;
@@ -115,7 +124,7 @@ export class ViolinSeries extends SeriesBase {
         continue;
       }
       this.pixels[i * 2] = coord.xScale.map(point.xValue);
-      this.pixels[i * 2 + 1] = coord.yScale.map(point.y);
+      this.pixels[i * 2 + 1] = coord.yScale.map(peakGridValue(profile, point.y));
     }
     this.xMonotonic = false;
     this.renderIndices = null;
@@ -177,6 +186,25 @@ export class ViolinSeries extends SeriesBase {
     }
     this.endDraw();
   }
+}
+
+/**
+ * 轮廓最宽处的 y（峰值密度所在的网格值）。
+ *
+ * 越界 / 取不到时退回 `fallback`（中位数）：调用方只求一个「一定在轮廓里」的锚点，
+ * 密度数组为空这种退化情形不该让锚点变成 NaN（那会让高亮与提示框整块消失）。
+ */
+function peakGridValue(profile: { grid: number[]; density: number[] }, fallback: number): number {
+  let best = -1;
+  let bestDensity = -Infinity;
+  for (let k = 0; k < profile.density.length; k++) {
+    if (profile.density[k] > bestDensity) {
+      bestDensity = profile.density[k];
+      best = k;
+    }
+  }
+  const value = best >= 0 ? profile.grid[best] : NaN;
+  return isFinite(value) ? value : fallback;
 }
 
 /** 偶奇规则的多边形内部判定（射线法）。 */
