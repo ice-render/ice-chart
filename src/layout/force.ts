@@ -37,41 +37,6 @@ export interface ForceLayoutResult {
   links: ForceLinkLayout[];
 }
 
-export interface GraphLabelAnchorOptions {
-  /** 节点半径（像素）。 */
-  radius: number;
-  /** 节点与文字之间的间隙（像素）。 */
-  gap: number;
-  /** 一行文字的高度（用字号近似即可；文字基线在中线，所以上下各占一半）。 */
-  textHeight: number;
-  /** 组件盒的高度（本地坐标 0..boxHeight）。 */
-  boxHeight: number;
-}
-
-/**
- * 节点标签的中心线 y：默认在节点下方，放不下就翻到上方，上下都放不下就夹进盒子。
- *
- * 为什么必须夹：标签是**画在盒子外也不会报错**的那种东西，漏了这一步就是「图上看得见、
- * 但被画布裁掉半行」。实测（2026-09-25）：四个大屏的力导向面板底部余量只剩 1~2px，
- * `dashboard-energy` 那张的节点名被裁成半行 —— 后来立了 `scripts/audit-bleed.mjs` 盯这条。
- *
- * 盒子比一行文字还矮时无能为力（那已经排不进任何东西了），此时贴住盒子内最靠近节点的一侧。
- */
-export function graphLabelAnchorY(
-  centerY: number,
-  options: GraphLabelAnchorOptions
-): { y: number; below: boolean } {
-  const { radius, gap, textHeight, boxHeight } = options;
-  const half = textHeight / 2;
-  const belowY = centerY + radius + gap;
-  if (belowY + half <= boxHeight) return { y: belowY, below: true };
-  const aboveY = centerY - radius - gap;
-  if (aboveY - half >= 0) return { y: aboveY, below: false };
-  const lo = Math.min(half, Math.max(0, boxHeight - half));
-  const hi = Math.max(lo, boxHeight - half);
-  return { y: clamp(belowY, lo, hi), below: true };
-}
-
 /**
  * 这个节点要不要标名字：`show: false` 全不标；`minSize` 只标不小于它的。
  *
