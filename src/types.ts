@@ -126,6 +126,12 @@ export interface GraphNodeOption {
   value?: number;
   /** 分类名（对应 `graph.categories`），用于配色。 */
   category?: string | number;
+  /**
+   * 节点颜色，**覆盖口**：写了就用它。
+   *
+   * 不写时的解析顺序是「分类色 → 主题色板」：`categories` 里同名分类的 `color`，
+   * 没配分类色就退回 `categories[该分类的下标]` 对应的主题色板色，仍没有则按节点下标取色板。
+   */
   color?: string;
   /** 初始坐标（给了就用它，否则按 circular 均匀铺开）。 */
   x?: number;
@@ -139,6 +145,14 @@ export interface GraphLinkOption {
   source: string | number;
   target: string | number;
   value?: number;
+  /**
+   * 连线颜色，**覆盖口**：写了就用它。
+   *
+   * ⚠️ 不写时的默认是**继承源节点的颜色**（`link.color || 源节点.color`）——
+   * 多分类的关系图里，这条默认会把各个分类的颜色顺着连线铺满整张图，看着像一片杂色。
+   * 想要「连线只表达关系类型 / 一律中性色」，就在每条线上显式给 `color`
+   * （动态生成的数据也一样：`links.map(l => ({ ...l, color: 按关系类型取色 }))`）。
+   */
   color?: string;
 }
 

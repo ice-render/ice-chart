@@ -198,7 +198,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `gauge` | `gauge: { min, max, axisLineColor }` + `data: [{ name, value }]` | 指针随数值转动，轴线按阈值分段配色 |
 | `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
 | `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
-| `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；按分类配色、**按关系量定大小**（节点写 `value: 1` 才开这个开关）。标签**自己找位置**：先下方、贴底翻上方、与别的标签相撞就挪到左右侧，最后才选撞得最少的一侧 —— 所以密集图也能给每个节点都标名字（`graph.label.minSize` 可按需只标主要节点），标签也不会被画布裁掉 |
+| `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；**按关系量定大小**（节点写 `value: 1` 才开这个开关）。标签**自己找位置**：先下方、贴底翻上方、与别的标签相撞就挪到左右侧，最后才选撞得最少的一侧 —— 所以密集图也能给每个节点都标名字（`graph.label.minSize` 可按需只标主要节点），标签也不会被画布裁掉。**配色三个覆盖口**：`categories[].color`（分类色）/ `nodes[].color`（单点）/ `links[].color`（单条线）；连线**不写颜色时继承源节点颜色**，多分类图想让它「只表达关系类型」就逐条给 `links[].color` |
 | `function` | `expression: 'sin(x)/x'`（+ `params` / `domain` / `samples` / `adaptive`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合；默认**自适应细分**，`adaptive: false` 才是均匀采样 |
 | `parametric` | `xExpression: 'sin(3*t)'` + `yExpression: 'cos(2*t)'` | 参数曲线（李萨如 / 螺线 / 心形线）；自变量是 `t` |
 | `parametric`（极坐标） | `polarExpression: 'cos(3*t)'` + `polarGrid: true` | 极坐标 `r(θ)`（玫瑰线 / 心形线 / 螺线），配 `aspect: 'equal'` 出 MATLAB `polarplot` 观感 |
