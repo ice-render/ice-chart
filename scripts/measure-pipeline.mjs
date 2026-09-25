@@ -148,6 +148,78 @@ const measure = async (virtual, withWindow = false) =>
   );
 
 const rows = [await measure(false), await measure(true), await measure(true, true)];
+
+/**
+ * **视窗场景**（2026-09-25 补，P1「布局复用」的尺子）。
+ *
+ * 为什么单列一条：上面三条量的是「数据每 tick 都变」的滚动窗口 —— 那条路里域的判据
+ * **永远不成立**，布局复用本来就不该帮上忙。P1 服务的是另一类更新：**数据没变、只改视窗**
+ * （拖 dataZoom 滑块 / 滚轮缩放 / `setDomain` API）。这一档就量它：
+ *
+ * - `域变化`：窗口真的移了（类目轴的 tick 表跟着换），这是布局复用**不能**整段跳过的那种；
+ * - `同输入重跑`：`applyOption` 拿到一模一样的输入（数据没变、窗口没变）—— 布局复用的上限就在这里。
+ *
+ * 两条都给 p50，因为「拖滑块卡不卡」看的是这个数。
+ *
+ * 这一条就是 P1 的判据来源：10 万类目下两条都是 0.2~0.3ms，所以 P1 不做
+ * （结论与 profile 见 `plans/incremental-pipeline.md` 的「第 8 期」）。
+ * 用的是内置 `line` + `virtual: true`（列存那条路），与上面三行用的自定义 Probe 系列不是同一条链路。
+ */
+const measureViewport = async (POINTS, TICKS) =>
+  page.evaluate(
+    async ({ POINTS, TICKS }) => {
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;left:0;top:0;z-index:9;background:#fff';
+      const canvas = document.createElement('canvas');
+      canvas.width = 1100;
+      canvas.height = 460;
+      host.appendChild(canvas);
+      document.body.appendChild(host);
+
+      const data = new Array(POINTS);
+      for (let i = 0; i < POINTS; i++) data[i] = { x: `D${i}`, y: 50 + Math.sin(i / 37) * 20 };
+      const chart = window.ICEChart.createChart(canvas, {
+        legend: { show: false },
+        animation: { enabled: false },
+        xAxis: { type: 'category' },
+        yAxis: {},
+        series: [{ id: 's', type: 'line', name: 'S', yField: 'y', data, virtual: true }],
+      });
+      await chart.render();
+
+      const median = (list) => {
+        const sorted = list.slice().sort((a, b) => a - b);
+        return Math.round(sorted[Math.floor(sorted.length / 2)] * 100) / 100;
+      };
+
+      const domainMs = [];
+      for (let i = 0; i < TICKS; i++) {
+        const from = 0.5 + i * 0.002;
+        const t = performance.now();
+        chart.setDomainFromFractions(from, Math.min(1, from + 0.4), 'api');
+        domainMs.push(performance.now() - t);
+      }
+
+      const repeatMs = [];
+      for (let i = 0; i < TICKS; i++) {
+        const t = performance.now();
+        chart.applyOption(chart.option, { animate: false, preserveView: true });
+        repeatMs.push(performance.now() - t);
+      }
+
+      chart.destroy();
+      host.remove();
+      return {
+        模式: '视窗（10 万类目，数据不变）',
+        点数: POINTS,
+        '域变化 p50 ms': median(domainMs),
+        '同输入重跑 p50 ms': median(repeatMs),
+      };
+    },
+    { POINTS, TICKS }
+  );
+
+rows.push(await measureViewport(POINTS, TICKS));
 await cdp.send('HeapProfiler.collectGarbage');
 const usage = await cdp.send('Runtime.getHeapUsage');
 console.log(JSON.stringify({ url: URL, 堆MB: Math.round((usage.usedSize / 1048576) * 10) / 10, rows }, null, 1));
