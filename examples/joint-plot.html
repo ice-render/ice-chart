@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>ice-chart · 边际分布（joint plot）</title>
+    <link rel="stylesheet" href="./assets/style.css" />
+  </head>
+  <body>
+    <h1>边际分布（joint plot）</h1>
+    <p class="lead">
+      联合分布图 = 主图（散点 / 热力）+ 轴侧边际。**core 不需要为新类型加东西**：几何由
+      <code>matrix: { rows: [3, 1] }</code> 给到，边际的「计数」域用第二个 y 轴
+      （<code>yAxis: [{...}, { name: '计数' }]</code> + 边际系列 <code>yAxisIndex: 1</code>），
+      两者共享同一份 x 域 —— 主图与边际永远对齐，缩放 / 框选也一起走。
+      直方图的分箱在页面侧算（示例里给了一段 <code>histogram()</code>），core 只画柱子。
+    </p>
+
+    <div class="row">
+      <div class="card"><canvas id="joint" width="720" height="560"></canvas></div>
+      <div class="card"><canvas id="joint-transposed" width="720" height="560"></canvas></div>
+    </div>
+    <div class="card" id="snapshot-panel"></div>
+    <div class="card"><div class="log" id="log">事件日志：</div></div>
+
+    <script src="./vendor/ice-render.umd.js"></script>
+    <script src="./vendor/ice-chart.umd.js"></script>
+    <script src="./assets/snapshot-panel.js"></script>
+    <script>
+      /** 两团相关的点：主图看「关系」，边际看「各自的分布」。确定性伪随机。 */
+      const makeCloud = () => {
+        const points = [];
+        let seed = 20260925;
+        const noise = () => {
+          seed = (seed * 1103515245 + 12345) % 2147483648;
+          return seed / 2147483648 - 0.5;
+        };
+        for (let i = 0; i < 600; i++) {
+          const x = 30 + i * 0.08 + noise() * 26;
+          const y = 0.6 * x + 40 + noise() * 34;
+          points.push([Math.round(x * 100) / 100, Math.round(y * 100) / 100]);
+        }
+        return points;
+      };
+
+      /** 把一列数值切成等宽箱：返回 [{ center, count }]，供柱子直接画。 */
+      const histogram = (values, bins, domain) => {
+        const [lo, hi] = domain;
+        const width = (hi - lo) / bins;
+        const counts = new Array(bins).fill(0);
+        for (const value of values) {
+          if (!isFinite(value) || value < lo || value > hi) continue;
+          const index = Math.min(bins - 1, Math.floor((value - lo) / width));
+          counts[index] += 1;
+        }
+        return counts.map((count, index) => ({ center: lo + width * (index + 0.5), count, width }));
+      };
+
+      const cloud = makeCloud();
+      const xs = cloud.map((point) => point[0]);
+      const domainOf = (values) => {
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const pad = (max - min) * 0.08;
+        return [min - pad, max + pad];
+      };
+      const xDomain = domainOf(xs);
+      const bars = histogram(xs, 28, xDomain);
+
+      const joint = ICEChart.createChart('joint', {
+        title: { text: '主图 + 底部边际（共享 x 域）' },
+        theme: 'light',
+        legend: { show: false },
+        matrix: { rows: [3, 1], columns: 1, gap: 10 },
+        // ⚠️ 必须显式 `type: 'value'`：只要图里有 bar，x 轴会按惯例推断成**类目轴**，
+        // 直方图的柱宽会塌成 1px（数值 x 上的等距槽才是直方图要的）
+        xAxis: { type: 'value', name: '规格 A', min: xDomain[0], max: xDomain[1] },
+        yAxis: [
+          { name: '规格 B' },
+          { name: '计数' },
+        ],
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [
+          { id: 'cloud', type: 'scatter', name: '样本', panel: 0, symbolSize: 4, data: cloud },
+          {
+            id: 'margin-x',
+            type: 'bar',
+            name: '规格 A 的分布',
+            panel: 1,
+            yAxisIndex: 1,
+            barWidth: 0.9,
+            data: bars.map((bin) => [bin.center, bin.count]),
+          },
+        ],
+      });
+
+      // 变体：把边际放上面（rows: [1, 3]），主图换成热力 —— 同一套机制换布局方向
+      const heatBars = histogram(cloud.map((point) => point[1]), 22, domainOf(cloud.map((point) => point[1])));
+      const jointTransposed = ICEChart.createChart('joint-transposed', {
+        title: { text: '边际在上（rows: [1, 3]）+ 主图热力' },
+        theme: 'light',
+        legend: { show: false },
+        matrix: { rows: [1, 3], columns: 1, gap: 10 },
+        // 共享的 x 轴是「规格 B」，所以边际（在上）画的是规格 B 的分布
+        xAxis: { type: 'value', name: '规格 B' },
+        yAxis: [{ name: '计数' }, { name: '规格 A' }],
+        tooltip: { trigger: 'item' },
+        animation: { enabled: false },
+        series: [
+          {
+            id: 'margin-y',
+            type: 'bar',
+            name: '规格 B 的分布',
+            panel: 0,
+            yAxisIndex: 0,
+            barWidth: 0.9,
+            data: heatBars.map((bin) => [bin.center, bin.count]),
+          },
+          {
+            id: 'heat',
+            type: 'scatter',
+            name: '样本',
+            panel: 1,
+            yAxisIndex: 1,
+            symbolSize: 4,
+            data: cloud.map((point) => [point[1], point[0]]),
+          },
+        ],
+      });
+
+      const log = document.getElementById('log');
+      const write = (line) => {
+        log.textContent = `${new Date().toLocaleTimeString()}  ${line}\n` + log.textContent;
+      };
+      joint.on('item:hover', (p) => write(`主图 hover  ${p.seriesName} → (${p.value})`));
+      joint.on('brush:end', (range) => range && write(`主图框选 x: ${range.x0} ~ ${range.x1}`));
+      jointTransposed.on('item:hover', (p) => write(`变体 hover  ${p.seriesName}`));
+
+      window.__charts = { joint, jointTransposed };
+      mountSnapshotPanel();
+    </script>
+  </body>
+</html>

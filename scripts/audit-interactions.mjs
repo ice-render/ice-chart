@@ -53,6 +53,7 @@ const pages = [
   'distribution',
   'matrix',
   'hexbin',
+  'joint-plot',
   'treemap',
   'graph',
   'mini-matlab',

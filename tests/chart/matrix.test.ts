@@ -222,4 +222,31 @@ describe('面板矩阵（引擎集成）', () => {
     const drawn = (axes[0].lastTicks || []).filter((tick: any) => tick.drawn);
     expect(drawn.length).toBeGreaterThanOrEqual(3);
   });
+
+  /**
+   * 边际分布（joint plot）靠这条：每一行画的是**那一行实际用到的那根 y 轴**，
+   * 而不是恒为主轴 —— 否则边际（计数域）会顶着主图（数值域）的刻度，读数全是错的。
+   */
+  it('每行画自己那根 y 轴（边际行用计数轴，不和主图串刻度）', async () => {
+    const c = await mount({
+      legend: { show: false },
+      matrix: { rows: [3, 1], columns: 1, gap: 10 },
+      xAxis: { type: 'value', name: '规格 A' },
+      yAxis: [{ name: '规格 B' }, { name: '计数' }],
+      animation: { enabled: false },
+      series: [
+        { id: 'cloud', type: 'scatter', panel: 0, data: [[10, 30], [20, 45], [30, 60]] },
+        { id: 'margin', type: 'bar', panel: 1, yAxisIndex: 1, data: [[12, 4], [18, 7], [24, 3]] },
+      ],
+    });
+    const body: any = (c as any).panelAxisY[0];
+    const margin: any = (c as any).panelAxisY[1];
+    expect(margin.axis).toBeTruthy();
+    // 两行各自绑自己的轴：主图是轴 0（规格 B），边际是轴 1（计数）
+    expect(body.axis.option.name).toBe('规格 B');
+    expect(margin.axis.option.name).toBe('计数');
+    // 而且用的是各自面板里的那套比例尺（边际的计数域从 0 起）
+    expect(body.axis.scale.domain[0]).toBeCloseTo(30 - (60 - 30) * 0.05, 0);
+    expect(margin.axis.scale.domain[0]).toBeCloseTo(0, 1);
+  });
 });
