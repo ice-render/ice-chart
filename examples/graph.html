@@ -16,11 +16,19 @@
       <b>节点大小按关系量</b>（连了多少关系、亲疏多少，面积开方映射），连线粗细按单条关系的亲疏。
       <br />
       <b>只给主要人物标名字</b>（`graph.label.minSize`）—— 一百多号人全标会糊成一片，
-      其余人物<b>悬停</b>看是谁、点一下看所属与关系数。<b>拖动任意节点</b>可以重新排布：
-      拖的时候跟着指针走，松手后跑少量迭代让邻居跟随（被拖的节点保持固定）。
+      其余人物<b>悬停</b>看是谁、点一下看所属与关系数。
+      <br />
+      <b>滚轮缩放画布</b>（以指针为锚点）、<b>拖空白处平移画布</b>、<b>拖节点单独挪它</b> ——
+      拖节点时<b>不会再跑一遍自动布局</b>（`graph.settleOnDrop: false`），所以摆好的位置不会被力学重排冲掉；
+      放大之后想回到全景，点「复位视图」。
     </p>
 
-    <div class="card"><canvas id="graph" width="1560" height="960"></canvas></div>
+    <div class="card">
+      <div class="toolbar">
+        <button id="reset-view" type="button">复位视图</button>
+      </div>
+      <canvas id="graph" width="1560" height="960"></canvas>
+    </div>
     <div class="card" id="snapshot-panel"></div>
     <div class="card"><div class="log" id="log">事件日志：</div></div>
 
@@ -292,14 +300,25 @@
         legend: { show: false },
         tooltip: { trigger: 'item', formatter },
         animation: { enter: { duration: 900 } },
+        /**
+         * 画布（视图）缩放与平移：力导向图没有坐标轴，「改数据域」那套缩放 / 平移对它没有意义 ——
+         * 走 `mode: 'viewport'`：滚轮以指针为锚点缩放、拖空白处平移视图。
+         * 拖节点不受影响：命中节点那条路在 controller 里优先级更高（先走节点拖拽）。
+         */
+        interaction: {
+          zoom: { enabled: true, mode: 'viewport', wheel: true, wheelFactor: 1.15 },
+          pan: { enabled: true, mode: 'viewport' },
+        },
         graph: {
           layout: 'force',
           /**
            * 一百多号人的参数**不是照小图抄的**：向心力的增量是「离中心的距离 × gravity」，
-           * 默认 0.06 在 1400px 的画布上等于每步 80+ 的拉力，而弹簧力只有个位数 ——
-           * 结果就是核心挤成一团、少数离群点又把包围盒撑大（铺满时核心被压得更小）。
-           * 这组数是**扫出来的**（`forceLayout` 纯函数跑同一份数据，比「铺满度 / 核心占比 /
-           * 标签重叠对数 / 节点最小间距」）：标签零重叠、铺满 88%、核心展开 62%。
+           * 默认 0.06 在 1500px 的画布上等于每步 80+ 的拉力，而弹簧力只有个位数 ——
+           * 结果就是核心挤成一团、少数离群点又把包围盒撑大（等比铺满时核心被压得更小）。
+           *
+           * ⚠️ 这组数是在**189 人的真实数据**上挑的，页面实测：节点包围盒 933×891、
+           * 绘图区 1532×912（铺满 59%）、31 位标名、按名长估的标签盒有 1 对重叠。
+           * （别拿早先那份「扫参数脚本」的输出当数 —— 那把尺子的指标算错过。）
            */
           repulsion: 70000,
           edgeLength: 170,
@@ -307,12 +326,13 @@
           damping: 0.88,
           iterations: 900,
           symbolSizeRange: [10, 44],
-          // 只标主要人物：`minSize` 是**像素**（节点直径）。115 人里这个阈值正好留下 ~29 位主角，
+          // 只标主要人物：`minSize` 是**像素**（节点直径）。189 人里这个阈值留下 31 位主角，
           // 其余靠悬停读 —— 全标会糊成一片（判据用页面上的实际直径分布量过）。
           label: { minSize: 20 },
           curve: true,
           draggable: true,
-          settleOnDrop: true,
+          // 拖完**不**再跑力学：摆好的位置是用户的意图，不该被自动布局冲掉
+          settleOnDrop: false,
           categories,
           nodes,
           links,
@@ -326,6 +346,11 @@
       };
       graph.on('item:hover', (p) => write(`hover  ${p.xValue}`));
       graph.on('item:click', (p) => write(`click  ${p.xValue}`));
+      document.getElementById('reset-view').addEventListener('click', () => {
+        // 视图缩放 / 平移落在引擎的 viewport 上（scale + tx/ty），复位就是把它拉回原样
+        graph.ice.setViewport(1, 0, 0);
+        write('view reset  1.00x');
+      });
 
       window.__chart = graph;
       mountSnapshotPanel();
