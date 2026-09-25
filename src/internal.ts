@@ -939,6 +939,8 @@ export interface ChartLayout {
   polar: PolarLayout | null;
   /** dataZoom 滑块占用的矩形；未启用时为 null。 */
   slider: Rect | null;
+  /** y 方向的 dataZoom 滑块（绘图区右侧外的竖直轨道）；没配 `dataZoom.sliderY` 时为 null。 */
+  sliderY: Rect | null;
   xAxisLayout: AxisLayout;
   /** 每个 y 轴的刻度布局，与 norm.yAxes 一一对应。 */
   yAxes: AxisLayout[];

@@ -170,6 +170,8 @@ export class ICEChart {
   public highlight: Highlight | null = null;
   public brushComponent: Brush | null = null;
   public dataZoomSlider: DataZoomSlider | null = null;
+  /** y 方向的竖直滑块（配了 `dataZoom.sliderY` 才显示；见 `layout.sliderY`）。 */
+  public dataZoomSliderY: DataZoomSlider | null = null;
   public seriesComponents: SeriesBase[] = [];
   public controller: InteractionController;
   /** 数据坐标图元的容器（注释 / 阈值线 / 预测带）。 */
@@ -312,6 +314,14 @@ export class ICEChart {
     this.highlight = new Highlight({ width: canvas.width, height: canvas.height, zIndex: Z.highlight });
     this.brushComponent = new Brush({ width: canvas.width, height: canvas.height, zIndex: Z.brush });
     this.dataZoomSlider = new DataZoomSlider({ left: 0, top: 0, width: canvas.width, height: 26, zIndex: Z.brush + 5 });
+    this.dataZoomSliderY = new DataZoomSlider({
+      left: 0,
+      top: 0,
+      width: 26,
+      height: 0,
+      orientation: 'vertical',
+      zIndex: Z.brush + 5,
+    });
     this.tooltip = new Tooltip({ width: canvas.width, height: canvas.height, zIndex: Z.tooltip });
 
     this.root.addChildren([
@@ -328,6 +338,7 @@ export class ICEChart {
       this.highlight,
       this.brushComponent,
       this.dataZoomSlider,
+      this.dataZoomSliderY,
       this.tooltip,
     ]);
 
@@ -2200,6 +2211,7 @@ export class ICEChart {
 
     if (this.dataZoomSlider) {
       const sliderRect = layout.slider;
+      const sliderOption: any = norm.option.dataZoom && norm.option.dataZoom.slider;
       if (sliderRect) {
         this.dataZoomSlider.setState({
           left: sliderRect.x,
@@ -2210,11 +2222,37 @@ export class ICEChart {
         });
         const [startFraction, endFraction] = this.domainFractions();
         this.dataZoomSlider.setWindow(startFraction, endFraction);
+        // `dataZoom.slider.color` 以前文档里有、代码里没用过（组件根本没有颜色字段）—— 一并做实
+        this.dataZoomSlider.windowColor = (sliderOption && sliderOption.color) || null;
       } else {
         this.dataZoomSlider.setState({ display: false });
       }
       this.dataZoomSlider.theme = theme;
       this.dataZoomSlider.markDirty();
+    }
+
+    if (this.dataZoomSliderY) {
+      const sliderYRect = layout.sliderY;
+      const zoomOption: any = norm.option.dataZoom;
+      const sliderYOption: any = zoomOption && zoomOption.sliderY;
+      if (sliderYRect) {
+        this.dataZoomSliderY.setState({
+          left: sliderYRect.x,
+          top: sliderYRect.y,
+          width: sliderYRect.width,
+          height: sliderYRect.height,
+          display: true,
+        });
+        const axisIndex = Math.max(0, Math.floor(Number(sliderYOption && sliderYOption.axisIndex) || 0));
+        const [startFraction, endFraction] = this.domainYFractions(axisIndex);
+        this.dataZoomSliderY.setWindow(startFraction, endFraction);
+        this.dataZoomSliderY.axisIndex = axisIndex;
+        this.dataZoomSliderY.windowColor = (sliderYOption && sliderYOption.color) || null;
+      } else {
+        this.dataZoomSliderY.setState({ display: false });
+      }
+      this.dataZoomSliderY.theme = theme;
+      this.dataZoomSliderY.markDirty();
     }
 
     this.syncSeries(animate);
@@ -2284,6 +2322,69 @@ export class ICEChart {
     const span = f1 - f0;
     const range = [f0 + span * start, f0 + span * end];
     return this.setDomain('x', guard ? this.guardInteractiveXWindow(range) : range, source);
+  }
+
+  /**
+   * 当前 **y** 数据域在完整数据域中的比例窗口（0~1），供竖直滑块显示。
+   *
+   * 口径与 x 的 `domainFractions` 逐条对齐：类目轴按**类目数**计
+   * （窗口 `[from..to]` → `[from/n, (to+1)/n]`，与 `dataZoom.start/end` 的语义一致），
+   * 数值轴按值线性插值。`axisIndex` 选哪根 y 轴（多轴叠加时用），越界退回主轴。
+   */
+  public domainYFractions(axisIndex = 0): [number, number] {
+    const index = axisIndex > 0 && axisIndex < this.norm.yAxes.length ? axisIndex : 0;
+    const full = (index === 0 ? this.fullYDomain : this.fullYDomains[index]) as any[];
+    const axis = this.norm.yAxes[index] || this.norm.yAxis;
+    const domain = axis ? axis.domain : null;
+    if (!full || full.length < 2 || !domain || domain.length < 2) return [0, 1];
+    if (axis.type === 'category') {
+      const n = full.length;
+      if (n <= 1) return [0, 1];
+      // y 的类目表没有增量查表口（那是 x 专有的），退回 indexOf；窗口是**一串类目**，
+      // 端点取首末两项，长度按类目数计。
+      const from = Math.max(0, full.indexOf(domain[0]));
+      const to = full.indexOf(domain[domain.length - 1]);
+      return [from / n, ((to < 0 ? n - 1 : to) + 1) / n];
+    }
+    const f0 = Number(full[0]);
+    const f1 = Number(full[1]);
+    const span = f1 - f0 || 1;
+    return [(Number(domain[0]) - f0) / span, (Number(domain[1]) - f0) / span];
+  }
+
+  /**
+   * 由**竖直滑块**的比例窗口反推 y 数据域并应用（`axisIndex` 默认主轴，多轴时用）。
+   *
+   * 与 x 的 `setDomainFromFractions` 同一套口径，只有一处有意不同：**不套**
+   * `guardInteractiveXWindow` 那套「窗口至少盖住 2 个数据点」的探针 —— 它依赖 `xValueAt`
+   * 的单调列，y 侧没有可用的单调列，每拖一次就是一趟全量扫描（10 万点 × 每次 pointermove）。
+   * y 的兜底本来就统一在 `clampAxisDomain` 里：数值轴最小跨度 0.1% 且不越出数据域、
+   * 类目轴至少两个类目；滑块拖动另有 0.02 的最小窗口（在 `InteractionController` 里）。
+   * 也就是说：**滑块的兜底与 y 的滚轮 / 平移手势完全同口径**，不引入第二套语义。
+   */
+  public setDomainYFromFractions(start: number, end: number, source = 'slider', axisIndex = 0): this {
+    if (this.norm.kind !== 'cartesian') return this;
+    const index = axisIndex > 0 && axisIndex < this.norm.yAxes.length ? axisIndex : 0;
+    const full = (index === 0 ? this.fullYDomain : this.fullYDomains[index]) as any[];
+    const axis = this.norm.yAxes[index] || this.norm.yAxis;
+    if (!full || full.length < 2 || !axis) return this;
+    // 窗口没变就不重建（与 x 那条一致）
+    const [currentStart, currentEnd] = this.domainYFractions(index);
+    if (Math.abs(currentStart - start) < 1e-4 && Math.abs(currentEnd - end) < 1e-4) return this;
+    let range: any[];
+    if (axis.type === 'category') {
+      const n = full.length;
+      const from = Math.max(0, Math.min(n - 1, Math.round(start * n)));
+      let to = Math.max(0, Math.min(n - 1, Math.round(end * n) - 1));
+      if (to <= from) to = Math.min(n - 1, from + 1);
+      range = [full[from], full[to]];
+    } else {
+      const f0 = Number(full[0]);
+      const f1 = Number(full[1]);
+      const span = f1 - f0;
+      range = [f0 + span * start, f0 + span * end];
+    }
+    return index === 0 ? this.setDomain('y', range, source) : this.setAxisDomain(index, range, source);
   }
 
   /** 让 y 轴组件数量 / 位置与 norm.yAxes 保持一致（轴数量变化时增删组件）。 */

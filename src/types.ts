@@ -680,6 +680,22 @@ export interface DataZoomOption {
     /** 是否在两端显示当前区间文本。 */
     showDetail?: boolean;
   };
+  /**
+   * **y 方向**的滑块：绘图区右侧外一条竖直轨道，拖动改 y 的数据窗口。
+   *
+   * 与 `slider`（底部横向）不同，它**默认不显示** —— 多让出一条竖直轨道会改变绘图区宽度，
+   * 不该让既有图的外观凭空变一次。写 `sliderY: {}` 就是打开，`show: false` 可显式关掉。
+   * 轨道方向约定「上 = 大值、下 = 小值」（与屏幕同向），即从上往下拖 = 窗口朝小值走。
+   */
+  sliderY?: {
+    show?: boolean;
+    /** 轨道宽度（像素），默认 26。 */
+    width?: number;
+    /** 驱动第几根 y 轴，默认 0（多 y 轴叠加时用）。 */
+    axisIndex?: number;
+    /** 选中窗口颜色。 */
+    color?: string;
+  };
 }
 
 export interface ZoomInteractionOption {

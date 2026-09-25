@@ -126,7 +126,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 悬停高亮 | 圆环 / 柱形描边 | 可配置 `dimOthers` 压暗其他系列 |
 | 选中 | single / multiple | 点击或键盘 Enter，抛出 `select:change` |
 | 框选 | x / y / xy，select / zoom 两种模式 | 拖拽出选区，实时抛 `brush:change` |
-| 缩放 | 滚轮（data / viewport 两种模式） | 以指针位置为锚点，可配置 `minSpan / maxSpan` |
+| 缩放 | 滚轮（data / viewport 两种模式）+ **dataZoom 滑块** | 以指针位置为锚点，可配置 `minSpan / maxSpan`；滑块有横（底部，管 x 窗口）与**竖直**（绘图区右侧，管 y 窗口，`dataZoom.sliderY`，默认关）两条 |
 | 平移 | 拖拽 | 自动约束在完整数据域内 |
 | 键盘导航 | ←/→ 移动数据点，↑/↓ 切换系列 | Enter 选中，Esc 清空；只由最后激活的图表响应 |
 | 跨图联动 | hover / zoom / brush | `linkCharts([a, b])`，按 x 数据值对齐 |
@@ -566,7 +566,8 @@ npm run examples:serve      # http://localhost:5177
 ```
 
 示例页面覆盖：基础折线 / 面积、分组与堆叠柱形、多 y 轴叠加、饼图 / 环形图 / 玫瑰图、雷达图、
-热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志）、时间轴 + dataZoom 滑块、
+热力图、桑基图、交互总览（框选 + 多选 + 键盘 + 事件日志 + **横竖两条 dataZoom 滑块**）、
+时间轴 + dataZoom 滑块、
 分布组图（小提琴 / 蜂群 / 箱线叠成的雨云图）、
 面板矩阵（小倍数：2×3 共享比例尺 + 主图/窄条权重）、
 六边形分箱（点云聚成蜂窝格，细格/粗格对照）、
@@ -682,7 +683,6 @@ node scripts/audit-space.mjs         # 104 张示例图：直角坐标占宽 ≥
   归一化 / 布局 / 组件同步的增量是 `plans/incremental-pipeline.md` 里的 P1~P3，
   验收线「10 万根窗口 ≤ 0.5 ms/tick」仍未达到。
 - **桑基节点拖拽重排与折叠**（布局已与渲染解耦，扩展成本低）。
-- **y 轴方向的 dataZoom 滑块**（`setAxisDomain` 已可用，缺 UI）。
 - **标注的第二梯队**：非直角坐标系里的标注（树图 / 日历热力 / 雷达 …）——
   目前标注只在直角坐标场景生效，其它场景会给出 `annotation:unsupported-scene` 警告并整批跳过；
   另有趋势线与误差棒（按需）。

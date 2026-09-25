@@ -17,6 +17,7 @@ const AXIS_NAME_GAP = 6;
 const LEGEND_GAP = 8;
 const SLIDER_GAP = 14;
 const SLIDER_HEIGHT = 26;
+const SLIDER_WIDTH = 26;
 
 /**
  * 计算图表布局（标题 / 图例 / 绘图区 / 坐标轴）。
@@ -95,13 +96,43 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   const showSlider =
     norm.kind === 'cartesian' && !!norm.option.dataZoom && (!sliderOption || sliderOption.show !== false);
   const sliderHeight = Math.max(12, Number(sliderOption && sliderOption.height) || SLIDER_HEIGHT);
-  let sliderY: number | null = null;
+  let sliderTrackY: number | null = null;
   if (showSlider) {
     const limit = canvas.height - margin.bottom;
     const need = sliderHeight + SLIDER_GAP;
     if (bottom + need > limit) bottom -= bottom + need - limit;
-    sliderY = bottom + SLIDER_GAP;
+    sliderTrackY = bottom + SLIDER_GAP;
   }
+  /**
+   * y 方向的 dataZoom 滑块：绘图区**右侧外**一条竖直轨道。
+   *
+   * 放在最外侧（右侧 y 轴之外）：右侧轴占的横向空间由它自己的 `offset` 管，
+   * 两者不会叠在一起。默认**不显示** —— 与 x 滑块（声明了 `dataZoom` 就默认出）不同，
+   * 多一条竖直轨道会改绘图区宽度，不该让既有图的外观变一次。
+   */
+  const sliderYOption = norm.option.dataZoom && norm.option.dataZoom.sliderY;
+  /**
+   * 竖直滑块驱动哪根 y 轴（越界夹回主轴）。
+   *
+   * **类目 y 轴不出竖直滑块**：归一化里有一条既有规则 —— 类目 y 轴不吃 y 视窗
+   * （`applyViewToNormalized` 的 `axis.categoryDomain` 短路，带视窗重跑那条路也一样），
+   * 所以给它一条能拖但拖了没反应的轨道只会骗人。横向柱的「窗口一个排行榜」是另一件事，
+   * 要动的是那条归一化规则，不是这里。
+   */
+  const sliderYIndex = Math.max(
+    0,
+    Math.min(norm.yAxes.length - 1, Math.floor(Number(sliderYOption && sliderYOption.axisIndex) || 0))
+  );
+  const sliderYAxis = norm.yAxes[sliderYIndex];
+  const showSliderY =
+    norm.kind === 'cartesian' &&
+    !!norm.option.dataZoom &&
+    !!sliderYOption &&
+    sliderYOption.show !== false &&
+    !!sliderYAxis &&
+    sliderYAxis.type !== 'category';
+  const sliderYWidth = Math.max(12, Number(sliderYOption && sliderYOption.width) || SLIDER_WIDTH);
+  if (showSliderY) right -= sliderYWidth + SLIDER_GAP;
 
   let plot: Rect = {
     x: Math.round(Math.max(0, left)),
@@ -217,9 +248,18 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   plot = panelUnion;
 
   const slider: Rect | null =
-    showSlider && sliderY !== null
-      ? { x: plot.x, y: Math.round(sliderY), width: plot.width, height: Math.round(sliderHeight) }
+    showSlider && sliderTrackY !== null
+      ? { x: plot.x, y: Math.round(sliderTrackY), width: plot.width, height: Math.round(sliderHeight) }
       : null;
+  // 竖直轨道：与绘图区等高、贴它右侧（宽度已经在算 plot 之前让出来了）
+  const sliderYRect: Rect | null = showSliderY
+    ? {
+        x: Math.round(plot.x + plot.width + SLIDER_GAP),
+        y: Math.round(plot.y),
+        width: Math.round(sliderYWidth),
+        height: Math.round(plot.height),
+      }
+    : null;
 
   return {
     canvas,
@@ -231,6 +271,7 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
     title,
     polar,
     slider,
+    sliderY: sliderYRect,
     xAxisLayout,
     yAxes: yAxisLayouts,
     yAxisLayout,
