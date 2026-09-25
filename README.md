@@ -196,7 +196,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | `waterfall` | `data: [{ name, value }]`，合计项标 `total: true` | 增/减/合计三色 + 连接虚线 |
 | `funnel` | `data: [{ name, value }]` | 阶段梯形、`minSize` 保护最小阶段、图例按阶段显隐 |
 | `gauge` | `gauge: { min, max, axisLineColor }` + `data: [{ name, value }]` | 指针随数值转动，轴线按阈值分段配色 |
-| `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中 |
+| `sankey` | `sankey: { nodes, links }` | 分层 + 纵向松弛布局，节点/连线分别命中；**节点可在自己那一列里拖拽重排**（松手把顺序写回 `sankey.nodeOrder`，`sankey.draggable: false` 关掉），想直接定死列序也可以手写 `nodeOrder` |
 | `treemap` | `data: [{ name, value, children }]` | squarified 布局，父节点留标题带；命中返回最深节点 |
 | `graph` | `graph: { nodes, links }` | 力导向布局（无底图），节点可拖拽重排；**按关系量定大小**（节点写 `value: 1` 才开这个开关）。标签**自己找位置**：先下方、贴底翻上方、与别的标签相撞就挪到左右侧，最后才选撞得最少的一侧 —— 所以密集图也能给每个节点都标名字（`graph.label.minSize` 可按需只标主要节点），标签也不会被画布裁掉。**配色三个覆盖口**：`categories[].color`（分类色）/ `nodes[].color`（单点）/ `links[].color`（单条线）；连线**不写颜色时继承源节点颜色**，多分类图想让它「只表达关系类型」就逐条给 `links[].color` |
 | `function` | `expression: 'sin(x)/x'`（+ `params` / `domain` / `samples` / `adaptive`） | 迷你 MATLAB：直接写表达式画 `y = f(x)`，按可视区间重采样、y 轴自动贴合；默认**自适应细分**，`adaptive: false` 才是均匀采样 |
@@ -684,11 +684,12 @@ node scripts/audit-space.mjs         # 104 张示例图：直角坐标占宽 ≥
 还没做：
 
 - **增量绘制**：`appendData` 现在每次都全量重建像素缓存（列存 + 环形缓冲是它的落地路径）。
-  ⚠️ 归一化 / 布局那条增量线**已经量过一轮**：P1（布局复用）实测**不值得做**（天花板 0.06~0.1 ms，
-  而那条路本来只有 0.2~0.6 ms），剩下的瓶颈在**落墨**（10 万点列存折线 33.3 ms/帧，
-  浏览器原生光栅化占 90.4%）—— 结论与数据见 `plans/incremental-pipeline.md` 的「第 8 期」。
-  要接着做就得走 CDP Tracing 拆光栅分片，或立项引擎的重绘策略（跨仓）。
-- **桑基节点拖拽重排与折叠**（布局已与渲染解耦，扩展成本低）。
+  ⚠️ 这条**已经结案**，不是「还没排上」：同步流水线只占一帧的 2%~5%，瓶颈在**落墨**
+  （10 万点列存折线 33.3 ms/帧，浏览器原生光栅化占 90.4%）—— 归一化 / 布局方向再抠都是
+  0.1 ms 量级。要接着做只剩两条路：用 CDP Tracing 拆光栅分片，或立项**引擎的重绘策略**
+  （跨仓，动 ice-render）。结论与数据见 `plans/incremental-pipeline.md` 的「第 8 期」。
+- **桑基节点的折叠**（拖拽重排已落地）：桑基是 DAG，多父节点的折叠语义不唯一 ——
+  「折叠一个中间节点后上游下游怎么接」没有唯一答案。要「只看一部分」就在数据侧过滤 `nodes` / `links`。
 - **标注的第二梯队**：非直角坐标系里的标注（树图 / 日历热力 / 雷达 …）——
   目前标注只在直角坐标场景生效，其它场景会给出 `annotation:unsupported-scene` 警告并整批跳过；
   另有趋势线与误差棒（按需）。
