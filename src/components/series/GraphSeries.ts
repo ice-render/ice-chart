@@ -3,11 +3,12 @@ import type { GraphOption, SeriesType } from '../../types';
 import type { Rect } from '../../internal';
 import {
   forceLayout,
-  graphLabelAnchorY,
+  placeGraphLabels,
   sampleGraphLink,
   shouldLabelGraphNode,
   type ForceLayoutResult,
 } from '../../layout/force';
+import { measureTextWidth } from '../../util/text';
 import { distanceToSegment } from './LineSeries';
 
 export interface GraphSeriesCoord {
@@ -29,6 +30,11 @@ export class GraphSeries extends SeriesBase {
   public graph: GraphSeriesCoord | null = null;
   protected clipToBox = false;
   private graphKey = '';
+  /**
+   * 最近一帧画出去的标签盒（本地坐标）。给审计与调试用 —— 「画了哪些标签、摆在哪」是渲染态的事实，
+   * 画布桩是空实现、单测里断不了文字，只能读这个（与 `Axis.lastTicks` 同一个用途）。
+   */
+  public lastLabelBoxes: Array<{ name: string; x0: number; x1: number; y0: number; y1: number }> = [];
 
   public setCoord(coord: any): this {
     this.graph = (coord || null) as GraphSeriesCoord | null;
@@ -201,32 +207,47 @@ export class GraphSeries extends SeriesBase {
     }
 
     /**
-     * 标签：默认画在节点下方（关系图靠名字读）。
+     * 标签：默认画在节点下方（关系图靠名字读），**撞了就换边**（见 `placeGraphLabels`）。
      *
      * 两条纪律都写在这里，别回退：
-     * 1. **放不下要翻到上方并夹进盒子**（`graphLabelAnchorY`）—— 直接按固定偏移画，
-     *    节点靠近绘图区下沿时文字会跑到盒子外，实测被画布裁掉半行；
+     * 1. **落点要算**（`placeGraphLabels`）：先试下方、贴底翻上方，都与已放置的标签相撞时改放
+     *    左右，最后才选撞得最少的 —— 直接按固定偏移画，节点靠近下沿会把文字画到画布外（被裁），
+     *    而密集图（一百多号人全标名字）会把标签糊成一片；
      * 2. 密集图（几十上百个节点）全标会糊成一片，用 `graph.label.minSize` 只标主要节点。
      */
     this.setFont(theme.fontSize, theme.fontFamily);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = theme.textColor;
-    const boxHeight = this.state.height || 0;
-    for (const node of nodes) {
-      if (!shouldLabelGraphNode(node.size, coord.options.label)) continue;
-      const [nx, ny] = positionOf(node);
-      const x = nx - plot.x;
-      const anchor = graphLabelAnchorY(ny - plot.y, {
-        radius: node.size / 2,
-        gap: 9 * unit,
-        textHeight: theme.fontSize,
-        boxHeight,
-      });
+    const labelled = nodes.filter((node) => shouldLabelGraphNode(node.size, coord.options.label));
+    if (labelled.length) {
+      const placements = placeGraphLabels(
+        labelled.map((node) => {
+          const [nx, ny] = positionOf(node);
+          return { name: node.name, x: nx - plot.x, y: ny - plot.y, size: node.size };
+        }),
+        {
+          box: { width: this.state.width || 0, height: this.state.height || 0 },
+          // 用真实文字宽度量（CJK 与拉丁字母差很多，按字数估会误判）
+          measure: (text) => measureTextWidth(ctx, text, theme.fontSize, theme.fontFamily),
+          lineHeight: theme.fontSize * 1.4,
+          gap: 9 * unit,
+        }
+      );
       ctx.strokeStyle = theme.labelHaloColor;
       ctx.lineWidth = 3 * unit;
-      ctx.strokeText(node.name, x, anchor.y);
-      ctx.fillText(node.name, x, anchor.y);
+      this.lastLabelBoxes = [];
+      for (let i = 0; i < labelled.length; i++) {
+        const name = labelled[i].name;
+        const { x, y } = placements[i];
+        ctx.strokeText(name, x, y);
+        ctx.fillText(name, x, y);
+        const w = measureTextWidth(ctx, name, theme.fontSize, theme.fontFamily);
+        const h = theme.fontSize * 1.4;
+        this.lastLabelBoxes.push({ name, x0: x - w / 2, x1: x + w / 2, y0: y - h / 2, y1: y + h / 2 });
+      }
+    } else {
+      this.lastLabelBoxes = [];
     }
     this.endDraw();
   }

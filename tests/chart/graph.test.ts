@@ -3,6 +3,7 @@ import { normalizeOption } from '../../src/option/normalize';
 import { forceLayout } from '../../src/layout/force';
 import { graphLabelAnchorY } from '../../src/layout/force';
 import { shouldLabelGraphNode } from '../../src/layout/force';
+import { placeGraphLabels } from '../../src/layout/force';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
 
@@ -117,6 +118,53 @@ describe('力导向布局（纯函数层）', () => {
     expect(shouldLabelGraphNode(20, { show: false })).toBe(false);
     expect(shouldLabelGraphNode(40, { minSize: 30 })).toBe(true);
     expect(shouldLabelGraphNode(20, { minSize: 30 })).toBe(false);
+  });
+
+  /**
+   * 标签落点（2026-09-25）：189 个节点的关系图要给**每个人**都标名字，光靠调力参数排不开 ——
+   * 实测同一组参数在不同环境里结果能差一个数量级（浏览器里挤成一团、Node 里铺得很开），
+   * 把「名字能不能读」押在力参数上太脆。所以标签自己找位置：先试下方（旧行为），
+   * 撞了就试上方 / 右侧 / 左侧，都不行才选重叠最少的那一侧。
+   */
+  describe('placeGraphLabels：给每个标签找不撞的位置', () => {
+    const options = {
+      box: { width: 400, height: 300 },
+      lineHeight: 14,
+      gap: 6,
+      measure: (text: string) => text.length * 12,
+    };
+    const node = (name: string, x: number, y: number, size = 10) => ({ name, x, y, size });
+
+    it('放得下时全在节点下方（与旧行为一致）', () => {
+      const placed = placeGraphLabels([node('甲', 100, 100), node('乙', 300, 100)], options);
+      expect(placed).toHaveLength(2);
+      expect(placed[0].y).toBeGreaterThan(100);
+      expect(placed[0].y).toBeCloseTo(100 + 5 + 6 + 7, 1);
+      expect(placed[0].x).toBe(100);
+    });
+
+    it('下方放不下（贴盒底）就翻到上方', () => {
+      const placed = placeGraphLabels([node('甲', 100, 294)], options);
+      expect(placed[0].y).toBeLessThan(294);
+    });
+
+    it('上下都和别人撞了，就挪到左右', () => {
+      // 三个节点竖向叠在一起：第 1、2 个占掉下方/上方，第 3 个只能去侧面
+      const placed = placeGraphLabels(
+        [node('甲', 100, 100), node('乙', 100, 101), node('丙', 100, 102)],
+        options
+      );
+      const xs = placed.map((p) => p.x);
+      expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(10);
+    });
+
+    it('怎么放都撞时，选重叠最少的一侧且结果确定', () => {
+      const nodes = [node('甲', 100, 100), node('乙', 100, 100), node('丙', 100, 100)];
+      const a = placeGraphLabels(nodes, options);
+      const b = placeGraphLabels(nodes, options);
+      expect(a).toEqual(b);
+      expect(a).toHaveLength(3);
+    });
   });
 
   it('supports circular layout and explicit coordinates', () => {

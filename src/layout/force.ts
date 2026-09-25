@@ -85,6 +85,99 @@ export function shouldLabelGraphNode(size: number, label?: GraphLabelOption): bo
   return isFinite(minSize) && minSize > 0 ? size >= minSize : true;
 }
 
+export interface GraphLabelPlacementOptions {
+  /** 标签可用区域（组件本地坐标：0..width / 0..height）。 */
+  box: { width: number; height: number };
+  /** 量一段文字的宽度（用 `measureTextWidth`，别按字数估）。 */
+  measure: (text: string) => number;
+  /** 一行文字的高度（字号 × 行距，含描边留白）。 */
+  lineHeight: number;
+  /** 节点边缘与文字之间的间隙。 */
+  gap: number;
+}
+
+export interface GraphLabelPlacement {
+  /** 文字中心（本地坐标）。 */
+  x: number;
+  y: number;
+}
+
+/**
+ * 给每个节点的标签找一个**不跟别的标签相撞**的位置。
+ *
+ * 为什么要它：189 个节点的关系图要给每个人都标名字时，光靠「把力参数调大」排不开 ——
+ * 实测同一组参数在不同环境里结果能差一个数量级（浏览器里挤成一团、Node 里铺得很开），
+ * 把「名字能不能读」押在力参数上太脆。这里让标签自己找位置：
+ *
+ * 1. 先试**下方**（老行为）；下方放不下就翻**上方**（也是老行为）；
+ * 2. 上下都被占了，试**右侧 / 左侧**；
+ * 3. 四个方向都撞，选**撞得最少**的那个（宁可挤一点，也不要把名字甩到看不见的地方）。
+ *
+ * 顺序是确定的：按节点直径从大到小落位（重要人物先占到好位置），同尺寸按下标。
+ * 纯函数：不碰画布、不依赖引擎，输入输出都是数字，可单测。
+ */
+export function placeGraphLabels(
+  nodes: Array<{ name: string; x: number; y: number; size: number }>,
+  options: GraphLabelPlacementOptions
+): GraphLabelPlacement[] {
+  const { box, measure, lineHeight, gap } = options;
+  const clampCenter = (value: number, half: number, max: number): number =>
+    Math.min(Math.max(value, half), Math.max(half, max - half));
+  const rectOf = (cx: number, cy: number, w: number, h: number): { x0: number; x1: number; y0: number; y1: number } => {
+    const x = clampCenter(cx, w / 2, box.width);
+    const y = clampCenter(cy, h / 2, box.height);
+    return { x0: x - w / 2, x1: x + w / 2, y0: y - h / 2, y1: y + h / 2 };
+  };
+  const hits = (a: { x0: number; x1: number; y0: number; y1: number }, b: { x0: number; x1: number; y0: number; y1: number }): boolean =>
+    a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+
+  const placed: Array<{ x0: number; x1: number; y0: number; y1: number }> = [];
+  const out: GraphLabelPlacement[] = new Array(nodes.length);
+  const order = nodes.map((_, index) => index).sort((a, b) => nodes[b].size - nodes[a].size || a - b);
+
+  for (const index of order) {
+    const node = nodes[index];
+    const w = Math.max(1, measure(node.name));
+    const h = lineHeight;
+    const radius = node.size / 2;
+    const belowY = node.y + radius + gap + h / 2;
+    const aboveY = node.y - radius - gap - h / 2;
+    const fitsBelow = belowY - h / 2 >= 0 && belowY + h / 2 <= box.height;
+    const fitsAbove = aboveY - h / 2 >= 0 && aboveY + h / 2 <= box.height;
+    // 上下二选一的先后顺序沿用老行为；两侧是「新位置」，只在撞了之后才用
+    const vertical = fitsBelow || !fitsAbove ? (['below', 'above'] as const) : (['above', 'below'] as const);
+    const candidates: Array<{ x: number; y: number }> = [];
+    for (const side of vertical) {
+      candidates.push({ x: node.x, y: side === 'below' ? belowY : aboveY });
+    }
+    candidates.push(
+      { x: node.x + radius + gap + w / 2, y: node.y },
+      { x: node.x - radius - gap - w / 2, y: node.y }
+    );
+
+    let best = candidates[0];
+    let bestHits = Infinity;
+    let bestRect = rectOf(best.x, best.y, w, h);
+    for (const candidate of candidates) {
+      const rect = rectOf(candidate.x, candidate.y, w, h);
+      let count = 0;
+      for (const other of placed) if (hits(rect, other)) count += 1;
+      if (count < bestHits) {
+        bestHits = count;
+        best = candidate;
+        bestRect = rect;
+      }
+      if (count === 0) break;
+    }
+    placed.push(bestRect);
+    out[index] = {
+      x: Math.round(((bestRect.x0 + bestRect.x1) / 2) * 10) / 10,
+      y: Math.round(((bestRect.y0 + bestRect.y1) / 2) * 10) / 10,
+    };
+  }
+  return out;
+}
+
 /**
  * 力导向布局（纯函数）。
  *
