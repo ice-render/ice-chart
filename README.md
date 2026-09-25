@@ -118,7 +118,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 系列类型 | line / area / bar（含横向）/ scatter（含气泡）/ pie（含环形、玫瑰）/ radar / heatmap / **hexbin（蜂窝分箱）** / sankey / **alluvial（多轴分类流）** / funnel / gauge / boxplot / **violin（含半宽）/ beeswarm** / waterfall / treemap / graph / **calendar（日历热力）** / function / parametric | 见下方「图表类型与写法」 |
 | 比例尺 | linear / category / time / log | time 轴按跨度自动切换毫秒~年粒度 |
 | 坐标系 | 直角坐标 / 极坐标（饼图）/ 雷达 / 桑基 / 漏斗 / 仪表盘 / 水位球 / 树图 / 关系图 / 日历 / 多轴分类流 | 按系列类型自动切换场景，即 `normalizeOption` 返回的 `norm.kind`（11 个场景） |
-| 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter、**数据域留白 `padding`（默认 5%）** |
+| 坐标轴 | x + **多 y 轴**（左右可配） | 刻度、网格、轴名、标签旋转与自动抽稀、自定义 formatter、**数据域留白 `padding`（默认 5%）**、**首末标签留白 `xAxis.edgeLabelPadding`（默认 12px，只在不够时从绘图区里让位）** |
 | 面板矩阵（小倍数） | `matrix: { rows, columns, gap }` + `series[].panel` | 一张画布 N 个同构面板，**共享数据域**；轴只画外圈，悬停 / 框选 / 缩放按**指针所在面板**解析；`columns: [4, 1]` 的权重即「主图 + 窄条」。不给 `matrix` 时行为逐像素不变 |
 | 图例 | top / bottom / left / right | **可点击切换系列 / 扇区显隐**并重算数据域 |
 | 提示框 | axis / item 触发器 | 画在画布内（不依赖 HTML 浮层）；箱线图给五数概括、桑基给流量 |

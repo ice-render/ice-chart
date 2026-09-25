@@ -1,8 +1,12 @@
 import { normalizeOption } from '../../src/option/normalize';
 import { computeLayout } from '../../src/layout/layout';
 import type { ChartOption } from '../../src/types';
+import { measureTextWidth } from '../../src/util/text';
 
 const canvas = { x: 0, y: 0, width: 600, height: 400 };
+
+/** 首末 x 标签距画布边缘的最小留白（`xAxis.edgeLabelPadding` 的默认值）。 */
+const EDGE_PADDING = 12;
 
 function layoutOf(option: ChartOption) {
   const norm = normalizeOption(option);
@@ -10,6 +14,54 @@ function layoutOf(option: ChartOption) {
 }
 
 describe('computeLayout', () => {
+  describe('首末 x 标签的留白（edgeLabelPadding）', () => {
+    /** 末标签很宽：居中画在刻度上时，有一半会探到绘图区外面。 */
+    const wideLabel = 'WWWWWWWWWW';
+    const wideOption: ChartOption = {
+      xAxis: { type: 'value', min: 0, max: 100, formatter: () => wideLabel },
+      series: [{ type: 'line', data: [[0, 1], [100, 2]] }],
+    };
+
+    it('末标签的右缘与画布边缘之间留出最小留白', () => {
+      const { layout, norm } = layoutOf(wideOption);
+      const half = measureTextWidth(null, wideLabel, norm.theme.fontSize, norm.theme.fontFamily) / 2;
+      const plotRight = layout.plot.x + layout.plot.width;
+      // 末刻度就是数据域上限 100，落在绘图区右沿上 —— 标签以它为中心，右缘还要再探出半宽
+      expect(layout.canvas.width - (plotRight + half)).toBeGreaterThanOrEqual(EDGE_PADDING);
+    });
+
+    it('edgeLabelPadding: 0 关掉这条约束（回到旧行为）', () => {
+      const { layout, norm } = layoutOf({
+        ...wideOption,
+        xAxis: { type: 'value', min: 0, max: 100, formatter: () => wideLabel, edgeLabelPadding: 0 },
+      });
+      const half = measureTextWidth(null, wideLabel, norm.theme.fontSize, norm.theme.fontFamily) / 2;
+      const plotRight = layout.plot.x + layout.plot.width;
+      expect(layout.canvas.width - (plotRight + half)).toBeLessThan(EDGE_PADDING);
+    });
+
+    it('标签本来就放得下时不动布局（不给既有图凭空收窄绘图区）', () => {
+      const narrow: ChartOption = {
+        xAxis: { type: 'value', min: 0, max: 9, formatter: () => '1' },
+        series: [{ type: 'line', data: [[0, 1], [9, 2]] }],
+      };
+      const withDefault = layoutOf(narrow).layout;
+      const off = layoutOf({ ...narrow, xAxis: { ...narrow.xAxis, edgeLabelPadding: 0 } }).layout;
+      expect(withDefault.plot.width).toBe(off.plot.width);
+      expect(withDefault.plot.x).toBe(off.plot.x);
+    });
+
+    it('类目轴：末标签画在最后一个带中心、本来就离边缘够远，不缩窄绘图区', () => {
+      const category: ChartOption = {
+        xAxis: { type: 'category', data: ['华东', '华北', '华南', '西南'] },
+        series: [{ type: 'bar', data: [3, 5, 2, 4] }],
+      };
+      const withDefault = layoutOf(category).layout;
+      const off = layoutOf({ ...category, xAxis: { ...category.xAxis, edgeLabelPadding: 0 } }).layout;
+      expect(withDefault.plot.width).toBe(off.plot.width);
+    });
+  });
+
   it('keeps the plot inside the canvas', () => {
     const { layout } = layoutOf({ series: [{ type: 'line', data: [1, 5, 3] }] });
     expect(layout.plot.x).toBeGreaterThanOrEqual(0);

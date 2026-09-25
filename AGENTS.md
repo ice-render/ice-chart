@@ -170,6 +170,15 @@ static 常量/字段  →  static 方法  →  实例字段  →  构造函数  
   回归点：`components/axis-labels.test.ts`（盯真画出去的 `lastTicks[].drawn`）、
   `layout/layout.test.ts`（盯间距）、`chart/grid-x.test.ts`（盯网格与标签同一批位置，
   含隐藏轴的两种情形）。
+- **首末 x 标签要「让位」，不许「推动」**（2026-09-25 加，别改回去）：刻度标签是**居中**画在
+  刻度上的，末刻度落在绘图区右沿时有一半探到绘图区外面；右侧只有固定 `margin.right` 时，
+  那一半能把余量吃光（实测大屏小面板上最后一个标签离画布边只剩 7px，看着像「没留边距」）。
+  现在 `xAxis.edgeLabelPadding`（默认 12px，`0` 关）把「探出去的那半截 + 留白」提前从绘图区里
+  扣掉，**只在不够时才扣**（111 张示例图里只有 5 张的布局变了，其余逐像素不变）。
+  两条别踩：① **不许改成把标签往相邻那颗的方向推** —— 推了会压住邻居（`thinXAxisLabels`
+  里那条实测）；② **`xAxis.show:false` 也要照算**，否则同一张图藏/显 x 轴会让网格线错位
+  （`chart/grid-x.test.ts` 盯着）。回归点：`tests/layout/layout.test.ts` 的
+  「首末 x 标签的留白」四条。
 - **悬停的三条铁律**（2026-09-15 / 2026-09-21 修，别改回去）：
   1. **画布量不到尺寸（`canvasWidth/Height` 为 0）＝ 指针不在本图上，判 `false`**。
      引擎的原生监听挂在 **window** 上，同一页里每张图都会收到整页的事件，`isOverCanvas`
