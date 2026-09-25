@@ -115,7 +115,14 @@ export type SeriesType = BuiltinSeriesType | (string & Record<never, never>);
 export interface GraphNodeOption {
   id?: string;
   name: string;
-  /** 权重：影响节点大小与连线粗细。 */
+  /**
+   * 打开「按关系量定大小」的开关：给了**正值**，这个节点的直径就由**它所有连线的亲疏之和**
+   * （面积开方映射进 `symbolSizeRange`）决定；不给或给 `0` 就恒为 `symbolSizeRange[0]`。
+   *
+   * ⚠️ 注意**不是**「直接拿这个数当权重」——关系网里「它在网里有多重要」本来就该由连接数 /
+   * 关系量回答，直接照抄一个人的手写权重会与图形想表达的东西打架。这里只当开关用：
+   * 想让它按关系量长，就写 `value: 1`。
+   */
   value?: number;
   /** 分类名（对应 `graph.categories`），用于配色。 */
   category?: string | number;
@@ -160,6 +167,16 @@ export interface GraphOption {
   draggable?: boolean;
   /** 拖完松手后是否再跑几轮力迭代让邻居跟随，默认 true。 */
   settleOnDrop?: boolean;
+  /**
+   * 节点标签：默认全都标名字。密集图（几十上百个节点）全标会糊成一片，
+   * 用 `minSize` 只给主要节点标（其余靠悬停 + 提示框读）。
+   */
+  label?: {
+    /** 是否画标签，默认 true；`false` 时整张图只靠悬停读名字。 */
+    show?: boolean;
+    /** 只给直径不小于它的节点标名（像素），默认 0 = 全都标。 */
+    minSize?: number;
+  };
 }
 
 /** 矩形树图配置。 */

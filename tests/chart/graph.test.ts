@@ -1,6 +1,8 @@
 import { createChart } from '../../src/index';
 import { normalizeOption } from '../../src/option/normalize';
 import { forceLayout } from '../../src/layout/force';
+import { graphLabelAnchorY } from '../../src/layout/force';
+import { shouldLabelGraphNode } from '../../src/layout/force';
 import type { ICEChart } from '../../src/ICEChart';
 import type { ChartOption } from '../../src/types';
 
@@ -80,6 +82,41 @@ describe('力导向布局（纯函数层）', () => {
     const layout = forceLayout(GRAPH.graph!.nodes, GRAPH.graph!.links, rect, GRAPH.graph!);
     expect(layout.nodes[0].color).toBe('#0d6efd');
     expect(layout.nodes[2].color).toBe('#198754');
+  });
+
+  /**
+   * 节点标签的落点（2026-09-25）。
+   *
+   * 标签默认画在节点**下方**（中心线往下 radius + gap）。节点靠近绘图区下沿时，那一行文字就
+   * 画到了盒子外 —— 实测被画布裁掉半行（`dashboard-energy` 的力导向图底部只剩 1px 余量）。
+   * 所以：下方放不下就翻到上方；上下都放不下（盒子比节点还矮）就夹进盒子里。
+   * 判据是「标签的上下沿都不许越过盒子」—— 这是 `scripts/audit-bleed.mjs` 门禁盯的那条。
+   */
+  it('节点标签放不下时翻到上方，并夹进盒子', () => {
+    const options = { radius: 10, gap: 9, textHeight: 12, boxHeight: 200 };
+    // 中间：保持在下（中心线 + radius + gap）
+    const middle = graphLabelAnchorY(100, options);
+    expect(middle.below).toBe(true);
+    expect(middle.y).toBe(119);
+    // 靠近下沿：下方放不下（119 + 6 > 200 那一条不成立时才算），翻到上方
+    const nearBottom = graphLabelAnchorY(190, options);
+    expect(nearBottom.below).toBe(false);
+    expect(nearBottom.y).toBe(171);
+    // 盒子比节点还矮：上下都放不下 → 夹进盒子（文字的上沿不小于 0、下沿不大于 boxHeight）
+    const tight = graphLabelAnchorY(30, { radius: 40, gap: 9, textHeight: 12, boxHeight: 60 });
+    expect(tight.y - 6).toBeGreaterThanOrEqual(0);
+    expect(tight.y + 6).toBeLessThanOrEqual(60);
+  });
+
+  /**
+   * 密集图（几十上百个节点）全标名字会糊成一片，所以给一个「只标主要节点」的口子。
+   * 判据走纯函数，组件只负责调用 —— 画布桩是空实现，断不了「画了哪些文字」。
+   */
+  it('密集图可以只给主要节点标名（show / minSize）', () => {
+    expect(shouldLabelGraphNode(20, undefined)).toBe(true);
+    expect(shouldLabelGraphNode(20, { show: false })).toBe(false);
+    expect(shouldLabelGraphNode(40, { minSize: 30 })).toBe(true);
+    expect(shouldLabelGraphNode(20, { minSize: 30 })).toBe(false);
   });
 
   it('supports circular layout and explicit coordinates', () => {
