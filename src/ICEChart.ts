@@ -1831,6 +1831,26 @@ export class ICEChart {
   }
 
   /** 数据坐标图元所属的面板下标（`spec.panel`，默认 0；越界夹回）。 */
+  /**
+   * 第 `row` 行左列那块面板里的系列用的是哪根 y 轴；这一行没有系列时返回 -1。
+   *
+   * 边际分布的关键：边际行用 `yAxisIndex: 1`（计数域），主图行用轴 0（数值域）——
+   * 每行各画自己那根轴，刻度才与数据对得上。同一行内多个面板用不同轴时以**左列**为准
+   * （外圈轴只画一份，这是「轴只画外圈」的固有取舍）。
+   */
+  private rowAxisIndex(panelIndex: number, columns: number): number {
+    const norm = this.norm;
+    if (!norm.matrix) return 0;
+    for (let c = 0; c < columns; c++) {
+      const index = panelIndex + c;
+      for (const series of norm.series) {
+        if (this.panelIndexOf(series) !== index) continue;
+        return series.axisIndex;
+      }
+    }
+    return -1;
+  }
+
   private markPanelIndex(spec: ChartMarkSpec): number {
     if (!this.norm.matrix) return 0;
     const raw = Math.floor(Number(spec.panel));
@@ -1924,15 +1944,29 @@ export class ICEChart {
       const component = this.panelAxisY[r];
       const panelIndex = Math.min(panels.length - 1, r * columns);
       const scales = this.panelScales[panelIndex] || this.panelScales[0];
-      const primary = norm.yAxes[0] || norm.yAxis;
+      /**
+       * 这一行画**哪根 y 轴**：由该行左列面板里的系列决定，而不是恒为主轴。
+       *
+       * 边际分布（joint plot）就靠这条：边际行用 `yAxisIndex: 1`（计数域），
+       * 若还按主轴画刻度，边际会顶着主图的量程 —— 数字全对不上（实测会误导到「边际峰值 70」
+       * 被读成「规格 B ≈ 70」）。
+       */
+      const axisIndex = this.rowAxisIndex(panelIndex, columns);
+      if (axisIndex < 0) {
+        // 这一行没有任何系列：没有轴可画（空面板）
+        component.setState({ width: canvas.width, height: canvas.height, display: false });
+        component.markDirty();
+        continue;
+      }
+      const primary = norm.yAxes[axisIndex] || norm.yAxis;
       // ⚠️ 单面板 / 非直角场景必须回到「轴照常显示」的旧口径：这里写 `display: multi`
       // 会把普通折线图的 y / x 轴一起藏掉（自查抓到的回归，单面板路径一行都不能漏）。
       component.setState({ width: canvas.width, height: canvas.height, display: multi || !isPolar });
       component.layout = layout;
       component.theme = norm.theme;
       component.plot = multi ? panels[panelIndex] : null;
-      component.axis = multi ? { ...primary, scale: scales.ys[0] } : primary;
-      component.axisIndex = 0;
+      component.axis = multi ? { ...primary, scale: scales.ys[axisIndex] || scales.ys[0] } : primary;
+      component.axisIndex = axisIndex;
       component.position = (primary && primary.position) || 'left';
       component.syncTicks();
       component.markDirty();
