@@ -127,7 +127,7 @@ gray-100~900、`--bs-border-radius`、`--bs-body-font-family`），图表放进 
 | 选中 | single / multiple | 点击或键盘 Enter，抛出 `select:change` |
 | 框选 | x / y / xy，select / zoom 两种模式 | 拖拽出选区，实时抛 `brush:change` |
 | 缩放 | 滚轮（data / viewport 两种模式）+ **dataZoom 滑块** | 以指针位置为锚点，可配置 `minSpan / maxSpan`；滑块有横（底部，管 x 窗口）与**竖直**（绘图区右侧，管 y 窗口，`dataZoom.sliderY`，默认关）两条 |
-| 平移 | 拖拽 | 自动约束在完整数据域内 |
+| 平移 | 拖拽（`data` / `viewport` 两种模式） | `data`（默认）改数据域、自动约束在完整数据域内；`viewport` 平移**画布视图**（`pan.mode: 'viewport'`，配 `zoom.mode: 'viewport'`）—— 没有坐标轴的场景（力导向图 / 关系图）走这条 |
 | 键盘导航 | ←/→ 移动数据点，↑/↓ 切换系列 | Enter 选中，Esc 清空；只由最后激活的图表响应 |
 | 跨图联动 | hover / zoom / brush | `linkCharts([a, b])`，按 x 数据值对齐 |
 | 动画 | 进入与数据更新 | 走引擎的 `AnimationManager`（`state.progress` 驱动） |
@@ -573,7 +573,8 @@ npm run examples:serve      # http://localhost:5177
 六边形分箱（点云聚成蜂窝格，细格/粗格对照）、
 边际分布（主图 + 轴侧直方图，matrix 权重 + 第二个 y 轴共享 x 域）、
 日历热力（一行一天，UTC 日期语义 + 常数时间命中）、多轴分类流（表的分面：N 轴 + 流量带）、
-**力导向关系图（《红楼梦》人物关系：189 人 / 266 条关系，1560×960 画布，只给主要人物标名字）**、
+**力导向关系图（《红楼梦》人物关系：189 人 / 266 条关系，1560×960 画布，只给主要人物标名字；
+滚轮缩放画布、拖空白处平移、拖节点单独挪它且不再触发自动布局）**、
 大数据量（5 万点降采样 / **100 万点列存虚拟化：散点 + 折线**）、无障碍、跨图联动、迷你 MATLAB，以及 **5 个深色大屏**
 （运营 / 设备 / 能源 / 物流 / 函数实验）。
 

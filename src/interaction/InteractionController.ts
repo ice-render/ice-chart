@@ -1188,6 +1188,19 @@ export class InteractionController {
     }
 
     const panOption: any = this.host.norm.option.interaction && this.host.norm.option.interaction.pan;
+    /**
+     * 视图平移：拖的是**画布视图**（`ice.viewport` 的 tx / ty），不是数据域。
+     *
+     * 没有坐标轴的场景（力导向图 / 关系图）走这条 —— 那边没有数据域可改，按老路径拖了没反应，
+     * 于是「能滚轮放大、不能拖」放大之后卡在正中间。方向与「抓住内容拖」一致：
+     * `screenToWorld` 是 `(screen - tx) / scale`，tx 加多少内容就往右移多少。
+     * 与滚轮缩放同一套像素量纲（都是 CSS 像素），所以缩放之后手感不变。
+     */
+    if (panOption && panOption.mode === 'viewport') {
+      const vp = this.host.ice.viewport || { scale: 1, tx: 0, ty: 0 };
+      this.host.ice.setViewport(vp.scale, vp.tx + dx, vp.ty + dy);
+      return;
+    }
     const axes = (panOption && panOption.axes) || 'xy';
     if ((axes === 'x' || axes === 'xy') && drag.domainX) {
       const next = this.shiftDomain('x', drag.domainX, dx, drag.panelWidth);

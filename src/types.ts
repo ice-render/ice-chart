@@ -751,6 +751,15 @@ export interface ZoomInteractionOption {
 export interface PanInteractionOption {
   enabled?: boolean;
   axes?: 'x' | 'y' | 'xy';
+  /**
+   * `data`（默认）：拖拽改**数据域**（常规图表）；`viewport`：拖拽平移**画布视图**
+   * （`ice.setViewport` 的 tx / ty），配 `zoom.mode: 'viewport'` 用。
+   *
+   * 没有坐标轴的场景（力导向图 / 关系图）必须用 `viewport` —— 那边没有数据域可改，
+   * 拖了会毫无反应（早先只有滚轮能缩放、不能平移，放大之后就卡在正中间）。
+   * viewport 模式下 `axes` 无意义：视图平移本来就是二维的。
+   */
+  mode?: 'data' | 'viewport';
 }
 
 export interface BrushInteractionOption {
