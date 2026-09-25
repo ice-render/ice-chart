@@ -50,6 +50,15 @@ type DragState =
       startY: number;
       domainX: [any, any] | null;
       domainY: [any, any] | null;
+      /**
+       * 起手时的画布视图（`pan.mode: 'viewport'` 用）。
+       *
+       * ⚠️ 必须**记下起点**、每帧从它算绝对位移。往「当前的 tx」上再加一次累计位移
+       * 会把位移累积成平方增长 —— 实测一次拖 80px、画面跑了 360px（用户反馈「比鼠标快好几倍」）。
+       * 数据域那条路一开始就是这么写的（`domainX` 记起手窗口 + 每帧按累计位移推），
+       * 平移视图要照抄这个口径。
+       */
+      viewport: { scale: number; tx: number; ty: number };
       /** 起手时指针所在面板的像素尺寸（面板矩阵下按它把位移换算成数据位移）。 */
       panelWidth: number;
       panelHeight: number;
@@ -1045,12 +1054,14 @@ export class InteractionController {
     if (panEnabled) {
       this.setHover(null);
       const panelRect = this.resolver.panelRect(this.resolver.panelAt(target.chart[0], target.chart[1]));
+      const vp: any = this.host.ice.viewport || { scale: 1, tx: 0, ty: 0 };
       this.drag = {
         mode: 'pan',
         startX: screenX,
         startY: screenY,
         domainX: this.currentXWindow(),
         domainY: [this.host.norm.yAxis.domain[0], this.host.norm.yAxis.domain[1]],
+        viewport: { scale: Number(vp.scale) || 1, tx: Number(vp.tx) || 0, ty: Number(vp.ty) || 0 },
         panelWidth: panelRect.width,
         panelHeight: panelRect.height,
         moved: false,
@@ -1197,8 +1208,9 @@ export class InteractionController {
      * 与滚轮缩放同一套像素量纲（都是 CSS 像素），所以缩放之后手感不变。
      */
     if (panOption && panOption.mode === 'viewport') {
-      const vp = this.host.ice.viewport || { scale: 1, tx: 0, ty: 0 };
-      this.host.ice.setViewport(vp.scale, vp.tx + dx, vp.ty + dy);
+      // 从**起手**的视图算绝对位移（`dx`/`dy` 本身就是相对起手点的累计量）
+      const from = drag.viewport;
+      this.host.ice.setViewport(from.scale, from.tx + dx, from.ty + dy);
       return;
     }
     const axes = (panOption && panOption.axes) || 'xy';
