@@ -417,6 +417,15 @@ export interface AxisOption {
   showTick?: boolean;
   /** 轴标签旋转角度（度），仅在水平轴上有实际意义。 */
   labelRotate?: number;
+  /**
+   * **首末 x 刻度标签**到画布边缘的最小留白（px，默认 12；`0` 关掉）。
+   *
+   * 刻度标签是居中画在刻度上的，末刻度落在绘图区右沿时标签有一半探到绘图区外 ——
+   * 右侧只有固定 `margin.right` 时，那一半能把余量吃光（小面板上只剩几个像素）。
+   * 给了留白之后，布局会把不够的那部分从绘图区里让出来（只在不够时才让，够就不动），
+   * **不推动标签**（往里推会压住相邻的那一颗）。
+   */
+  edgeLabelPadding?: number;
   inverse?: boolean;
   /** log 轴的底数，默认 10。 */
   logBase?: number;

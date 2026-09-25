@@ -18,6 +18,14 @@ const LEGEND_GAP = 8;
 const SLIDER_GAP = 14;
 const SLIDER_HEIGHT = 26;
 const SLIDER_WIDTH = 26;
+/**
+ * 首末 x 刻度标签到画布边缘的最小留白（`xAxis.edgeLabelPadding` 的默认值，px）。
+ *
+ * 刻度标签是**居中**画在刻度上的：末刻度落在绘图区右沿时，标签有一半探到绘图区外面。
+ * 右侧只留固定的 `margin.right`（默认 16）时，那一半能把余量吃光 —— 实测大屏小面板上
+ * 最后一个标签离画布边只剩 7px，看着像「没留边距」。这里为它提前让位。
+ */
+const EDGE_LABEL_PADDING = 12;
 
 /**
  * 计算图表布局（标题 / 图例 / 绘图区 / 坐标轴）。
@@ -86,6 +94,54 @@ export function computeLayout(norm: NormalizedOption, ctx: any, canvas: Rect): C
   const showX = norm.kind === 'cartesian' && norm.xAxis.option.show !== false;
   left += leftOffset;
   right -= rightOffset;
+  /**
+   * 首末 x 标签的留白：把「标签探出绘图区的那半截 + 想要的留白」提前从绘图区里扣掉。
+   *
+   * **不推动标签**：往里推会压住相邻的那颗（见 `thinXAxisLabels` 里那条纪律），
+   * 所以只能反过来给绘图区让位。只在「现在的余量不够」时才动（够就不动 —— 既有图的外观不变）。
+   * 两条边界：① 面板矩阵不吃这条（每个面板有自己的矩形，抽稀也按面板边界算）；
+   * ② **`xAxis.show: false` 也要照算** —— 藏起来的轴照样出同一张刻度表、网格线要跟显示时
+   * 对齐成方格（既有契约，`tests/chart/grid-x.test.ts` 盯着），所以横向预留必须一致。
+   */
+  if (norm.kind === 'cartesian' && !norm.matrix) {
+    const edgePadding = Number(norm.xAxis.option.edgeLabelPadding);
+    const padding = isFinite(edgePadding) ? Math.max(0, edgePadding) : EDGE_LABEL_PADDING;
+    const ticks = xAxisLayout.ticks;
+    if (padding > 0 && ticks && ticks.length > 1 && right - left > 2) {
+      const fontSize = norm.theme.fontSize;
+      const fontFamily = norm.theme.fontFamily;
+      const scale = createScale(norm.xAxis.type, norm.xAxis.domain, [0, Math.max(1, right - left)], {
+        logBase: norm.xAxis.option.logBase,
+        categoryLookup: norm.xAxis.categoryLookup,
+        categoryOffset: norm.xAxis.categoryOffset,
+      });
+      const firstFrac = Math.min(1, Math.max(0, scale.fractionOf(ticks[0])));
+      const lastFrac = Math.min(1, Math.max(0, scale.fractionOf(ticks[ticks.length - 1])));
+      const firstLabel = xAxisLayout.labels[0];
+      const lastLabel = xAxisLayout.labels[xAxisLayout.labels.length - 1];
+      /**
+       * 末标签：位置 = left + lastFrac × 绘图区宽，右缘再探出半宽。
+       * 把右沿收 d 之后位置左移 lastFrac × d，所以需要 `padding - 当前余量 ≤ lastFrac × d`。
+       * `lastFrac ≈ 0`（末刻度就在左端，退化情形）时无解也不该动。
+       */
+      if (lastLabel && lastFrac > 0.01) {
+        const half = measureTextWidth(ctx, lastLabel, fontSize, fontFamily) / 2;
+        const room = canvas.width - (left + lastFrac * (right - left) + half);
+        const need = padding - room;
+        if (need > 0) right = Math.max(left + 1, right - need / lastFrac);
+      }
+      /**
+       * 首标签：同样只探出半宽，但左端是「往左探」。收左沿 d 之后首刻度右移 `(1 - frac) × d`，
+       * 所以需要 `padding - 当前余量 ≤ (1 - frac) × d`。`frac ≈ 1` 时同理跳过。
+       */
+      if (firstLabel && firstFrac < 0.99) {
+        const half = measureTextWidth(ctx, firstLabel, fontSize, fontFamily) / 2;
+        const room = left + firstFrac * (right - left) - half;
+        const need = padding - room;
+        if (need > 0) left = Math.min(right - 1, left + need / (1 - firstFrac));
+      }
+    }
+  }
   if (showX) {
     bottom -= xAxisLayout.labelHeight + TICK_LENGTH + LABEL_GAP;
     if (norm.xAxis.option.name) bottom -= xAxisLayout.nameHeight + AXIS_NAME_GAP;
