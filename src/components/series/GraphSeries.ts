@@ -1,7 +1,13 @@
 import { SeriesBase } from './SeriesBase';
 import type { GraphOption, SeriesType } from '../../types';
 import type { Rect } from '../../internal';
-import { forceLayout, sampleGraphLink, type ForceLayoutResult } from '../../layout/force';
+import {
+  forceLayout,
+  graphLabelAnchorY,
+  sampleGraphLink,
+  shouldLabelGraphNode,
+  type ForceLayoutResult,
+} from '../../layout/force';
 import { distanceToSegment } from './LineSeries';
 
 export interface GraphSeriesCoord {
@@ -194,19 +200,33 @@ export class GraphSeries extends SeriesBase {
       ctx.stroke();
     }
 
-    // 标签：只画节点旁边的名字（关系图靠名字读，值得一直显示）
+    /**
+     * 标签：默认画在节点下方（关系图靠名字读）。
+     *
+     * 两条纪律都写在这里，别回退：
+     * 1. **放不下要翻到上方并夹进盒子**（`graphLabelAnchorY`）—— 直接按固定偏移画，
+     *    节点靠近绘图区下沿时文字会跑到盒子外，实测被画布裁掉半行；
+     * 2. 密集图（几十上百个节点）全标会糊成一片，用 `graph.label.minSize` 只标主要节点。
+     */
     this.setFont(theme.fontSize, theme.fontFamily);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = theme.textColor;
+    const boxHeight = this.state.height || 0;
     for (const node of nodes) {
+      if (!shouldLabelGraphNode(node.size, coord.options.label)) continue;
       const [nx, ny] = positionOf(node);
       const x = nx - plot.x;
-      const y = ny - plot.y + node.size / 2 + 9 * unit;
+      const anchor = graphLabelAnchorY(ny - plot.y, {
+        radius: node.size / 2,
+        gap: 9 * unit,
+        textHeight: theme.fontSize,
+        boxHeight,
+      });
       ctx.strokeStyle = theme.labelHaloColor;
       ctx.lineWidth = 3 * unit;
-      ctx.strokeText(node.name, x, y);
-      ctx.fillText(node.name, x, y);
+      ctx.strokeText(node.name, x, anchor.y);
+      ctx.fillText(node.name, x, anchor.y);
     }
     this.endDraw();
   }
